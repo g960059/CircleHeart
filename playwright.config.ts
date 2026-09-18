@@ -8,7 +8,7 @@ const previewOutputDirectory = process.env.CIRCLEHEART_E2E_DIST;
 export default defineConfig({
   testDir: "./e2e",
   // Public-content fixtures require a configured repository; the local numerical suite does not.
-  testIgnore: ["**/courses-v1.spec.ts", "**/article-loading-v1.spec.ts", "**/workbench-publication-v3.spec.ts"],
+  testIgnore: ["**/courses-v1.spec.ts", "**/article-loading-v1.spec.ts", "**/workbench-publication-v3.spec.ts", "**/header-auth-loading-v3.spec.ts"],
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,

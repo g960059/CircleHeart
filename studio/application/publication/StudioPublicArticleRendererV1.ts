@@ -5,6 +5,9 @@ import {
   type ArticleReadingIndexV1,
 } from "@/studio/application/article/StudioArticleReadingV1";
 import katex from "katex";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { SiteAccountPendingV3 } from "@/components/site/SiteAccountPendingV3";
 import circleHeartWordmark from "@/assets/brand/circleheart-wordmark.svg?raw";
 import { articleHeadingPhrasesV1 } from "@/studio/application/article/StudioArticleHeadingPhrasesV1";
 
@@ -520,13 +523,19 @@ function publicStaticSiteHeaderHtmlV1(
     `<a class="site-brand-link" href="/${locale}" aria-label="${homeLabel}"><span class="circleheart-wordmark" aria-hidden="true">${circleHeartWordmark}</span></a>`,
     `<span class="public-static-site-header-spacer"></span>`,
     ...(isHome ? [`<button class="home-header-search" type="button" disabled aria-label="${locale === 'ja' ? 'コンテンツを検索' : 'Search content'}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="7.5"/><path d="m16 16 5 5"/></svg><span>${locale === 'ja' ? '検索' : 'Search'}</span><kbd>⌘K</kbd></button>`] : []),
+    // Public HTML is cacheable and cannot know the browser's session. Only
+    // no-JS readers get guest actions here; React resolves the account chrome.
+    `<noscript><style>.public-static-site-header noscript{display:contents}.public-static-site-header .site-account-pending-action,.public-static-site-header .site-account-pending-avatar{display:none}</style>`,
     `<nav class="public-static-language" aria-label="${siteHeaderCopy.language}">`,
     `<a${locale === "ja" ? " aria-current=\"true\"" : ""} href="${locale === "ja" ? canonical.pathname : alternatePath}">JA</a>`,
     `<a${locale === "en" ? " aria-current=\"true\"" : ""} href="${locale === "en" ? canonical.pathname : alternatePath}">EN</a>`,
-    `</nav>`,
+    `</nav></noscript>`,
     `<span class="public-static-theme-icon" aria-hidden="true"><span class="public-static-theme-sun">${sunIconHtmlV1()}</span><span class="public-static-theme-moon">${moonIconHtmlV1()}</span></span>`,
+    renderToStaticMarkup(createElement(SiteAccountPendingV3, { createLabel: siteHeaderCopy.create })),
+    `<noscript>`,
     `<a class="public-static-primary-icon" href="/${locale}/experiments/new" aria-label="${simulationLabel}">${flaskIconHtmlV1()}<span class="public-static-responsive-label">${simulationLabel}</span></a>`,
     `<a class="public-static-quiet-icon" href="/${locale}/login" aria-label="${loginLabel}">${loginIconHtmlV1()}<span class="public-static-responsive-label">${loginLabel}</span></a>`,
+    `</noscript>`,
     `</header>`,
   ].join("");
 }

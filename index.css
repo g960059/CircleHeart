@@ -1646,6 +1646,45 @@ body:has(.public-static-shell) {
   container-type: inline-size;
 }
 
+/* Reserve the authenticated controls' geometry without guessing the session.
+ * Keep this static: a pulse would draw attention to every page reload. */
+.site-account-pending-action,
+.site-account-pending-avatar {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  background: var(--wb-panel-bg-soft);
+  border-radius: 0.5rem;
+}
+
+.site-account-pending-avatar {
+  border-radius: 50%;
+}
+
+.site-account-pending-action > span {
+  display: none;
+  visibility: hidden;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+@media (min-width: 400px) {
+  .site-account-pending-action {
+    width: auto;
+    /* Two 16px icons, two 6px gaps, and 24px button padding. */
+    padding-inline: 34px;
+  }
+  .site-account-pending-action > span { display: inline; }
+}
+
+@media (min-width: 640px) {
+  .site-account-pending-action { height: 36px; }
+  .site-account-pending-action > span { font-size: 15px; }
+}
+
 .public-static-site-header {
   position: relative;
   z-index: 50;
@@ -1654,8 +1693,8 @@ body:has(.public-static-shell) {
   flex: 0 0 62px;
   align-items: center;
   gap: 1rem;
-  padding-inline: clamp(0.75rem, 3vw, 1.25rem);
-  border-bottom: 1px solid color-mix(in srgb, var(--wb-border) 72%, transparent);
+  padding-inline: 0.75rem;
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--wb-border) 72%, transparent);
   background: color-mix(in srgb, var(--wb-header-bg) 95%, transparent);
   backdrop-filter: blur(20px);
   font-family: var(--wb-font-ui);
@@ -1830,6 +1869,8 @@ body[data-app-theme="light"] .public-static-theme-moon {
 }
 
 @media (min-width: 40rem) {
+  .public-static-site-header { padding-inline: 1.25rem; }
+
   .public-static-primary-icon,
   .public-static-quiet-icon {
     width: auto;

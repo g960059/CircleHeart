@@ -210,6 +210,15 @@ describe("Studio public content delivery V1", () => {
     expect(rendered.documentHtml).toContain('<div id="public-static-root">');
     expect(rendered.documentHtml).toContain('<div id="root" hidden></div>');
     expect(rendered.documentHtml).toContain('class="public-static-site-header"');
+    const header = rendered.documentHtml.match(/<header class="public-static-site-header">(.*?)<\/header>/s)![1];
+    const scriptEnabledHeader = header.replace(/<noscript>.*?<\/noscript>/gs, "");
+    expect(scriptEnabledHeader).toContain('data-testid="site-account-pending-v3"');
+    expect(scriptEnabledHeader).not.toContain('href="/ja/login"');
+    expect(scriptEnabledHeader).not.toContain('href="/ja/experiments/new"');
+    expect(scriptEnabledHeader).not.toContain('class="public-static-language"');
+    // Guest navigation remains available in the readable no-JS document.
+    expect(header).toContain('href="/ja/login"');
+    expect(header).toContain('href="/ja/experiments/new"');
     expect(rendered.documentHtml).toContain('class="article-title"');
     expect(rendered.documentHtml).toContain('class="article-paragraph"');
     expect(rendered.documentHtml).toContain(

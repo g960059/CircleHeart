@@ -33,6 +33,7 @@ import {
 } from "@/localeRouting";
 import { useHomeSearchV1 } from "../home/HomeSearchV1";
 import { CircleHeartLogoV1 } from "./CircleHeartLogoV1";
+import { SiteAccountPendingV3 } from "./SiteAccountPendingV3";
 import { useSiteAccountSessionV3 } from "./SiteAccountSessionV3";
 
 const LANGUAGE_ITEMS_V3: readonly Readonly<{
@@ -90,7 +91,7 @@ export function SiteHeaderV3() {
         </button>
       )}
 
-      {accountSession.account === null && (
+      {!accountSession.loading && accountSession.account === null && (
         <nav
           className="flex items-center rounded-lg bg-wb-soft p-0.5"
           aria-label={t("siteHeader.language")}
@@ -140,33 +141,35 @@ export function SiteHeaderV3() {
         )}
       </button>
 
-      {accountSession.account === null ? (
-        <Link
-          to={newExperimentHref(locale)}
-          aria-label={t("siteHeader.startSimulation")}
-          data-testid="site-start-simulation-v3"
-          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-wb-primary px-2 text-[13.5px] font-semibold text-white transition-[background-color,transform] duration-150 hover:bg-wb-primary-hover active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wb-accent sm:h-9 sm:px-3 sm:text-[15px]"
-        >
-          <FlaskConical className="h-4 w-4" aria-hidden="true" />
-          <span className="hidden md:inline">
-            {t("siteHeader.startSimulation")}
-          </span>
-        </Link>
+      {accountSession.loading ? (
+        <SiteAccountPendingV3 createLabel={t("siteHeader.create")} />
+      ) : accountSession.account === null ? (
+        <>
+          <Link
+            to={newExperimentHref(locale)}
+            aria-label={t("siteHeader.startSimulation")}
+            data-testid="site-start-simulation-v3"
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-wb-primary px-2 text-[13.5px] font-semibold text-white transition-[background-color,transform] duration-150 hover:bg-wb-primary-hover active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wb-accent sm:h-9 sm:px-3 sm:text-[15px]"
+          >
+            <FlaskConical className="h-4 w-4" aria-hidden="true" />
+            <span className="hidden md:inline">
+              {t("siteHeader.startSimulation")}
+            </span>
+          </Link>
+          <Link
+            to={loginHref(locale)}
+            aria-label={t("siteHeader.login")}
+            className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg px-2 text-[13.5px] font-semibold text-wb-muted transition-[color,background-color,transform] duration-150 hover:bg-wb-hover hover:text-wb-text active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wb-accent sm:h-9 sm:min-w-20 sm:text-[15px]"
+          >
+            <LogIn className="h-4 w-4 sm:hidden" aria-hidden="true" />
+            <span className="hidden sm:inline">{t("siteHeader.login")}</span>
+          </Link>
+        </>
       ) : (
-        <SiteCreateMenuV3 locale={locale} />
-      )}
-
-      {accountSession.account === null ? (
-        <Link
-          to={loginHref(locale)}
-          aria-label={t("siteHeader.login")}
-          className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg px-2 text-[13.5px] font-semibold text-wb-muted transition-[color,background-color,transform] duration-150 hover:bg-wb-hover hover:text-wb-text active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wb-accent sm:h-9 sm:min-w-20 sm:text-[15px]"
-        >
-          <LogIn className="h-4 w-4 sm:hidden" aria-hidden="true" />
-          <span className="hidden sm:inline">{t("siteHeader.login")}</span>
-        </Link>
-      ) : (
-        <SiteProfileMenuV3 locale={locale} />
+        <>
+          <SiteCreateMenuV3 locale={locale} />
+          <SiteProfileMenuV3 locale={locale} />
+        </>
       )}
     </header>
   );
@@ -198,7 +201,7 @@ function SiteCreateMenuV3({ locale }: Readonly<{ locale: Locale }>) {
   }, [open]);
 
   return (
-    <div ref={rootRef} className="relative shrink-0">
+    <div ref={rootRef} className="relative flex shrink-0">
       <button
         type="button"
         aria-haspopup="menu"
@@ -308,7 +311,7 @@ function SiteProfileMenuV3({ locale }: Readonly<{ locale: Locale }>) {
     account.accountId.charAt(0).toLocaleUpperCase();
 
   return (
-    <div ref={rootRef} className="relative shrink-0">
+    <div ref={rootRef} className="relative flex shrink-0">
       <button
         type="button"
         aria-haspopup="menu"
