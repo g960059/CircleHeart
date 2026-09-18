@@ -1,5 +1,11 @@
 import React from "react";
-import { articleBriefingInflowContentV3 } from "@/studio/application/authoring/StudioArticleBriefingPresentationV3";
+import {
+  articleBriefingAnalysisRecomputeV3,
+  articleBriefingInflowContentV3,
+  articleBriefingSplitViewsV3,
+  articleBriefingViewsV3,
+  defaultArticleBriefingPresentationV3,
+} from "@/studio/application/authoring/StudioArticleBriefingPresentationV3";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
@@ -1081,5 +1087,81 @@ describe("Article Editor V3 briefing", () => {
     expect(briefing.controls[0]?.presentation).not.toBe(
       snapshot.content.surface.controlPanes[0]?.items[0]?.presentation,
     );
+  });
+});
+
+describe("Article Briefing sealed reading form", () => {
+  const graphs = [
+    { paneId: "pane/pv", order: 0, emphasis: "primary" as const },
+    { paneId: "pane/starling", order: 1, emphasis: "supporting" as const },
+    { paneId: "pane/pressure", order: 2, emphasis: "supporting" as const },
+  ];
+  const scenarioScope = { visibleScenarioIds: ["a", "b"], initialFocusScenarioId: "a" };
+
+  it("reads an explicit extent ahead of the complexity heuristic and defaults to on-request analyses", () => {
+    expect(articleBriefingPresentationV3({ graphs, scenarioScope, presentation: { extent: "inline" } })).toBe("inflow");
+    expect(articleBriefingPresentationV3({ graphs, scenarioScope, presentation: { extent: "full" } })).toBe("fullscreen");
+    expect(articleBriefingPresentationV3({ graphs, scenarioScope })).toBe("inflow");
+    expect(articleBriefingPresentationV3({ graphs, scenarioScope, controls: [{}, {}] as never })).toBe("peek");
+    expect(articleBriefingAnalysisRecomputeV3({ graphs })).toBe("on-request");
+    expect(articleBriefingAnalysisRecomputeV3({ graphs, presentation: { extent: "peek", analysisRecompute: "automatic" } })).toBe("automatic");
+    expect(defaultArticleBriefingPresentationV3({ graphs, scenarioScope, controls: [{}, {}] as never })).toEqual({
+      extent: "peek", views: [{ paneIds: ["pane/pv"] }, { paneIds: ["pane/starling"] }, { paneIds: ["pane/pressure"] }], analysisRecompute: "on-request",
+    });
+  });
+
+  it("keeps sealed pairs first, appends unsealed graphs as single views, and splits pairs for narrow stages", () => {
+    const views = articleBriefingViewsV3({
+      graphs, presentation: { extent: "peek", views: [{ paneIds: ["pane/pressure", "pane/pv"] }, { paneIds: ["pane/gone"] }] },
+    });
+    expect(views).toEqual([{ paneIds: ["pane/pressure", "pane/pv"] }, { paneIds: ["pane/starling"] }]);
+    expect(articleBriefingSplitViewsV3(views)).toEqual([
+      { paneIds: ["pane/pressure"] }, { paneIds: ["pane/pv"] }, { paneIds: ["pane/starling"] },
+    ]);
+  });
+
+  it("does not trim an explicitly sealed inline Briefing", () => {
+    const briefing = {
+      defaultTitle: "t", scenarioScope: { visibleScenarioIds: ["a"], initialFocusScenarioId: "a" },
+      graphs, outputs: [], controls: [], presentation: { extent: "inline" as const },
+    };
+    expect(articleBriefingInflowContentV3(briefing)).toBe(briefing);
+  });
+});
+
+describe("Article Reader stage selection", () => {
+  it("keeps the selected graph across pair splitting and rejoining", async () => {
+    const { articleReaderActiveViewIndexV3 } = await import("@/components/article/reader/ArticleReaderEmbedV3");
+    const pairs = [{ paneIds: ["pv", "starling"] }, { paneIds: ["pressure", "flow"] }];
+    const singles = articleBriefingSplitViewsV3(pairs);
+    // Selecting the second pair keeps its first pane; narrow shows that pane, wide returns to the pair.
+    expect(articleReaderActiveViewIndexV3(pairs, "pressure")).toBe(1);
+    expect(articleReaderActiveViewIndexV3(singles, "pressure")).toBe(2);
+    // A pane chosen while narrow still selects its pair when widened.
+    expect(articleReaderActiveViewIndexV3(singles, "flow")).toBe(3);
+    expect(articleReaderActiveViewIndexV3(pairs, "flow")).toBe(1);
+    // No selection or an unknown pane falls back to the first view.
+    expect(articleReaderActiveViewIndexV3(pairs, null)).toBe(0);
+    expect(articleReaderActiveViewIndexV3(pairs, "gone")).toBe(0);
+    expect(articleReaderActiveViewIndexV3([], "pv")).toBe(0);
+  });
+});
+
+describe("Workbench Briefing re-capture", () => {
+  it("carries the sealed reading form through re-capture and drops views of removed graphs", async () => {
+    const { reconcileWorkbenchBriefingV3 } = await import("@/components/workbench/WorkbenchBriefingPolicy");
+    const snapshot = twoGraphSnapshotV3();
+    const sealed: ExperimentPlacementBriefingV2 = {
+      ...defaultArticleBriefingV3(snapshot, "scenario/baseline", "Sealed"),
+      presentation: { extent: "full", views: [{ paneIds: ["pane/pv", "pane/pressure"] }], analysisRecompute: "automatic" },
+    };
+    const kept = reconcileWorkbenchBriefingV3({ briefing: sealed, preferredFocusScenarioId: "scenario/baseline", snapshot });
+    expect(kept.presentation).toEqual({ extent: "full", views: [{ paneIds: ["pane/pv", "pane/pressure"] }], analysisRecompute: "automatic" });
+    const narrowed = reconcileWorkbenchBriefingV3({
+      briefing: { ...sealed, graphs: sealed.graphs.filter(({ paneId }) => paneId === "pane/pressure") },
+      preferredFocusScenarioId: "scenario/baseline", snapshot,
+    });
+    expect(narrowed.presentation).toEqual({ extent: "full", views: [{ paneIds: ["pane/pressure"] }], analysisRecompute: "automatic" });
+    expect(reconcileWorkbenchBriefingV3({ briefing: null, preferredFocusScenarioId: "scenario/baseline", snapshot }).presentation).toBeUndefined();
   });
 });

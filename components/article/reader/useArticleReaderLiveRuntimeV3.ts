@@ -295,6 +295,7 @@ function initialStateV3(
           ? [[scenario.scenarioId, scenario.capture.fixture] as const]
           : []),
     )),
+    changedScenarioIds: Object.freeze([]),
     analysisByKey: Object.freeze(Object.create(null)) as Readonly<
       Record<string, never>
     >,

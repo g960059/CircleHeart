@@ -400,6 +400,36 @@ export type ExperimentPlacementBriefingControlV2 = Readonly<{
 }>;
 
 /**
+ * One reading view of the graph stage: one selected graph pane, or two shown
+ * side by side when the stage is wide enough. Narrow stages split a pair into
+ * consecutive single views; the pairing is a density hint, never a renderer
+ * or numerical change.
+ */
+export type ExperimentPlacementBriefingViewV2 = Readonly<{
+  paneIds: readonly SurfacePaneIdV2[];
+}>;
+
+/**
+ * Author-sealed reading form of one Placement.
+ *
+ * `extent` is the resting form in the Article column: `inline` renders live
+ * in flow, `peek` rests as an anchor and opens beside the text, `full` rests
+ * as an anchor and opens over the page in the Workbench area arrangement.
+ * `views` groups the selected graphs into stage views (1–2 panes each);
+ * graphs absent from every view follow as single views.
+ * `analysisRecompute` decides whether Surface-pinned analyses (settled PV
+ * relations, Starling families, PVA outputs) are re-measured automatically
+ * after every reader control change, or only when the reader asks. The
+ * analysis identity, method, and result are unchanged either way; only the
+ * moment of the expensive measurement moves.
+ */
+export type ExperimentPlacementBriefingPresentationV2 = Readonly<{
+  extent: "inline" | "peek" | "full";
+  views?: readonly ExperimentPlacementBriefingViewV2[];
+  analysisRecompute?: "on-request" | "automatic";
+}>;
+
+/**
  * Article-local Reader projection of one pinned immutable Snapshot Surface.
  *
  * The role-specific selections are deliberately explicit. Graphs may carry a
@@ -415,6 +445,8 @@ export type ExperimentPlacementBriefingV2 = Readonly<{
   graphs: readonly ExperimentPlacementBriefingGraphV2[];
   outputs: readonly ExperimentPlacementBriefingOutputV2[];
   controls: readonly ExperimentPlacementBriefingControlV2[];
+  /** Absent on Placements sealed before explicit reading forms; a heuristic applies. */
+  presentation?: ExperimentPlacementBriefingPresentationV2;
 }>;
 
 export type ExperimentPlacementV2 = Readonly<{

@@ -1588,9 +1588,10 @@ function assertPlacementBriefingV2(
   if (briefing === undefined) {
     throw validationErrorV2(path, "must be an object when present");
   }
-  assertExactKeysV2(
+  assertRequiredOptionalKeysV2(
     briefing,
     ["defaultTitle", "scenarioScope", "graphs", "outputs", "controls"],
+    ["presentation"],
     path,
   );
   requiredTrimmedStringV2(briefing.defaultTitle, `${path}.defaultTitle`);
@@ -1653,6 +1654,13 @@ function assertPlacementBriefingV2(
       assertGraphBriefingOverridesV2(graph.overrides, `${graphPath}.overrides`);
     }
   });
+  if (hasOwnV2(briefing, "presentation")) {
+    assertPlacementBriefingPresentationV2(
+      briefing.presentation,
+      graphPaneIds,
+      `${path}.presentation`,
+    );
+  }
 
   arrayV2(briefing.outputs, `${path}.outputs`);
   const outputKeys = new Set<string>();
@@ -1725,6 +1733,56 @@ function assertPlacementBriefingV2(
     );
     assertControlBriefingBindingV2(control.binding, `${controlPath}.binding`);
   });
+}
+
+/**
+ * The sealed reading form is layout density only. Every view pane must be a
+ * selected Briefing graph, no graph may sit in two views, and a view holds one
+ * or two panes. Renderer identity and numerical semantics are not touched.
+ */
+function assertPlacementBriefingPresentationV2(
+  presentation: ExperimentPlacementBriefingV2["presentation"],
+  graphPaneIds: ReadonlySet<string>,
+  path: string,
+): void {
+  if (presentation === undefined) {
+    throw validationErrorV2(path, "must be an object when present");
+  }
+  assertRequiredOptionalKeysV2(
+    presentation,
+    ["extent"],
+    ["views", "analysisRecompute"],
+    path,
+  );
+  if (!["inline", "peek", "full"].includes(presentation.extent)) {
+    throw validationErrorV2(`${path}.extent`, "must be inline, peek, or full");
+  }
+  if (hasOwnV2(presentation, "views")) {
+    arrayV2(presentation.views, `${path}.views`);
+    const viewedPaneIds = new Set<string>();
+    presentation.views!.forEach((view, index) => {
+      const viewPath = `${path}.views[${index}]`;
+      assertExactKeysV2(view, ["paneIds"], viewPath);
+      arrayV2(view.paneIds, `${viewPath}.paneIds`);
+      if (view.paneIds.length < 1 || view.paneIds.length > 2) {
+        throw validationErrorV2(`${viewPath}.paneIds`, "must hold one or two graph panes");
+      }
+      view.paneIds.forEach((value, paneIndex) => {
+        const paneId = requiredPortableIdV2(value, `${viewPath}.paneIds[${paneIndex}]`);
+        if (!graphPaneIds.has(paneId)) {
+          throw validationErrorV2(`${viewPath}.paneIds[${paneIndex}]`, "must select a Briefing graph");
+        }
+        assertUniqueIdV2(viewedPaneIds, paneId, `${viewPath}.paneIds[${paneIndex}]`);
+      });
+    });
+  }
+  if (
+    hasOwnV2(presentation, "analysisRecompute")
+    && presentation.analysisRecompute !== "on-request"
+    && presentation.analysisRecompute !== "automatic"
+  ) {
+    throw validationErrorV2(`${path}.analysisRecompute`, "must be on-request or automatic");
+  }
 }
 
 function assertGraphAxisRangesV2(value: unknown, path: string): void {

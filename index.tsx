@@ -30,6 +30,11 @@ const DevDashboardPage = React.lazy(
     default: module.DevDashboardPage,
   })),
 );
+const EmbedStudyPageV1 = React.lazy(
+  () => import('./components/dev/embedStudy/EmbedStudyPageV1').then((module) => ({
+    default: module.EmbedStudyPageV1,
+  })),
+);
 const WorkbenchSelectorPage = React.lazy(
   () => import('./components/workbench/WorkbenchSelectorPage').then((module) => ({
     default: module.WorkbenchSelectorPage,
@@ -137,6 +142,14 @@ const appRoutes = () => (
       element={(
         <React.Suspense fallback={<ProductPageLoading label="Loading development content…" />}>
           <DevDashboardPage />
+        </React.Suspense>
+      )}
+    />
+    <Route
+      path="dev/embed-study"
+      element={(
+        <React.Suspense fallback={<ProductPageLoading label="Loading embed study…" />}>
+          <EmbedStudyPageV1 />
         </React.Suspense>
       )}
     />

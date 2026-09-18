@@ -5,11 +5,13 @@ import { describe, expect, it } from "vitest";
 
 import "@/i18n";
 import {
+  ArticleReaderAnalysisStatusV3,
   ArticleReaderExperimentPeekPanelV3,
   ArticleReaderExperimentV3,
   ArticleReaderControlV3,
   ArticleReaderOutputsV3,
   ArticleReaderStructuralReturnGraphV3,
+  articleReaderAnalysisScenarioIdsV3,
   articleReaderPeriodicPvaEnabledV3,
   resolveArticleReaderStaticGraphSeriesLabelV3,
   articleReaderBoundedHistoryV3,
@@ -356,6 +358,7 @@ function readerRuntimeStubV3(
       pendingControlInstanceId: null,
       pendingAnalysisKeys: Object.freeze([]),
       fixtureByScenario: Object.freeze({}),
+      changedScenarioIds: Object.freeze([]),
       analysisByKey: Object.freeze({}),
       analysisHistoryByKey: Object.freeze({}),
       analysisErrorByKey: Object.freeze({}),
@@ -867,9 +870,22 @@ describe("Article Reader V3 experiment anchor", () => {
     };
     const html = renderExperimentV3({ snapshot, contract, live: true });
 
-    expect(html).toContain("シミュレーション情報");
+    // Inline keeps only the reading instrument; model disclosure belongs to
+    // the opened panel header, so neither legacy label may leak into flow.
+    expect(html).not.toContain("シミュレーション情報");
     expect(html).not.toContain("MW 72");
     expect(html).not.toContain("MW V3");
+    const panel = renderToStaticMarkup(
+      <ArticleReaderExperimentPeekPanelV3
+        maximized={false}
+        title="Reader experiment"
+        onClose={NOOP}
+        toolbar={<span>シミュレーション情報</span>}
+      >
+        <div />
+      </ArticleReaderExperimentPeekPanelV3>,
+    );
+    expect(panel).toContain("シミュレーション情報");
   });
 
   it("overlays every visible Scenario in one structural comparison canvas", () => {
@@ -1038,8 +1054,11 @@ describe("Article Reader V3 experiment anchor", () => {
     }] };
     const html = renderToStaticMarkup(<ArticleReaderOutputsV3 briefing={briefing} contract={contract} sampleStore={store}
       scenarioLabels={{ baseline: "基準条件", higher: "張力増加" }} />);
-    expect(html).toMatch(/<h3[^>]*>基準条件<\/h3>/);
-    expect(html).toMatch(/<h3[^>]*>張力増加<\/h3>/);
+    // Each section is one source pane read for its sealed Scenario; the
+    // Scenario name is the section title when the pane label is unavailable.
+    expect(html).toMatch(/<h3[^>]*>.*基準条件<\/span><\/h3>/);
+    expect(html).toMatch(/<h3[^>]*>.*張力増加<\/span><\/h3>/);
+    expect(html).toContain('data-reader-section-count="2"');
     expect(html).toContain("55<span");
     expect(html).toContain("65<span");
   });
@@ -1276,7 +1295,10 @@ describe("Article Reader V3 experiment anchor", () => {
 
     expect(html).toContain("<figure");
     expect(html).not.toContain('data-reader-presentation="peek"');
-    expect(html.match(/data-reader-graph-render-active=/g)).toHaveLength(2);
+    // The stage paints one sealed view at a time; the second graph is one tab away.
+    expect(html.match(/data-reader-graph-render-active=/g)).toHaveLength(1);
+    expect(html).toContain('data-testid="article-reader-stage-rail-v3"');
+    expect(html.match(/role="tab"/g)).toHaveLength(2);
     expect(html).not.toContain("data-reader-open-details");
   });
 
@@ -1336,5 +1358,79 @@ describe("Article Reader V3 experiment anchor", () => {
     expect(html).toContain('data-reader-placement-id="placement/reader"');
     expect(html).not.toContain("data-reader-placement-live");
     expect(html).not.toContain("<figure");
+  });
+});
+
+describe("Article Reader V3 sealed-state analysis policy", () => {
+  it("lists the Scenarios whose Surface-pinned analysis the Briefing displays", () => {
+    expect(articleReaderAnalysisScenarioIdsV3(briefingV3(), snapshotV3(), contractV3(), true))
+      .toEqual(["scenario/comparison"]);
+    expect(articleReaderAnalysisScenarioIdsV3({ ...briefingV3(), graphs: [] }, snapshotV3(), contractV3(), true))
+      .toEqual([]);
+    expect(articleReaderAnalysisScenarioIdsV3({ ...briefingV3(), graphs: [], outputs: [{
+      sourcePaneId: "pane/outputs", outputId: MAIN_WIRE_PERIODIC_PVA_OUTPUT_IDS_V1.pressureVolumeAreaMilliJoule,
+      scenarioId: "scenario/comparison", label: "PVA", order: 0,
+    }] }, snapshotV3(), contractV3(), true)).toEqual(["scenario/comparison"]);
+  });
+
+  it("stays silent while the sealed state is measured automatically, then asks the reader after a control change", () => {
+    const analysisId = MAIN_WIRE_INTEGRATED_MODEL_FORMAL_PRESSURE_VOLUME_RELATIONS_V3_ID;
+    const key = articleReaderAnalysisKeyV3("scenario/comparison", analysisId);
+    const render = (runtime: UseArticleReaderLiveRuntimeResultV3, auto: readonly string[]) => renderToStaticMarkup(
+      <ArticleReaderAnalysisStatusV3
+        analysisAutoScenarioIds={new Set(auto)}
+        briefing={briefingV3()}
+        contract={contractV3()}
+        runtime={runtime}
+        snapshot={snapshotV3()}
+      />,
+    );
+    // Sealed state, not yet measured: the graph requests it itself; nothing to decide.
+    expect(render(readerRuntimeStubV3(), ["scenario/comparison"])).toBe("");
+    // Measuring: progress, no button.
+    const pending = render(readerRuntimeStubV3({ pendingAnalysisKeys: [key] }), ["scenario/comparison"]);
+    expect(pending).toContain('data-reader-analysis-state="pending"');
+    expect(pending).not.toContain("data-reader-recompute-analysis");
+    // Changed by a control under the on-request policy: stale, with an explicit re-measure action.
+    const stale = render(readerRuntimeStubV3({ changedScenarioIds: ["scenario/comparison"] }), []);
+    expect(stale).toContain('data-reader-analysis-state="stale"');
+    expect(stale).toContain('data-reader-analysis-stale-scenarios="scenario/comparison"');
+    expect(stale).toContain("data-reader-recompute-analysis");
+    // Same change under the automatic policy: the graph re-requests; nothing to decide.
+    expect(render(readerRuntimeStubV3({ changedScenarioIds: ["scenario/comparison"] }), ["scenario/comparison"])).toBe("");
+    // A present result is fresh regardless of policy.
+    expect(render(readerRuntimeStubV3({ changedScenarioIds: ["scenario/comparison"],
+      analysisByKey: { [key]: structuralAnalysisV3("scenario/comparison") } }), [])).toBe("");
+  });
+
+  it("titles output sections by their source pane and lays compared panes side by side", () => {
+    const store = new WorkbenchScenarioPresentationSampleStoreV3();
+    const outputId = "hemodynamics.stroke-volume.LV-event-defined";
+    store.append("scenario/baseline", [{ acceptedTimeSec: 1, acceptedRevision: 1, inputEpoch: 0, values: { [outputId]: 70 } }]);
+    store.append("scenario/comparison", [{ acceptedTimeSec: 1, acceptedRevision: 1, inputEpoch: 0, values: { [outputId]: 90 } }]);
+    const snapshot: ExperimentSnapshotV2 = { ...snapshotV3(), content: { ...snapshotV3().content, surface: {
+      ...snapshotV3().content.surface,
+      outputPanes: [
+        { paneId: "pane/valves", role: "output", label: "弁関連", order: 0, priority: 2, binding: { mode: "fixed", scenarioId: "scenario/baseline" }, items: [{ outputId, label: "SV", order: 0 }] },
+        { paneId: "pane/valves-b", role: "output", label: "弁関連（比較）", order: 1, priority: 1, binding: { mode: "fixed", scenarioId: "scenario/comparison" }, items: [{ outputId, label: "SV", order: 0 }] },
+      ],
+    } } };
+    const briefing: ExperimentPlacementBriefingV2 = { ...briefingV3(),
+      scenarioScope: { visibleScenarioIds: ["scenario/baseline", "scenario/comparison"], initialFocusScenarioId: "scenario/baseline" },
+      outputs: [
+        { sourcePaneId: "pane/valves", outputId, scenarioId: "scenario/baseline", label: "SV", order: 0 },
+        { sourcePaneId: "pane/valves-b", outputId, scenarioId: "scenario/comparison", label: "SV", order: 1 },
+      ],
+    };
+    const contract: ModelContractV2 = { ...contractV3(), outputCatalog: [{
+      outputId, kind: "metric", unit: "mL", shape: "scalar", scope: "instant", dependencies: [], significantDigits: 3,
+    }] };
+    const html = renderToStaticMarkup(<ArticleReaderOutputsV3 briefing={briefing} contract={contract} sampleStore={store}
+      snapshot={snapshot} scenarioLabels={{ "scenario/baseline": "Baseline", "scenario/comparison": "Comparison" }} />);
+    expect(html).toContain('data-reader-section-count="2"');
+    expect(html).toMatch(/<h3[^>]*>.*弁関連<\/span><span class="article-reader-section-scenario">Baseline<\/span><\/h3>/);
+    expect(html).toContain("弁関連（比較）");
+    expect(html).toContain("70<span");
+    expect(html).toContain("90<span");
   });
 });

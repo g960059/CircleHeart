@@ -227,6 +227,22 @@ export function reconcileWorkbenchBriefingV3(
       }),
     );
 
+  // The sealed reading form survives re-capture; its views keep only graphs
+  // that are still selected, so it can never name a pane the Briefing lost.
+  const retainedGraphIds = new Set(graphs.map(({ paneId }) => paneId));
+  const presentation = authored.presentation === undefined
+    ? undefined
+    : Object.freeze({
+        ...authored.presentation,
+        ...(authored.presentation.views === undefined ? {} : {
+          views: Object.freeze(authored.presentation.views
+            .map((view) => Object.freeze({
+              paneIds: Object.freeze(view.paneIds.filter((paneId) => retainedGraphIds.has(paneId))),
+            }))
+            .filter((view) => view.paneIds.length > 0)),
+        }),
+      });
+
   const candidate = Object.freeze({
     // The composer has no detached title editor. Its default title always
     // comes from the frozen source projection so a stale in-memory Briefing
@@ -239,6 +255,7 @@ export function reconcileWorkbenchBriefingV3(
     graphs: Object.freeze(graphs),
     outputs: Object.freeze(outputs),
     controls: Object.freeze(controls),
+    ...(presentation === undefined ? {} : { presentation }),
   });
   return validateExperimentPlacementBriefingV2(
     candidate,

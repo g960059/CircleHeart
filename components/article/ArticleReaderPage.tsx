@@ -319,9 +319,10 @@ function ArticleReaderV3Resource({
   ) => {
     rememberReadingPosition();
     cancelPeekCloseTimer();
-    setPeekMaximized(false);
-    setExpandedPlacement(Object.freeze({ placementId, presentation }));
-    if (presentation !== "peek") setPeekOpen(false);
+    // A sealed full-width Placement is the same companion panel opened
+    // maximized; there is no second modal surface to maintain.
+    setPeekMaximized(presentation === "fullscreen");
+    setExpandedPlacement(Object.freeze({ placementId, presentation: "peek" }));
   }, [cancelPeekCloseTimer]);
 
   const finishPeekClose = React.useCallback(() => {
@@ -562,7 +563,13 @@ function ArticleReaderV3Resource({
                 peekMaximized={peekMaximized}
                 onActivate={() => {
                   visibleInlinePlacementsRef.current.add(block.placement.placementId);
-                  setActivePlacementId(block.placement.placementId);
+                  // The placement the reader reached first stays live while it
+                  // remains in view; a second placement peeking in at the edge
+                  // must not steal the lanes from the one being read.
+                  setActivePlacementId((current) =>
+                    current !== null && visibleInlinePlacementsRef.current.has(current)
+                      ? current
+                      : block.placement.placementId);
                 }}
                 onDeactivate={() => {
                   visibleInlinePlacementsRef.current.delete(block.placement.placementId);

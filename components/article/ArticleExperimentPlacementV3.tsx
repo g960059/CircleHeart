@@ -28,6 +28,7 @@ import {
   type ExperimentPlacementBriefingGraphSeriesV2,
   type ExperimentPlacementBriefingGraphV2,
   type ExperimentPlacementBriefingOutputV2,
+  type ExperimentPlacementBriefingPresentationV2,
   type ExperimentPlacementV2,
   type ExperimentSnapshotV2,
   type ExperimentSurfaceControlItemV2,
@@ -53,6 +54,11 @@ import {
   resolveArticlePlacementBriefingV3,
   resolveArticlePlacementTitleV3,
 } from "@/studio/application/article/ArticleExperimentPlacementV3";
+import {
+  articleBriefingViewsV3,
+  defaultArticleBriefingPresentationV3,
+  suggestedArticleBriefingPresentationV3,
+} from "@/studio/application/authoring/StudioArticleBriefingPresentationV3";
 
 export type ArticleExperimentPlacementV3Props = Readonly<{
   block: StudioArticleExperimentBlockV2;
@@ -525,9 +531,23 @@ export function ArticleBriefingEditorV3({
           : "supporting" as const,
       }]
       : briefing.graphs.filter(({ paneId }) => paneId !== pane.paneId);
+    const graphs = normalizeGraphOrderV3(next);
     updateBriefing({
       ...briefing,
-      graphs: normalizeGraphOrderV3(next),
+      graphs,
+      ...reconcilePresentationViewsV3(briefing.presentation, graphs),
+    });
+  };
+
+  const updatePresentation = (
+    patch: Partial<ExperimentPlacementBriefingPresentationV2>,
+  ) => {
+    updateBriefing({
+      ...briefing,
+      presentation: {
+        ...(briefing.presentation ?? defaultArticleBriefingPresentationV3(briefing)),
+        ...patch,
+      },
     });
   };
 
@@ -712,6 +732,12 @@ export function ArticleBriefingEditorV3({
         </label>
       </fieldset>
 
+      <BriefingReadingFormV3
+        briefing={briefing}
+        graphLabel={(paneId) => graphPanes.find((pane) => pane.paneId === paneId)?.label ?? paneId}
+        onChange={updatePresentation}
+      />
+
       <BriefingSectionV3 label={t("articleEditor.role.graph")}>
         {graphPanes.map((pane) => (
           <GraphBriefingRowV3
@@ -815,6 +841,132 @@ export function ArticleBriefingEditorV3({
         })}
       </BriefingSectionV3>
     </div>
+  );
+}
+
+/** Sealed views may only name selected graphs; dropping a graph drops it from its view. */
+function reconcilePresentationViewsV3(
+  presentation: ExperimentPlacementBriefingPresentationV2 | undefined,
+  graphs: readonly ExperimentPlacementBriefingGraphV2[],
+): Pick<ExperimentPlacementBriefingV2, "presentation"> {
+  if (presentation?.views === undefined) return presentation === undefined ? {} : { presentation };
+  const selected = new Set(graphs.map(({ paneId }) => paneId));
+  const views = presentation.views
+    .map((view) => ({ paneIds: view.paneIds.filter((paneId) => selected.has(paneId)) }))
+    .filter((view) => view.paneIds.length > 0);
+  return { presentation: { ...presentation, views } };
+}
+
+/**
+ * The author seals how the Placement reads: where it rests, which graphs
+ * share a view, and whether expensive analyses re-run on every control change.
+ */
+function BriefingReadingFormV3({
+  briefing,
+  graphLabel,
+  onChange,
+}: Readonly<{
+  briefing: ExperimentPlacementBriefingV2;
+  graphLabel: (paneId: string) => string;
+  onChange: (patch: Partial<ExperimentPlacementBriefingPresentationV2>) => void;
+}>) {
+  const { t } = useTranslation();
+  const effective = briefing.presentation ?? defaultArticleBriefingPresentationV3(briefing);
+  const suggested = suggestedArticleBriefingPresentationV3(briefing) === "inflow" ? "inline" : "peek";
+  const extentLabel = (extent: ExperimentPlacementBriefingPresentationV2["extent"]) =>
+    t(extent === "inline" ? "articleEditor.briefing.extentInline"
+      : extent === "peek" ? "articleEditor.briefing.extentPeek" : "articleEditor.briefing.extentFull");
+  const ordered = [...briefing.graphs].sort(compareSemanticOrderV3);
+  const views = articleBriefingViewsV3(briefing);
+  const viewIndexOf = (paneId: string) => views.findIndex((view) => view.paneIds.includes(paneId));
+  const paired = (index: number) => index > 0
+    && viewIndexOf(ordered[index]!.paneId) === viewIndexOf(ordered[index - 1]!.paneId);
+  const setPaired = (index: number, on: boolean) => {
+    const flags = ordered.map((_, candidate) => candidate === index ? on : paired(candidate));
+    const next: string[][] = [];
+    ordered.forEach((graph, candidate) => {
+      const current = next.at(-1);
+      if (candidate > 0 && flags[candidate] && current !== undefined && current.length === 1) current.push(graph.paneId);
+      else next.push([graph.paneId]);
+    });
+    onChange({ views: next.map((paneIds) => ({ paneIds })) });
+  };
+  const segment = <T extends string>(
+    groupLabel: string,
+    value: T,
+    options: readonly Readonly<{ value: T; label: string }>[],
+    select: (value: T) => void,
+  ) => (
+    <div className="workbench-control-segments article-briefing-segments" role="radiogroup" aria-label={groupLabel}>
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="radio"
+          aria-checked={option.value === value}
+          data-active={option.value === value ? "true" : "false"}
+          className="workbench-control-segment text-[10px]"
+          onClick={() => select(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+  return (
+    <fieldset className="mt-4 border-t border-wb-line/60 pt-3" data-testid="article-briefing-reading-form-v3">
+      <legend className="px-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-wb-subtle">
+        {t("articleEditor.briefing.reading")}
+      </legend>
+      <div className="grid gap-3 px-1 text-[10px] text-wb-muted">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span>{t("articleEditor.briefing.extent")}</span>
+          {segment(t("articleEditor.briefing.extent"), effective.extent, [
+            { value: "inline" as const, label: extentLabel("inline") },
+            { value: "peek" as const, label: extentLabel("peek") },
+            { value: "full" as const, label: extentLabel("full") },
+          ], (extent) => onChange({ extent }))}
+          <span className="text-wb-subtle">
+            {t("articleEditor.briefing.extentSuggested", { extent: extentLabel(suggested) })}
+          </span>
+        </div>
+        {ordered.length > 1 && (
+          <div>
+            <p>{t("articleEditor.briefing.views")}</p>
+            <p className="text-wb-subtle">{t("articleEditor.briefing.viewsHint")}</p>
+            <div className="mt-1 grid gap-1">
+              {ordered.map((graph, index) => index === 0 ? null : (
+                <label key={graph.paneId} className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    className="h-3 w-3 accent-wb-accent"
+                    checked={paired(index)}
+                    disabled={index > 1 && paired(index - 1)}
+                    onChange={(event) => setPaired(index, event.currentTarget.checked)}
+                  />
+                  <span className="truncate">
+                    {t("articleReader.viewPair", {
+                      first: graphLabel(ordered[index - 1]!.paneId),
+                      second: graphLabel(graph.paneId),
+                    })}
+                    {" · "}
+                    {t(paired(index) ? "articleEditor.briefing.viewPairWithPrevious" : "articleEditor.briefing.viewSingle")}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span>{t("articleEditor.briefing.analysisRecompute")}</span>
+          {segment(t("articleEditor.briefing.analysisRecompute"), effective.analysisRecompute ?? "on-request", [
+            { value: "on-request" as const, label: t("articleEditor.briefing.analysisOnRequest") },
+            { value: "automatic" as const, label: t("articleEditor.briefing.analysisAutomatic") },
+          ], (analysisRecompute) => onChange({ analysisRecompute }))}
+          <span className="basis-full text-wb-subtle">{t("articleEditor.briefing.analysisRecomputeHint")}</span>
+        </div>
+      </div>
+    </fieldset>
   );
 }
 

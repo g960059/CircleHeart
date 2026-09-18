@@ -79,12 +79,14 @@ export function ExperimentGraphPresentationV3({
 /** One output vocabulary shared by docked panes and Article Briefings. */
 export function ExperimentOutputGridV3({
   addItemAction,
+  className = "",
   emptyMessage,
   items,
   scrollMode = "contained",
   variant,
 }: Readonly<{
   addItemAction?: ExperimentPaneAddItemActionV3;
+  className?: string;
   emptyMessage?: string;
   items: readonly ExperimentOutputPresentationItemV3[];
   scrollMode?: "contained" | "parent";
@@ -101,7 +103,7 @@ export function ExperimentOutputGridV3({
       : "article-output-grid";
   return (
     <div
-      className={`workbench-output-grid grid ${layoutClassName}`}
+      className={`workbench-output-grid grid ${layoutClassName} ${className}`.trim()}
       data-experiment-output-presentation={variant}
     >
       {items.length === 0 && emptyMessage !== undefined && (

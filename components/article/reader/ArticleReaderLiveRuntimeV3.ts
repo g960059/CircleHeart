@@ -1,7 +1,7 @@
 import type { ExperimentScenarioV2, ExperimentSnapshotV2 } from
   "@/studio/contracts/v2/content";
 import type { StudioReaderContinuationV3 } from "@/studio/infrastructure/browser/StudioExperimentSessionHandoffV3";
-import { loadPreparedScenarioAnalysisV1 } from "@/components/workbench/runtime/PreparedModelAnalysisRegistryV1";
+import { loadArticleReaderPreparedAnalysisV1 } from "./ArticleReaderPreparedAnalysisV1";
 import { mainWireCardiacCycleOutputValueV1, mainWireFillingFlowOutputValueV1, mainWireAorticJetOutputValueV1 } from "@/analysis/methods/mainWire/MainWireCardiacCyclePresentationV1";
 import type {
   StudioSimulationAnalysisExecutionPlanResolverV2,
@@ -52,6 +52,13 @@ export type ArticleReaderLiveRuntimeStateV3 = Readonly<{
   fixtureByScenario: Readonly<
     Record<string, ExperimentScenarioV2["capture"]["fixture"]>
   >;
+  /**
+   * Scenarios whose inputs a reader control has changed since this runtime
+   * started. Sealed-state analyses (prepared or measured once at open) are
+   * valid only for Scenarios outside this set; the reading policy decides
+   * whether a changed Scenario is re-measured automatically or on request.
+   */
+  changedScenarioIds: readonly string[];
   analysisByKey: Readonly<Record<string, StudioSimulationAnalysisV2>>;
   analysisHistoryByKey: Readonly<
     Record<string, readonly StudioSimulationAnalysisV2[]>
@@ -200,9 +207,11 @@ export class ArticleReaderLiveRuntimeV3 {
           ...input,
           releaseTicket: dependencies.releaseTicket,
           backgroundWorkerPool,
+          // Sealed-state analyses (registry preparations, then Snapshot-carried
+          // preparations in this browser) replace the first measurement only.
           loadPreparedAnalysis: seed => seed.checkpoint === undefined
             ? Promise.resolve(null)
-            : loadPreparedScenarioAnalysisV1(dependencies.releaseTicket, {
+            : loadArticleReaderPreparedAnalysisV1(dependencies.releaseTicket, {
                 fixture: seed.fixture, checkpoint: seed.checkpoint,
               }),
           presentationOutputIds: () =>
@@ -226,6 +235,7 @@ export class ArticleReaderLiveRuntimeV3 {
         this.#snapshot,
         scenarioIds,
       ),
+      changedScenarioIds: EMPTY_ARTICLE_READER_ANALYSIS_KEYS_V3,
       analysisByKey: EMPTY_ARTICLE_READER_ANALYSES_V3,
       analysisHistoryByKey: EMPTY_ARTICLE_READER_ANALYSIS_HISTORY_V3,
       analysisErrorByKey: EMPTY_ARTICLE_READER_ANALYSIS_ERRORS_V3,
@@ -697,6 +707,9 @@ export class ArticleReaderLiveRuntimeV3 {
       this.#resumeAfterExclusiveOperationV3(runtime, {
         pendingControlInstanceId: null,
         fixtureByScenario,
+        changedScenarioIds: Object.freeze([...new Set([
+          ...this.#state.changedScenarioIds, ...input.scenarioIds,
+        ])]),
         analysisByKey: withoutArticleReaderRecordKeysV3(
           this.#state.analysisByKey,
           clearedAnalysisKeys,
