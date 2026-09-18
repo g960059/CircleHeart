@@ -8,7 +8,7 @@ import { controlLabelV3, outputLabelV3 } from "@/components/workbench/WorkbenchS
  * tools/dev/buildArticleEmbedStudySnapshotV1.ts) contains real exact captures
  * and real Surface-pinned analyses. The Surface below is ordinary Workbench
  * composition: four graph panes, one ten-item output pane per Scenario, and
- * two Scenario-bound control panes. Multi-Scenario comparison of outputs and
+ * three Scenario-bound control panes. Multi-Scenario comparison of outputs and
  * controls is composed from panes, exactly as the durable contract prescribes.
  */
 export const ARTICLE_EMBED_STUDY_SNAPSHOT_ID_V1 = "snapshot/dev-article-embed-study-v3";
@@ -29,6 +29,7 @@ export const ARTICLE_EMBED_STUDY_PANE_IDS_V1 = Object.freeze({
   outputsPlus500: "output-tbv-plus-500",
   outputsPlus1000: "output-tbv-plus-1000",
   controlsBaseline: "control-baseline",
+  controlsPlus500: "control-tbv-plus-500",
   controlsPlus1000: "control-tbv-plus-1000",
 });
 
@@ -110,7 +111,13 @@ export const ARTICLE_EMBED_STUDY_SURFACE_V1: ExperimentSurfaceV2 = Object.freeze
         Object.freeze({ controlId, label: controlLabelV3(controlId), order, presentation: Object.freeze({ kind: "slider" as const }) }))),
     }),
     Object.freeze({
-      paneId: ARTICLE_EMBED_STUDY_PANE_IDS_V1.controlsPlus1000, role: "control" as const, label: "TBV +1000 を操作", order: 1, priority: 99,
+      paneId: ARTICLE_EMBED_STUDY_PANE_IDS_V1.controlsPlus500, role: "control" as const, label: "TBV +500 を操作", order: 1, priority: 99,
+      binding: Object.freeze({ mode: "fixed" as const, scenarioIds: Object.freeze([ARTICLE_EMBED_STUDY_SCENARIOS_V1[1].scenarioId]) }),
+      items: Object.freeze(ARTICLE_EMBED_STUDY_CONTROL_IDS_V1.map((controlId, order) =>
+        Object.freeze({ controlId, label: controlLabelV3(controlId), order, presentation: Object.freeze({ kind: "slider" as const }) }))),
+    }),
+    Object.freeze({
+      paneId: ARTICLE_EMBED_STUDY_PANE_IDS_V1.controlsPlus1000, role: "control" as const, label: "TBV +1000 を操作", order: 2, priority: 98,
       binding: Object.freeze({ mode: "fixed" as const, scenarioIds: Object.freeze([ARTICLE_EMBED_STUDY_SCENARIOS_V1[2].scenarioId]) }),
       items: Object.freeze([
         Object.freeze({

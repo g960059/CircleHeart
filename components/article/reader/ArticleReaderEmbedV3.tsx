@@ -134,20 +134,6 @@ export function ArticleReaderStageV3({
       data-reader-stage-split={effectiveViews.length !== views.length ? "true" : "false"}
       data-reader-stage-active-pane={active?.paneIds[0] ?? ""}
     >
-      <div
-        id={`${tabId}-panel`}
-        role={effectiveViews.length > 1 ? "tabpanel" : undefined}
-        aria-labelledby={effectiveViews.length > 1 ? `${tabId}-tab-${index}` : undefined}
-        className="article-reader-stage-canvas"
-        data-reader-stage-slots={active?.paneIds.length ?? 0}
-      >
-        {active?.paneIds.map((paneId) => (
-          <div key={paneId} className="article-reader-stage-slot" data-reader-stage-pane={paneId}>
-            {renderGraph(paneId)}
-          </div>
-        ))}
-      </div>
-      {status}
       {effectiveViews.length > 1 && (
         <div
           className="workbench-mobile-graph-view-rail article-reader-stage-rail"
@@ -180,6 +166,20 @@ export function ArticleReaderStageV3({
           </div>
         </div>
       )}
+      <div
+        id={`${tabId}-panel`}
+        role={effectiveViews.length > 1 ? "tabpanel" : undefined}
+        aria-labelledby={effectiveViews.length > 1 ? `${tabId}-tab-${index}` : undefined}
+        className="article-reader-stage-canvas"
+        data-reader-stage-slots={active?.paneIds.length ?? 0}
+      >
+        {active?.paneIds.map((paneId) => (
+          <div key={paneId} className="article-reader-stage-slot" data-reader-stage-pane={paneId}>
+            {renderGraph(paneId)}
+          </div>
+        ))}
+      </div>
+      {status}
     </div>
   );
 }
@@ -241,6 +241,39 @@ export function ArticleReaderSectionsV3({
           <div className="article-reader-section-body">{section.body}</div>
         </div>
       ))}
+    </section>
+  );
+}
+
+/** Switching a controller pane never changes its sealed Scenario binding. */
+export function ArticleReaderControlSectionsV3({ sections }: Readonly<{ sections: readonly ArticleReaderSectionV3[] }>) {
+  const { t } = useTranslation();
+  const [selected, setSelected] = React.useState<string | null>(null);
+  const index = Math.max(0, sections.findIndex(s => s.key === selected));
+  const active = sections[index];
+  const id = React.useId();
+  const buttons = React.useRef<(HTMLButtonElement | null)[]>([]);
+  if (!active) return null;
+  if (sections.length === 1) return <ArticleReaderSectionsV3 kind="controls" label={t("articleReader.controls")} sections={sections} showHeaders />;
+  return (
+    <section className="article-reader-control-deck" aria-label={t("articleReader.controls")}>
+      <div role="tablist" aria-label={t("articleReader.controls")} className="article-reader-control-tabs">
+        {sections.map((section, i) => <button key={section.key} type="button" role="tab"
+          ref={element => { buttons.current[i] = element; }} id={`${id}-tab-${i}`} aria-controls={`${id}-panel`}
+          aria-selected={i === index} tabIndex={i === index ? 0 : -1} onClick={() => setSelected(section.key)}
+          onKeyDown={event => {
+            const next = event.key === "ArrowRight" ? (i + 1) % sections.length : event.key === "ArrowLeft" ? (i + sections.length - 1) % sections.length
+              : event.key === "Home" ? 0 : event.key === "End" ? sections.length - 1 : null;
+            if (next === null) return;
+            event.preventDefault(); setSelected(sections[next]!.key); buttons.current[next]?.focus();
+          }} title={section.scenario?.label}>
+          {section.scenario && <span className="article-reader-scenario-swatch" style={{ backgroundColor: section.scenario.colorHex }} aria-hidden="true" />}
+          {section.title}
+        </button>)}
+      </div>
+      <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-tab-${index}`} data-reader-control-section={active.key}>
+        {active.lead}{active.body}
+      </div>
     </section>
   );
 }
@@ -324,6 +357,8 @@ export function ArticleReaderWorkbenchLayoutV3({
       className="article-reader-workbench-layout min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(360px,1fr)_auto_auto] overflow-y-auto lg:overflow-hidden"
       inspectorResizeLabel={t("workbench.live.resizeInspectorArea")}
       outputResizeLabel={t("workbench.live.resizeOutputArea")}
+      preferenceStorageKey="circleheart.reader.area-layout.v1"
+      defaultPreference={{ inspectorWidthRatio: 0.24, outputHeightRatio: 0.2 }}
     >
       <div className="article-reader-workbench-graphs min-h-0 bg-wb-canvas lg:col-start-1 lg:row-start-1" data-reader-workbench-graph-count={graphs.length}>
         <div className="article-reader-workbench-graph-grid" data-reader-graph-count={graphs.length}>

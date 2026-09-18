@@ -829,7 +829,10 @@
     "expandInline": "広げる",
     "closeSheet": "記事に戻る",
     "sheetControls": "操作",
-    "sheetOutputs": "出力"
+    "sheetOutputs": "出力",
+    "measurementRange": "指標 {{start}}–{{end}} / {{total}}",
+    "previousMeasurements": "前の指標を比較",
+    "nextMeasurements": "次の指標を比較"
   },
   "snapshotReader": {
     "loading": "シミュレーションを読み込んでいます…",

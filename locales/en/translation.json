@@ -829,7 +829,10 @@
     "expandInline": "Expand",
     "closeSheet": "Back to article",
     "sheetControls": "Controls",
-    "sheetOutputs": "Outputs"
+    "sheetOutputs": "Outputs",
+    "measurementRange": "Measures {{start}}–{{end}} / {{total}}",
+    "previousMeasurements": "Compare previous measures",
+    "nextMeasurements": "Compare next measures"
   },
   "snapshotReader": {
     "loading": "Loading simulation…",

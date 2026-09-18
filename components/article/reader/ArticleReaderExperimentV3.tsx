@@ -102,6 +102,7 @@ import { type ArticleReaderSessionMemoryV3, useArticleReaderLiveRuntimeV3 } from
 import {
   ArticleReaderScenarioSelectorV3,
   ArticleReaderSectionsV3,
+  ArticleReaderControlSectionsV3,
   ArticleReaderSheetDeckV3,
   ArticleReaderStageV3,
   ArticleReaderWorkbenchLayoutV3,
@@ -114,6 +115,7 @@ import {
   articleBriefingViewsV3,
   type ArticleBriefingAnalysisRecomputeV3,
 } from "@/studio/application/authoring/StudioArticleBriefingPresentationV3";
+import { ArticleReaderOutputSelectionV3, ArticleReaderOutputComparisonV3, articleReaderComparableOutputIdsV3, type ArticleReaderOutputSectionV3 } from "./ArticleReaderOutputComparisonV3";
 import { workbenchScenarioColorSeedV3 } from "@/components/workbench/presentation/WorkbenchGraphColorV3";
 
 export type ArticleReaderExperimentV3Props = Readonly<{
@@ -123,6 +125,7 @@ export type ArticleReaderExperimentV3Props = Readonly<{
   contractAvailability?: "loading" | "ready" | "unavailable";
   runtimeComposition?: StudioClientCompositionV2 | null;
   live: boolean;
+  onViewportVisibilityChange?(visible: boolean): void;
   expandedPresentation: ArticleReaderExpandedPresentationV3 | null;
   peekPortalHost?: HTMLElement | null;
   peekMaximized?: boolean;
@@ -146,9 +149,9 @@ export type ArticleReaderExpandedPresentationV3 = Exclude<
 >;
 
 /**
- * Borderless article anchor. The live owner is mounted only for the single
- * Placement selected by the Reader page; within that Placement every visible
- * Scenario remains live in its own persistent Worker lane.
+ * Borderless article anchor. A started owner retains its exact reading session
+ * until the article closes. Only the placement in the reading area advances;
+ * paused owners keep measured analyses, conditions, and samples intact.
  */
 export function ArticleReaderExperimentV3({
   block,
@@ -163,6 +166,7 @@ export function ArticleReaderExperimentV3({
   forceInline = false,
   onActivate,
   onDeactivate,
+  onViewportVisibilityChange,
   onExpand,
   onClose,
   onOpenExperimentSession,
@@ -173,8 +177,15 @@ export function ArticleReaderExperimentV3({
   const rootRef = React.useRef<HTMLElement>(null);
   const onActivateRef = React.useRef(onActivate);
   const onDeactivateRef = React.useRef(onDeactivate);
+  const viewportVisibilityRef = React.useRef(onViewportVisibilityChange);
+  viewportVisibilityRef.current = onViewportVisibilityChange;
+  // Keep this reading session and its measured analyses while the article is
+  // open. Offscreen owners pause; moving or expanding never rebuilds a model.
+  const [started, setStarted] = React.useState(false);
+  React.useEffect(() => { if (live) setStarted(true); }, [live]);
   const inlinePresentation = forceInline || articleBriefingPresentationV3(block.placement.briefing) === "inflow";
   const [restartGeneration, setRestartGeneration] = React.useState(0);
+  const outputSelection = React.useMemo(() => ({ current: 0 }), [snapshot?.snapshotId, restartGeneration]);
   const playbackPreference = React.useMemo(() => ({ current: { playing: true, rate: 1 } }), [snapshot?.snapshotId, restartGeneration]);
   const sessionMemory = React.useMemo<ArticleReaderSessionMemoryV3>(() => ({ pending: null, error: null }), [snapshot?.snapshotId, restartGeneration]);
   const [inlineHeight, setInlineHeight] = React.useState(0);
@@ -210,12 +221,15 @@ export function ArticleReaderExperimentV3({
     const element = rootRef.current;
     if (element === null || !inlinePresentation) return undefined;
     if (typeof IntersectionObserver === "undefined") {
-      onActivateRef.current();
-      return () => onDeactivateRef.current();
+      if (viewportVisibilityRef.current) viewportVisibilityRef.current(true);
+      else onActivateRef.current();
+      return () => viewportVisibilityRef.current ? viewportVisibilityRef.current(false) : onDeactivateRef.current();
     }
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
+        if (viewportVisibilityRef.current) {
+          viewportVisibilityRef.current(entries.some(entry => entry.isIntersecting));
+        } else if (entries.some((entry) => entry.isIntersecting)) {
           onActivateRef.current();
         } else {
           onDeactivateRef.current();
@@ -229,7 +243,8 @@ export function ArticleReaderExperimentV3({
     observer.observe(element);
     return () => {
       observer.disconnect();
-      onDeactivateRef.current();
+      if (viewportVisibilityRef.current) viewportVisibilityRef.current(false);
+      else onDeactivateRef.current();
     };
   }, [inlinePresentation]);
 
@@ -286,30 +301,35 @@ export function ArticleReaderExperimentV3({
       data-reader-placement-id={block.placement.placementId}
       data-reader-placement-live={live}
       data-reader-presentation={forceInline ? undefined : presentation}
+      onPointerDownCapture={() => { if (!live && inlinePresentation) onActivate(); }}
+      onFocusCapture={() => { if (!live && inlinePresentation) onActivate(); }}
       style={inlinePresentation && !live && inlineHeight > 0 ? { minHeight: inlineHeight } : undefined}
     >
-      {live && contract !== null ? (
-        <ArticleReaderLiveOwnerV3
-          key={restartGeneration}
-          onRestart={() => setRestartGeneration(value => value + 1)}
-          briefing={briefing}
-          contract={contract}
-          runtimeComposition={runtimeComposition}
-          playbackPreference={playbackPreference}
-          sessionMemory={sessionMemory}
-          expandedPresentation={expandedPresentation}
-          forceInline={forceInline}
-          peekPortalHost={peekPortalHost}
-          peekMaximized={peekMaximized}
-          presentation={presentation}
-          snapshot={snapshot}
-          title={title}
-          onTitleCommit={onTitleCommit}
-          onExpand={onExpand}
-          onClose={onClose}
-          onOpenExperimentSession={onOpenExperimentSession}
-          onPeekMaximizedChange={onPeekMaximizedChange}
-        />
+      {(live || started) && contract !== null ? (
+        <ArticleReaderOutputSelectionV3.Provider value={outputSelection}>
+          <ArticleReaderLiveOwnerV3
+            active={live}
+            key={restartGeneration}
+            onRestart={() => setRestartGeneration(value => value + 1)}
+            briefing={briefing}
+            contract={contract}
+            runtimeComposition={runtimeComposition}
+            playbackPreference={playbackPreference}
+            sessionMemory={sessionMemory}
+            expandedPresentation={expandedPresentation}
+            forceInline={forceInline}
+            peekPortalHost={peekPortalHost}
+            peekMaximized={peekMaximized}
+            presentation={presentation}
+            snapshot={snapshot}
+            title={title}
+            onTitleCommit={onTitleCommit}
+            onExpand={onExpand}
+            onClose={onClose}
+            onOpenExperimentSession={onOpenExperimentSession}
+            onPeekMaximizedChange={onPeekMaximizedChange}
+          />
+        </ArticleReaderOutputSelectionV3.Provider>
       ) : (
         <ArticleReaderStaticExperimentV3
           briefing={briefing}
@@ -486,6 +506,7 @@ function ArticleReaderStaticExperimentV3({
 }
 
 function ArticleReaderLiveOwnerV3({
+  active,
   onRestart,
   briefing,
   contract,
@@ -505,6 +526,7 @@ function ArticleReaderLiveOwnerV3({
   onPeekMaximizedChange,
   onTitleCommit,
 }: Readonly<{
+  active: boolean;
   onRestart(): void;
   briefing: ExperimentPlacementBriefingV2;
   contract: ModelContractV2;
@@ -551,7 +573,7 @@ function ArticleReaderLiveOwnerV3({
     structuralAnalyses,
     presentationOutputIds,
     presentationAnalysisIds,
-    forceInline || presentation === "inflow" || expandedPresentation !== null,
+    active && (forceInline || presentation === "inflow" || expandedPresentation !== null),
     playbackPreference,
     sessionMemory,
     workbenchModelCyclePhaseOutputIdV3(contract),
@@ -812,8 +834,18 @@ function ArticleReaderEmbedSurfaceV3({
       snapshot={snapshot}
     />
   );
+  const groupedOutputs = new Map<string, { scenarioId: string; outputIds: string[] }>();
+  for (const output of [...briefing.outputs].sort(compareOrderV3)) {
+    const key = `${output.sourcePaneId}\u001f${output.scenarioId}`;
+    const group = groupedOutputs.get(key) ?? { scenarioId: output.scenarioId, outputIds: [] };
+    group.outputIds.push(output.outputId); groupedOutputs.set(key, group);
+  }
+  const denseComparison = articleReaderComparableOutputIdsV3([...groupedOutputs.values()]) !== null;
+  const singlePv = graphs.length === 1 && contract.graphCatalog.find(graph => graph.graphId === snapshot.content.surface.graphPanes.find(pane => pane.paneId === graphs[0]?.paneId)?.graphId)?.renderer === "pressure-volume";
+  const lightInstrument = singlePv && briefing.controls.length === 0 && briefing.outputs.length <= 6;
   const controls = briefing.controls.length > 0 ? (
     <ArticleReaderControlsV3
+      tabbed={layout !== "workbench"}
       briefing={briefing}
       contract={contract}
       runtime={runtime}
@@ -836,6 +868,7 @@ function ArticleReaderEmbedSurfaceV3({
     "data-reader-playback-rate": runtime.state.playbackRate.playbackRate,
     "data-reader-layout": layout,
     "data-reader-analysis-recompute": analysisRecompute,
+    "data-reader-comparison-layout": denseComparison ? "true" : undefined,
     className: `article-reader-embed min-w-0 ${layout === "inline" ? "article-reader-inflow" : "article-reader-live"}`,
   } as const;
 
@@ -876,6 +909,15 @@ function ArticleReaderEmbedSurfaceV3({
       status={status}
     />
   );
+  if ((layout === "peek" || layout === "sheet") && denseComparison) {
+    return <div {...rootProps}>
+      {stage}
+      <div className="article-reader-interaction-deck">
+        <div className="article-reader-observation-dock">{outputs}</div>
+        {controls !== null && <div className="article-reader-operation-dock">{controls}</div>}
+      </div>
+    </div>;
+  }
   if (layout === "sheet") {
     return (
       <div {...rootProps}>
@@ -887,13 +929,9 @@ function ArticleReaderEmbedSurfaceV3({
   return (
     <div {...rootProps}>
       {header}
-      {stage}
-      {(controls !== null || outputs !== null) && (
-        <div className="article-reader-deck">
-          {controls}
-          {outputs}
-        </div>
-      )}
+      {layout === "inline" ? <div className={lightInstrument ? "article-reader-inline-instrument" : undefined}>
+        {stage}<div className="article-reader-deck">{controls}{outputs}</div>
+      </div> : <>{stage}{(controls !== null || outputs !== null) && <div className="article-reader-deck">{controls}{outputs}</div>}</>}
     </div>
   );
 }
@@ -986,24 +1024,9 @@ export function ArticleReaderAnalysisStatusV3({
     });
   };
   if (pending.length > 0) {
-    const progress = pending.flatMap(({ key }) => {
-      const locus = structuralReturnOrientationFromPayloadV3(state.analysisByKey[key]?.payload, "left")?.starlingLocus;
-      return locus !== undefined && "completedPointCount" in locus ? [{ completed: locus.completedPointCount, total: locus.totalPointCount }] : [];
-    });
-    return (
-      <div className="article-reader-analysis-status" data-reader-analysis-state="pending" role="status">
-        <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-        <span>{t("articleReader.analysisRunning")}</span>
-        {progress.length > 0 && (
-          <span className="tabular-nums text-wb-subtle">
-            {t("articleReader.analysisMeasuringPoints", {
-              completed: progress.reduce((sum, { completed }) => sum + completed, 0),
-              total: progress.reduce((sum, { total }) => sum + total, 0),
-            })}
-          </span>
-        )}
-      </div>
-    );
+    // Graph legends already carry progress. Preserve one screen-reader status
+    // without adding another visible row or pushing the observations down.
+    return <span className="sr-only" data-reader-analysis-state="pending" role="status">{t("articleReader.analysisRunning")}</span>;
   }
   if (failed.length > 0) {
     return (
@@ -1089,6 +1112,7 @@ function ArticleReaderLiveGraphViewportV3({
       ref={rootRef}
       className={`${className} h-full min-h-0`}
       data-reader-graph-render-active={renderActive ? "true" : "false"}
+      data-reader-graph-renderer={contract.graphCatalog.find(graph => graph.graphId === snapshot.content.surface.graphPanes.find(pane => pane.paneId === briefing.paneId)?.graphId)?.renderer}
     >
       {renderActive ? (
         <ArticleReaderLiveGraphV3
@@ -1889,31 +1913,24 @@ export function ArticleReaderOutputsV3({
   const sectionKey = (item: { sourcePaneId: string; scenarioId: string }) => `${item.sourcePaneId}${item.scenarioId}`;
   const sectionKeys = [...new Set(items.map(sectionKey))];
   const multiScenario = briefing.scenarioScope.visibleScenarioIds.length > 1;
-  const sections: ArticleReaderSectionV3[] = sectionKeys.map((key) => {
-    const first = items.find((item) => sectionKey(item) === key)!;
-    const paneLabel = snapshot?.content.surface.outputPanes.find((pane) => pane.paneId === first.sourcePaneId)?.label?.trim();
+  const outputSections: ArticleReaderOutputSectionV3[] = sectionKeys.map((key) => {
+    const sectionItems = items.filter(item => sectionKey(item) === key);
+    const first = sectionItems[0]!;
+    const paneLabel = snapshot?.content.surface.outputPanes.find(pane => pane.paneId === first.sourcePaneId)?.label?.trim();
     const scenarioLabel = scenarioLabels?.[first.scenarioId] ?? first.scenarioId;
-    return {
-      key,
-      title: paneLabel || (multiScenario ? scenarioLabel : t("articleReader.outputs")),
-      ...(multiScenario ? { scenario: { label: scenarioLabel, colorHex: scenarioColor?.(first.scenarioId) ?? "#64748b" } } : {}),
-      body: (
-        <ExperimentOutputGridV3
-          variant="article"
-          className="article-reader-outputs"
-          items={items.filter((item) => sectionKey(item) === key)}
-        />
-      ),
-    };
+    return { key, scenarioId: first.scenarioId, title: paneLabel || (multiScenario ? scenarioLabel : t("articleReader.outputs")),
+      scenarioLabel, color: scenarioColor?.(first.scenarioId) ?? "#64748b", items: sectionItems };
   });
-  return (
-    <ArticleReaderSectionsV3
-      kind="outputs"
-      label={t("articleReader.outputs")}
-      sections={sections}
-      showHeaders={sections.length > 1 || multiScenario || compact === false && false}
-    />
-  );
+  const comparableIds = articleReaderComparableOutputIdsV3(outputSections.map(section => ({
+    scenarioId: section.scenarioId, outputIds: section.items.map(item => item.outputId!),
+  })));
+  if (comparableIds) return <ArticleReaderOutputComparisonV3 sections={outputSections} outputIds={comparableIds} />;
+  return <ArticleReaderSectionsV3 kind="outputs" label={t("articleReader.outputs")}
+    showHeaders={outputSections.length > 1 || multiScenario}
+    sections={outputSections.map(section => ({ key: section.key, title: section.title,
+      ...(multiScenario ? { scenario: { label: section.scenarioLabel, colorHex: section.color } } : {}),
+      body: <ExperimentOutputGridV3 variant="article" className="article-reader-outputs" items={section.items} />,
+    }))} />;
 }
 
 function articleReaderPeriodicPvaScalarV3(
@@ -1950,12 +1967,14 @@ function articleReaderPeriodicPvaScalarV3(
 }
 
 function ArticleReaderControlsV3({
+  tabbed = false,
   briefing,
   contract,
   runtime,
   scenarioColor,
   snapshot,
 }: Readonly<{
+  tabbed?: boolean;
   briefing: ExperimentPlacementBriefingV2;
   contract: ModelContractV2;
   runtime: ArticleReaderRuntimeHookV3;
@@ -2023,6 +2042,7 @@ function ArticleReaderControlsV3({
       ),
     };
   });
+  if (tabbed) return <ArticleReaderControlSectionsV3 sections={sections} />;
   return (
     <ArticleReaderSectionsV3
       kind="controls"

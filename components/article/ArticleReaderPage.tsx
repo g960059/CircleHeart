@@ -8,7 +8,7 @@ import { articleReadingFieldV1 } from "@/studio/application/article/StudioArticl
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import type { ArticleReaderExpandedPresentationV3 } from "@/components/article/reader/ArticleReaderExperimentV3";
-import { articleReaderPlacementAfterViewportExitV3 } from "@/components/article/reader/ArticleReaderPlacementV3";
+import { articleReaderPlacementAfterViewportExitV3, articleReaderPlacementInReadingAreaV3 } from "@/components/article/reader/ArticleReaderPlacementV3";
 import { ArticleReaderDeferredExperimentV1 } from "@/components/article/reader/ArticleReaderDeferredExperimentV1";
 import { ArticleLoadingSkeletonV1 } from "./ArticleLoadingSkeletonV1";
 import {
@@ -179,6 +179,23 @@ function ArticleReaderV3Resource({
     null,
   );
   const visibleInlinePlacementsRef = React.useRef(new Set<string>());
+  const selectReadingPlacement = React.useCallback(() => {
+    const host = document.querySelector<HTMLElement>(".article-reader-article-pane");
+    if (!host) return;
+    const bounds = host.getBoundingClientRect();
+    const viewport = { top: Math.max(0, bounds.top), bottom: Math.min(window.innerHeight, bounds.bottom) };
+    const placements = [...host.querySelectorAll<HTMLElement>('[data-reader-presentation="inflow"]')]
+      .map(element => ({ id: element.dataset.readerPlacementId!, ...pickReadingBoundsV3(element) }))
+      .filter(p => visibleInlinePlacementsRef.current.has(p.id));
+    setActivePlacementId(current => articleReaderPlacementInReadingAreaV3(placements, viewport, current));
+  }, []);
+  React.useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = () => { clearTimeout(timer); timer = setTimeout(selectReadingPlacement, 100); };
+    document.addEventListener("scroll", schedule, true);
+    window.addEventListener("resize", schedule);
+    return () => { clearTimeout(timer); document.removeEventListener("scroll", schedule, true); window.removeEventListener("resize", schedule); };
+  }, [selectReadingPlacement]);
   const [expandedPlacement, setExpandedPlacement] =
     React.useState<ArticleReaderExpandedPlacementV3 | null>(null);
   const [peekOpen, setPeekOpen] = React.useState(false);
@@ -561,15 +578,11 @@ function ArticleReaderV3Resource({
                 expandedPresentation={expandedPresentation}
                 peekPortalHost={peekPortalHost}
                 peekMaximized={peekMaximized}
-                onActivate={() => {
-                  visibleInlinePlacementsRef.current.add(block.placement.placementId);
-                  // The placement the reader reached first stays live while it
-                  // remains in view; a second placement peeking in at the edge
-                  // must not steal the lanes from the one being read.
-                  setActivePlacementId((current) =>
-                    current !== null && visibleInlinePlacementsRef.current.has(current)
-                      ? current
-                      : block.placement.placementId);
+                onActivate={() => setActivePlacementId(block.placement.placementId)}
+                onViewportVisibilityChange={(visible) => {
+                  if (visible) visibleInlinePlacementsRef.current.add(block.placement.placementId);
+                  else visibleInlinePlacementsRef.current.delete(block.placement.placementId);
+                  selectReadingPlacement();
                 }}
                 onDeactivate={() => {
                   visibleInlinePlacementsRef.current.delete(block.placement.placementId);
@@ -702,3 +715,8 @@ function ArticleReaderV3Resource({
 }
 
 export default ArticleReaderPage;
+
+function pickReadingBoundsV3(element: HTMLElement): { top: number; bottom: number } {
+  const { top, bottom } = element.getBoundingClientRect();
+  return { top, bottom };
+}

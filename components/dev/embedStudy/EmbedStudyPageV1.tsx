@@ -25,6 +25,7 @@ import {
 } from "@/studio/application/article/ArticleExperimentPlacementV3";
 import { validateExperimentSnapshotV2 } from "@/studio/application/authoring/StudioExperimentDataV2";
 import {
+  ARTICLE_EMBED_STUDY_SURFACE_V1,
   ARTICLE_EMBED_STUDY_OUTPUT_IDS_V1,
   ARTICLE_EMBED_STUDY_PANE_IDS_V1,
 } from "./embedStudyDefinitionV1";
@@ -107,7 +108,7 @@ export const STUDY_PLACEMENTS_V1: readonly StudyPlacementV1[] = [
   {
     placementId: "study-peek-heavy",
     title: "循環血液量の段階的増加（全部入り）",
-    caption: "本文の横。3 Scenario・4 graph（2画面×2列）・2 control pane・3 output pane×10 outputの負荷例。ESPVR/EDPVR・Starlingは封入時の測定済み結果を読み込み、操作後は読者が求めたときだけ再測定する。",
+    caption: "本文の横。3 Scenario・4 graph（2画面×2列）・3 control pane・3 output pane×10 outputの負荷例。ESPVR/EDPVR・Starlingは封入時の測定済み結果を読み込み、操作後は読者が求めたときだけ再測定する。",
     briefing: (base) => withPresentation(
       base,
       { extent: "peek", views: [{ paneIds: [P.pv, P.starling] }, { paneIds: [P.pressure, P.flow] }], analysisRecompute: "on-request" },
@@ -170,7 +171,7 @@ export function buildArticleEmbedStudyArticleV1(snapshot: ExperimentSnapshotV2):
       paragraph("p-inline-2", "比較したい値がある場合は、Workbenchでoutput paneを比較したいScenarioごとに作り、両方を封入します。paneのラベルがそのまま節の見出しになり、2つの節は幅があれば横に並び、同じ行に同じ指標が揃います。graphは2枚を1画面に2列で封入しました。スマートフォンの幅では自動で1枚ずつのタブになります。"),
       inlineCompare!,
       heading("h-peek", "2. 本文と並べる"),
-      paragraph("p-peek-1", "4枚のgraph、2つのcontrol pane、3つのoutput pane（10指標ずつ）を読む場合は本文内では長すぎます。下のアンカーから本文の横に開きます。graphは「PVループ + Guyton/Starling」「圧波形 + 弁流量」の2画面で、上に固定されたまま下のcontrolとoutputだけがスクロールします。controlの対象Scenarioは封入時に決まっており、節の見出しに表示されます。"),
+      paragraph("p-peek-1", "4枚のgraph、3つのcontrol pane、3つのoutput pane（10指標ずつ）を読む場合は本文内では長すぎます。下のアンカーから本文の横に開きます。graphは「PVループ + Guyton/Starling」「圧波形 + 弁流量」の2画面で、上に固定されます。比較する3つのScenarioは短い行に揃え、同じ指標の組を一緒に切り替えます。操作するpaneだけを下のタブで選びます。対象Scenarioは封入時のbindingのままで、グラフ・比較値・操作を同時に見られます。"),
       peekHeavy!,
       paragraph("p-peek-2", "スライダーを動かすと拍ごとの応答（ループ、波形、出力値）はすぐに変わりますが、ESPVR/EDPVR・Starling曲線は封入時の条件の測定結果のまま薄く残り、graphの下に「操作後の条件はまだ測定していません」と再測定ボタンが出ます。再測定は1 Scenarioあたり数十秒から数分かかるので、読者が求めたときだけ走らせます。"),
       heading("h-full", "3. 全幅で開く"),
@@ -231,7 +232,10 @@ export function EmbedStudyPageV1() {
         snapshot: unknown; admission: { status: string; reason?: string }; generatedAt: string; beatsAdvancedPerLane: number;
         preparedAnalyses: readonly { captureSha256: string }[]; analysisWallMsByScenario: Record<string, number>;
       };
-      const snapshot = validateExperimentSnapshotV2(record.snapshot);
+      const captured = validateExperimentSnapshotV2(record.snapshot);
+      // Refine only the authored panes. Exact captures and prepared evidence
+      // remain the measured fixture, so no new scientific sweep is implied.
+      const snapshot = validateExperimentSnapshotV2({ ...captured, content: { ...captured.content, surface: ARTICLE_EMBED_STUDY_SURFACE_V1 } });
       const article = buildArticleEmbedStudyArticleV1(snapshot);
       seedBrowserContentV1(snapshot, article);
       new BrowserPreparedAnalysisStoreV1().writeAll(record.preparedAnalyses);

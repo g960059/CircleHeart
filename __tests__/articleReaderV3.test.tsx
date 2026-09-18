@@ -1,4 +1,5 @@
-import { articleReaderPlacementAfterViewportExitV3 } from "@/components/article/reader/ArticleReaderPlacementV3";
+import { articleReaderPlacementAfterViewportExitV3, articleReaderPlacementInReadingAreaV3 } from "@/components/article/reader/ArticleReaderPlacementV3";
+import { articleReaderComparableOutputIdsV3 } from "@/components/article/reader/ArticleReaderOutputComparisonV3";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -733,6 +734,34 @@ describe("Article Reader V3 experiment anchor", () => {
       articleReaderPlacementAfterViewportExitV3("placement/b", "placement/a"),
     ).toBe("placement/b");
     expect(articleReaderPlacementAfterViewportExitV3("placement/a", "placement/a", ["placement/b", "placement/c"])).toBe("placement/c");
+  });
+
+  it("follows the reading area even while the preceding embed remains partly visible", () => {
+    const viewport = { top: 60, bottom: 900 };
+    expect(articleReaderPlacementInReadingAreaV3([
+      { id: "a", top: -346, bottom: 103 }, { id: "b", top: 312, bottom: 882 },
+    ], viewport, "a")).toBe("b");
+    expect(articleReaderPlacementInReadingAreaV3([
+      { id: "a", top: 140, bottom: 670 }, { id: "b", top: 850, bottom: 1420 },
+    ], viewport, "b")).toBe("a");
+    // Minor scroll/layout jitter does not restart alternating owners.
+    expect(articleReaderPlacementInReadingAreaV3([
+      { id: "a", top: 40, bottom: 475 }, { id: "b", top: 475, bottom: 910 },
+    ], viewport, "a")).toBe("a");
+    expect(articleReaderPlacementInReadingAreaV3([{ id: "a", top: 950, bottom: 1300 }], viewport, "a")).toBeNull();
+  });
+
+  it("aligns matching Scenario measurements without mixing unrelated output sections", () => {
+    const ids = ["EDV", "EDP", "SV", "EF", "CO"];
+    expect(articleReaderComparableOutputIdsV3([
+      { scenarioId: "a", outputIds: ids }, { scenarioId: "b", outputIds: [...ids].reverse() },
+    ])).toEqual(ids);
+    expect(articleReaderComparableOutputIdsV3([
+      { scenarioId: "a", outputIds: ids }, { scenarioId: "b", outputIds: ["PVA", "SW", "PE"] },
+    ])).toBeNull();
+    expect(articleReaderComparableOutputIdsV3([
+      { scenarioId: "a", outputIds: ids }, { scenarioId: "a", outputIds: ids },
+    ])).toBeNull();
   });
 
   it("treats history depth zero as no previous structural states", () => {

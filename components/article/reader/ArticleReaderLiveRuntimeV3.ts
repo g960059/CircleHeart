@@ -24,6 +24,7 @@ import {
 } from "@/components/workbench/presentation/WorkbenchPresentationSampleStoreV3";
 import {
   WorkbenchBackgroundWorkerPoolV3,
+  resolveWorkbenchBackgroundWorkerBudgetV3,
   type WorkbenchBackgroundWorkerPoolPortV3,
 } from "@/components/workbench/runtime/WorkbenchBackgroundWorkerPoolV3";
 import {
@@ -196,9 +197,10 @@ export class ArticleReaderLiveRuntimeV3 {
     this.sampleStore = dependencies.sampleStore
       ?? new WorkbenchScenarioPresentationSampleStoreV3();
     if (dependencies.createRuntime === undefined) {
+      // Retained, paused readers must not each reserve idle analysis Workers.
       this.#ownedBackgroundWorkerPool =
         dependencies.backgroundWorkerPool === undefined
-          ? new WorkbenchBackgroundWorkerPoolV3()
+          ? new WorkbenchBackgroundWorkerPoolV3({ ...resolveWorkbenchBackgroundWorkerBudgetV3(), warmSize: 0 })
           : null;
       const backgroundWorkerPool = dependencies.backgroundWorkerPool
         ?? this.#ownedBackgroundWorkerPool!;
@@ -415,24 +417,24 @@ export class ArticleReaderLiveRuntimeV3 {
     const runtime = this.#runtime;
     if (runtime === null) return;
     if (this.#shouldPlayV3()) {
-      if (this.#state.status === "paused") {
+      if (this.#state.status === "paused" || this.#state.status === "requesting-analysis") {
         runtime.playAll();
-        if (this.#runtime === runtime) {
+        if (this.#runtime === runtime && this.#state.status === "paused") {
           this.#publish({ status: "playing", error: null });
         }
       }
       return;
     }
-    if (this.#state.status !== "playing") return;
+    if (this.#state.status !== "playing" && this.#state.status !== "requesting-analysis") return;
     try {
       await runtime.pauseAll();
       if (this.#runtime !== runtime) return;
       if (this.#shouldPlayV3()) {
         runtime.playAll();
-        if (this.#runtime === runtime) {
+        if (this.#runtime === runtime && this.#state.status === "playing") {
           this.#publish({ status: "playing", error: null });
         }
-      } else {
+      } else if (this.#state.status === "playing") {
         this.#publish({ status: "paused", error: null });
       }
     } catch (error) {

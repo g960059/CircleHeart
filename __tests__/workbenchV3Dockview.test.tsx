@@ -3398,6 +3398,25 @@ describe("V3 Dockview Workbench", () => {
     ).toEqual({ inspectorWidthRatio: 0.42, outputHeightRatio: 0.18 });
   });
 
+  it("isolates Reader proportions from Workbench and recovers its own defaults", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+    const readerKey = "circleheart.reader.area-layout.v1";
+    const readerDefault = { inspectorWidthRatio: 0.24, outputHeightRatio: 0.28 };
+    const readerPreference = { inspectorWidthRatio: 0.3, outputHeightRatio: 0.4 };
+    expect(loadWorkbenchAreaLayoutPreferenceV3(storage, readerKey, readerDefault)).toEqual(readerDefault);
+    saveWorkbenchAreaLayoutPreferenceV3(storage, readerPreference, readerKey);
+    expect(loadWorkbenchAreaLayoutPreferenceV3(storage, readerKey, readerDefault)).toEqual(readerPreference);
+    expect(loadWorkbenchAreaLayoutPreferenceV3(storage)).toEqual(DEFAULT_WORKBENCH_AREA_LAYOUT_V3);
+    for (const invalid of ["not-json", "null", "{}"]) {
+      values.set(readerKey, invalid);
+      expect(loadWorkbenchAreaLayoutPreferenceV3(storage, readerKey, readerDefault)).toEqual(readerDefault);
+    }
+  });
+
   it("updates Dockview's internal title without rebuilding pane structure", () => {
     const clear = vi.fn();
     const addPanel = vi.fn();
