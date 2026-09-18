@@ -1,7 +1,10 @@
 import { articleReaderPlacementAfterViewportExitV3 } from "@/components/article/reader/ArticleReaderPlacementV3";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { periodicPvaFromAnalysisV3 } from "@/components/workbench/presentation/WorkbenchPeriodicPvaProjectionV3";
+import { structuralReturnOrientationFromPayloadV3 } from "@/components/workbench/presentation/GuytonStarlingOrientationCanvasV3";
+import { buildMainWirePeriodicPvaMethodV16, MAIN_WIRE_PERIODIC_PVA_METHOD_V16_ID } from "@/analysis/methods/mainWire/MainWirePeriodicPvaV1";
 
 import "@/i18n";
 import {
@@ -1063,7 +1066,7 @@ describe("Article Reader V3 experiment anchor", () => {
     expect(html).toContain("65<span");
   });
 
-  it("keeps Reader outputs vertical on the mobile base breakpoint", () => {
+  it("uses the shared responsive measurement grid for Reader outputs", () => {
     const store = new WorkbenchScenarioPresentationSampleStoreV3();
     const briefing: ExperimentPlacementBriefingV2 = {
       ...briefingV3(),
@@ -1143,6 +1146,51 @@ describe("Article Reader V3 experiment anchor", () => {
     expect(html).toContain('aria-label="AoP（近位）の説明"');
     expect(html).toContain('data-testid="output-value-context-v3"');
     expect(html).toContain('data-testid="workbench-item-description-trigger-v3"');
+  });
+
+  it("reuses the same formal projection across Reader outputs, live frames, and Workbench graphs", () => {
+    const source = structuralAnalysisV3("scenario/comparison");
+    const right = structuralReturnOrientationFromPayloadV3(source.payload, "right")!;
+    const analysis = { ...source, payload: { status: "available", right, left: { ...right, side: "left" } } };
+    const build = vi.fn(buildMainWirePeriodicPvaMethodV16);
+    const derivation = { methodId: MAIN_WIRE_PERIODIC_PVA_METHOD_V16_ID, sourceAnalysisId: analysis.analysisId, build };
+    const runtime = {
+      ...readerRuntimeStubV3({ analysisByKey: { [articleReaderAnalysisKeyV3(analysis.scenarioId, analysis.analysisId)]: analysis } }),
+      periodicPvaDerivation: derivation,
+    };
+    const briefing = { ...briefingV3(), outputs: Object.values(MAIN_WIRE_PERIODIC_PVA_OUTPUT_IDS_V1).map((outputId, order) => ({
+      sourcePaneId: "pane/energetics", outputId, scenarioId: analysis.scenarioId, label: outputId, order,
+    })) };
+    const render = () => renderToStaticMarkup(<ArticleReaderOutputsV3 briefing={briefing} contract={contractV3()} runtime={runtime} />);
+    render();
+    // Several energetics outputs consume one immutable measurement, not one
+    // expensive fit per output or per new exact presentation frame.
+    expect(build).toHaveBeenCalledTimes(1);
+    const projected = periodicPvaFromAnalysisV3(analysis, "left", derivation);
+    for (let frame = 1; frame <= 3; frame += 1) {
+      runtime.sampleStore.append(analysis.scenarioId, [{ acceptedTimeSec: frame, acceptedRevision: frame, inputEpoch: 0, values: {} }]);
+      render();
+      expect(periodicPvaFromAnalysisV3(analysis, "left", derivation)).toBe(projected);
+    }
+    expect(build).toHaveBeenCalledTimes(1);
+
+    // A new measurement/progress object, the other ventricle, or a different
+    // pinned method must not reuse the prior projection.
+    periodicPvaFromAnalysisV3({ ...analysis, inputEpoch: 1 }, "left", derivation);
+    periodicPvaFromAnalysisV3(analysis, "right", derivation);
+    periodicPvaFromAnalysisV3(analysis, "left", { ...derivation, methodId: "test/other-method" });
+    expect(build).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not retry an invalid formal projection on every live frame", () => {
+    const analysis = structuralAnalysisV3("scenario/comparison");
+    const build = vi.fn<typeof buildMainWirePeriodicPvaMethodV16>(() => { throw new Error("invalid fit"); });
+    const derivation = { methodId: "test/failed-projection", build };
+    expect(periodicPvaFromAnalysisV3(analysis, "right", derivation)).toBeUndefined();
+    expect(periodicPvaFromAnalysisV3(analysis, "right", derivation)).toBeUndefined();
+    expect(build).toHaveBeenCalledTimes(1);
+    periodicPvaFromAnalysisV3({ ...analysis, inputEpoch: 1 }, "right", derivation);
+    expect(build).toHaveBeenCalledTimes(2);
   });
 
   it("requests the shared settled relation analysis for output-only PVA briefings", () => {

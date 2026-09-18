@@ -60,6 +60,7 @@ import {
   useWorkbenchScenarioPresentationSamplesV3,
   type WorkbenchPressureVolumeTraceV3,
 } from "@/components/workbench/presentation";
+import { periodicPvaFromAnalysisV3 } from "@/components/workbench/presentation/WorkbenchPeriodicPvaProjectionV3";
 import { mainWireFormalPvAnalysisIdV1 } from "@/analysis/methods/mainWire/MainWireStructuralAnalysisContractV3";
 import {
   type MainWirePeriodicPvaV1,
@@ -67,7 +68,6 @@ import {
 import {
   MAIN_WIRE_PERIODIC_PVA_ANALYSIS_OUTPUT_IDS_V1,
   MAIN_WIRE_PERIODIC_PVA_OUTPUT_IDS_V1,
-  type MainWirePeriodicPvaDerivationV1,
 } from "@/analysis/methods/mainWire/MainWireAnalysisMethodRegistryV1";
 import type { StudioArticleExperimentBlockV2 } from "@/studio/contracts/v2/article";
 import type {
@@ -1496,8 +1496,8 @@ function ArticleReaderPressureVolumeCanvasV3({
           const side = pressureVolumeRelationSideV3(trace.chamberId);
           if (side === null) return trace;
           const key = articleReaderAnalysisKeyV3(trace.scenarioId, analysisId);
-          const periodicPva = periodicPvaFromPayloadV3(
-            runtime.state.analysisByKey[key]?.payload,
+          const periodicPva = periodicPvaFromAnalysisV3(
+            runtime.state.analysisByKey[key],
             side,
             runtime.periodicPvaDerivation,
           );
@@ -1506,7 +1506,7 @@ function ArticleReaderPressureVolumeCanvasV3({
             ...(periodicPva === undefined ? {} : { periodicPva }),
             periodicPvaHistory: articleReaderBoundedHistoryV3(runtime.state.analysisHistoryByKey[key] ?? [], historyDepth)
               .flatMap(analysis => {
-                const prior = periodicPvaFromPayloadV3(analysis.payload, side, runtime.periodicPvaDerivation);
+                const prior = periodicPvaFromAnalysisV3(analysis, side, runtime.periodicPvaDerivation);
                 return prior === undefined ? [] : [{ value: prior, inputEpoch: analysis.inputEpoch }];
               }),
             ...(runtime.state.analysisErrorByKey[key] === undefined
@@ -1524,6 +1524,7 @@ function ArticleReaderPressureVolumeCanvasV3({
       analysisId,
       historyDepth,
       periodicPvaEnabled,
+      runtime.periodicPvaDerivation,
       runtime.state.analysisHistoryByKey,
       runtime.state.analysisByKey,
       runtime.state.analysisErrorByKey,
@@ -1558,24 +1559,6 @@ function pressureVolumeRelationSideV3(
   if (chamberId === "LV") return "left";
   if (chamberId === "RV") return "right";
   return null;
-}
-
-function periodicPvaFromPayloadV3(
-  payload: unknown,
-  side: "left" | "right",
-  derivation: MainWirePeriodicPvaDerivationV1 | null,
-): MainWirePeriodicPvaV1 | undefined {
-  if (derivation === null) return undefined;
-  const orientation = structuralReturnOrientationFromPayloadV3(payload, side);
-  if (orientation === null) return undefined;
-  try {
-    return derivation.build(
-      orientation.starlingLocus,
-      side === "left" ? "LV" : "RV",
-    );
-  } catch {
-    return undefined;
-  }
 }
 
 function articleReaderModelCyclePhaseOutputIdV3(
@@ -1858,8 +1841,8 @@ export function ArticleReaderOutputsV3({
     const periodicPva =
       runtime !== undefined &&
       ARTICLE_READER_PERIODIC_PVA_OUTPUT_ID_SET_V3.has(output.outputId)
-        ? periodicPvaFromPayloadV3(
-            runtime.state.analysisByKey[analysisKey]?.payload,
+        ? periodicPvaFromAnalysisV3(
+            runtime.state.analysisByKey[analysisKey],
             "left",
             runtime.periodicPvaDerivation,
           )

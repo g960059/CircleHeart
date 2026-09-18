@@ -3166,10 +3166,10 @@ body[data-app-theme="light"] .public-static-theme-moon {
   gap: 0.75rem 1rem;
   margin-block-start: 0.75rem;
 }
-.article-reader-sections[data-reader-sections="outputs"][data-reader-section-count="2"],
-.article-reader-sections[data-reader-sections="outputs"][data-reader-section-count="3"],
-.article-reader-sections[data-reader-sections="outputs"][data-reader-section-count="4"] {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10.5rem), 1fr));
+.article-reader-sections[data-reader-sections="outputs"] {
+  /* Keep room for at least two measurements per section; sections and their
+     shared Workbench measurement grids each wrap at their available width. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
 }
 @container article-embed (min-width: 40rem) {
   .article-reader-sections[data-reader-sections="controls"][data-reader-section-count="2"],
@@ -3213,12 +3213,6 @@ body[data-app-theme="light"] .public-static-theme-moon {
 .article-reader-outputs .workbench-output-item { padding: 0.3rem 0.5rem 0.35rem; }
 .article-reader-outputs .workbench-output-label { font-size: 0.75rem; line-height: 1.3; }
 .article-reader-outputs .workbench-output-value { font-size: 1rem; }
-.article-reader-sections[data-reader-section-count="2"] .article-reader-outputs,
-.article-reader-sections[data-reader-section-count="3"] .article-reader-outputs,
-.article-reader-sections[data-reader-section-count="4"] .article-reader-outputs {
-  /* Compared sections read as aligned rows: one item per row per section. */
-  grid-template-columns: minmax(0, 1fr);
-}
 
 /* Analysis state strip: only present when the reader must decide or wait. */
 .article-reader-analysis-status {
@@ -3285,9 +3279,6 @@ body[data-app-theme="light"] .public-static-theme-moon {
 .article-reader-workbench-graph-grid .article-reader-stage-slot { block-size: auto; min-block-size: 14rem; }
 .article-reader-workbench-outputs { padding: 0.5rem 0.75rem; }
 .article-reader-workbench-outputs .article-reader-sections { margin-block-start: 0; }
-.article-reader-workbench-outputs .article-reader-sections[data-reader-sections="outputs"] {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
-}
 .article-reader-workbench-controls { padding: 0.5rem 0.75rem; }
 .article-reader-workbench-controls .article-reader-sections { grid-template-columns: minmax(0, 1fr); margin-block-start: 0; }
 @media (min-width: 1024px) {

@@ -34,6 +34,7 @@ import {
   type WorkbenchPaneDefinitionV3,
   type WorkbenchPaneSplitDirectionV3,
 } from "@/components/workbench/WorkbenchDockview";
+import { periodicPvaFromAnalysisV3 } from "./presentation/WorkbenchPeriodicPvaProjectionV3";
 import { WorkbenchAreaLayoutV3 } from "@/components/workbench/WorkbenchAreaLayoutV3";
 import {
   WorkbenchMobileStageDeckV3,
@@ -42,7 +43,6 @@ import {
 import { WorkbenchBriefingComposerV3 } from "@/components/workbench/WorkbenchBriefingComposerV3";
 import {
   GraphPaneBodyV3,
-  periodicPvaFromAnalysisV3,
 } from "@/components/workbench/WorkbenchGraphPaneBodyV3";
 import {
   ControlPaneBodyV3,

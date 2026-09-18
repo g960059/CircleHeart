@@ -198,8 +198,8 @@ export type ArticleReaderSectionV3 = Readonly<{
  * Sections are the Workbench pane, carried into the Article. Their title is
  * the pane label, so an author groups outputs by meaning (valve, myocardium)
  * or by Scenario simply by composing panes. Several sections sit side by side
- * when the column is wide enough, so equal rows line up for comparison
- * without a table.
+ * when the column is wide enough. Measurements flow horizontally within each
+ * section; both sections and measurements wrap without hiding outputs.
  */
 export function ArticleReaderSectionsV3({
   kind,
