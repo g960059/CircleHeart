@@ -5,9 +5,6 @@ import {
   type ArticleReadingIndexV1,
 } from "@/studio/application/article/StudioArticleReadingV1";
 import katex from "katex";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { SiteAccountPendingV3 } from "@/components/site/SiteAccountPendingV3";
 import circleHeartWordmark from "@/assets/brand/circleheart-wordmark.svg?raw";
 import { articleHeadingPhrasesV1 } from "@/studio/application/article/StudioArticleHeadingPhrasesV1";
 
@@ -531,7 +528,9 @@ function publicStaticSiteHeaderHtmlV1(
     `<a${locale === "en" ? " aria-current=\"true\"" : ""} href="${locale === "en" ? canonical.pathname : alternatePath}">EN</a>`,
     `</nav></noscript>`,
     `<span class="public-static-theme-icon" aria-hidden="true"><span class="public-static-theme-sun">${sunIconHtmlV1()}</span><span class="public-static-theme-moon">${moonIconHtmlV1()}</span></span>`,
-    renderToStaticMarkup(createElement(SiteAccountPendingV3, { createLabel: siteHeaderCopy.create })),
+    // Pending account slots share the browser shell's CSS sizing contract.
+    `<span class="site-account-pending-action" data-testid="site-account-pending-v3" aria-hidden="true"><span>${escapeHtmlTextV1(siteHeaderCopy.create)}</span></span>`,
+    `<span class="site-account-pending-avatar" aria-hidden="true"></span>`,
     `<noscript>`,
     `<a class="public-static-primary-icon" href="/${locale}/experiments/new" aria-label="${simulationLabel}">${flaskIconHtmlV1()}<span class="public-static-responsive-label">${simulationLabel}</span></a>`,
     `<a class="public-static-quiet-icon" href="/${locale}/login" aria-label="${loginLabel}">${loginIconHtmlV1()}<span class="public-static-responsive-label">${loginLabel}</span></a>`,
