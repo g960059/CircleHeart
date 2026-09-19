@@ -900,7 +900,9 @@ export function PressureVolumeLoopCanvasV3(
           ref={canvasRef}
           className="block h-full w-full"
           role="img"
-          aria-label={`${chamberAriaLabel} ${language?.startsWith("ja") ? "圧容積ループ" : "pressure-volume loop"}`}
+          aria-label={`${chamberAriaLabel} ${language?.startsWith("ja") ? "圧容積ループ" : "pressure-volume loop"}: ${pressureAxisTitle} / Volume (mL)`}
+          data-pv-pressure-axis={pressureAxisTitle}
+          data-pv-pressure-basis={pvPressureAxisBasisV3(traces) ?? "mixed"}
         />
         {showPvaBoundary && drawablePva.some(({ periodicPvaDrawing }) => periodicPvaDrawing.areaDisplay !== null && !periodicPvaDrawing.retainedFromPriorUpdate) && (
           <div className={`pointer-events-none absolute ${pvaAnalysisError ? "right-10" : "right-3"} top-1 flex items-center gap-2 text-[10px] text-wb-subtle`}
@@ -1062,28 +1064,47 @@ function pvLegendDescriptorV3(trace: WorkbenchPressureVolumeTraceV3) {
   });
 }
 
-function pvPressureAxisTitleV3(
+/** The pressure basis shared by every trace, or `null` when traces mix bases. */
+function pvPressureAxisBasisV3(
+  traces: readonly WorkbenchPressureVolumeTraceV3[],
+): WorkbenchPressureVolumeTraceV3["pressureBasis"] | null {
+  const bases = new Set(traces.map(({ pressureBasis }) => pressureBasis));
+  return bases.size === 1 ? traces[0]!.pressureBasis : null;
+}
+
+function pvPressureAxisChamberV3(
+  traces: readonly WorkbenchPressureVolumeTraceV3[],
+): string | undefined {
+  const chambers = new Set(traces.map(({ chamberLabel }) => chamberLabel));
+  return chambers.size === 1 ? traces[0]?.chamberLabel : undefined;
+}
+
+/** Full pressure axis title; mixed bases claim no single basis. */
+export function pvPressureAxisTitleV3(
   traces: readonly WorkbenchPressureVolumeTraceV3[],
 ): string {
-  const bases = new Set(traces.map(({ pressureBasis }) => pressureBasis));
-  const chambers = new Set(traces.map(({ chamberLabel }) => chamberLabel));
-  if (bases.size !== 1) return "Pressure (mmHg)";
-  const basis = traces[0]?.pressureBasis === "transmural"
-    ? "transmural pressure"
-    : "intracavitary pressure";
-  const chamber = chambers.size === 1 ? traces[0]?.chamberLabel : undefined;
-  return `${chamber === undefined ? "" : `${chamber} `}${basis} (mmHg)`;
+  const basis = pvPressureAxisBasisV3(traces);
+  if (basis === null) return "Pressure (mmHg)";
+  const chamber = pvPressureAxisChamberV3(traces);
+  return `${chamber === undefined ? "" : `${chamber} `}${basis === "transmural" ? "transmural pressure" : "intracavitary pressure"} (mmHg)`;
 }
 
 /** Below this canvas height the pressure axis title is one compact line. */
 const PV_COMPACT_AXIS_TITLE_HEIGHT_PX_V3 = 200;
 
-function pvCompactPressureAxisTitleV3(
+/**
+ * Compact title for short canvases. The basis stays identifiable through
+ * the subscript convention Ptm (transmural) / Pic (intracavitary); mixed
+ * bases fall back to the neutral P. The full wording remains in the canvas
+ * description for assistive technology.
+ */
+export function pvCompactPressureAxisTitleV3(
   traces: readonly WorkbenchPressureVolumeTraceV3[],
 ): string {
-  const chambers = new Set(traces.map(({ chamberLabel }) => chamberLabel));
-  const chamber = chambers.size === 1 ? traces[0]?.chamberLabel : undefined;
-  return `${chamber === undefined ? "" : `${chamber} `}P (mmHg)`;
+  const basis = pvPressureAxisBasisV3(traces);
+  const chamber = pvPressureAxisChamberV3(traces);
+  const symbol = basis === "transmural" ? "Ptm" : basis === "intracavitary" ? "Pic" : "P";
+  return `${chamber === undefined ? "" : `${chamber} `}${symbol} (mmHg)`;
 }
 
 function pvStableDomainCommitKeyV3(

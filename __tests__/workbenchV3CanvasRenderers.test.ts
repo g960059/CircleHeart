@@ -8,6 +8,7 @@ import { WorkbenchCompletedCycleBufferV3 } from "@/components/workbench/presenta
 import { workbenchPvTrailAlphaV3, workbenchPvInputTransitionV3, workbenchPvHistoryLayersV3, projectWorkbenchPvHistoryV3 } from "@/components/workbench/presentation/PressureVolumeLoopCanvasV3";
 import { workbenchManualChartDomainV3 } from "@/components/workbench/presentation/WorkbenchManualChartDomainV3";
 import { nextZeroBasedPvDomainV3, workbenchPvLoopDomainPointsV3 } from "@/components/workbench/presentation/PressureVolumeLoopCanvasV3";
+import { pvCompactPressureAxisTitleV3, pvPressureAxisTitleV3 } from "@/components/workbench/presentation/PressureVolumeLoopCanvasV3";
 
 import {
   WORKBENCH_PRESENTATION_SAMPLE_CAPACITY_V3,
@@ -1771,3 +1772,20 @@ function structuralOrientationV3(
     limitations: [],
   };
 }
+
+describe("PV pressure axis titles keep the pressure basis", () => {
+  const trace = (chamberLabel: string, pressureBasis: "transmural" | "intracavitary") => ({ chamberLabel, pressureBasis }) as never;
+  it("names the basis in full and compact form, and claims none for mixed bases", () => {
+    expect(pvPressureAxisTitleV3([trace("LV", "transmural")])).toBe("LV transmural pressure (mmHg)");
+    expect(pvCompactPressureAxisTitleV3([trace("LV", "transmural")])).toBe("LV Ptm (mmHg)");
+    expect(pvPressureAxisTitleV3([trace("LV", "intracavitary"), trace("LV", "intracavitary")])).toBe("LV intracavitary pressure (mmHg)");
+    expect(pvCompactPressureAxisTitleV3([trace("LV", "intracavitary")])).toBe("LV Pic (mmHg)");
+    // Several chambers keep the basis but drop the chamber name.
+    expect(pvPressureAxisTitleV3([trace("LV", "transmural"), trace("RV", "transmural")])).toBe("transmural pressure (mmHg)");
+    expect(pvCompactPressureAxisTitleV3([trace("LV", "transmural"), trace("RV", "transmural")])).toBe("Ptm (mmHg)");
+    // Mixed bases never present one basis, in either form.
+    expect(pvPressureAxisTitleV3([trace("LV", "transmural"), trace("LV", "intracavitary")])).toBe("Pressure (mmHg)");
+    expect(pvCompactPressureAxisTitleV3([trace("LV", "transmural"), trace("LV", "intracavitary")])).toBe("LV P (mmHg)");
+    expect(pvCompactPressureAxisTitleV3([])).toBe("P (mmHg)");
+  });
+});
