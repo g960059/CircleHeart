@@ -183,8 +183,6 @@
       "mobileGraphViews": "Graph views",
       "mobileEditGraphView": "Edit graph view {{title}}",
       "mobileAddGraphView": "Add graph view",
-      "mobileFocusGraph": "Focus graph",
-      "mobileShowTasks": "Show task deck",
       "mobileTaskDeck": "Workbench tasks",
       "mobileControlGroups": "Control groups",
       "mobileMetricGroups": "Metric groups",

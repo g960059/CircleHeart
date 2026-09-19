@@ -2,8 +2,6 @@ import React from "react";
 import { WorkbenchPaneSettingsButtonV3 } from "./WorkbenchPaneSettingsButtonV3";
 import {
   ChevronDown,
-  ChevronsDown,
-  ChevronsUp,
   Plus,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -128,7 +126,6 @@ export function WorkbenchMobileStageDeckV3({
 }: WorkbenchMobileStageDeckPropsV3) {
   const { t } = useTranslation();
   const [activeTask, setActiveTask] = React.useState<WorkbenchMobileTaskV3>("control");
-  const [graphFocused, setGraphFocused] = React.useState(false);
   const [graphPaneId, setGraphPaneId] = useReconciledPaneSelectionV3(graphPanes);
   // The first controller pane opens; the rest wait one tap away. Output panes
   // open so every measurement is a toggle for the observation.
@@ -164,10 +161,6 @@ export function WorkbenchMobileStageDeckV3({
       toggleLabel: (label, selected) => t(selected ? "workbench.live.unobserveOutput" : "workbench.live.observeOutput", { label }),
     };
 
-  const chooseTask = (task: WorkbenchMobileTaskV3) => {
-    setActiveTask(task);
-    setGraphFocused(false);
-  };
   const addPane = (area: "control" | "output", anchor: HTMLElement) => {
     const request = area === "control" ? onAddControlPane : onAddOutputPane;
     request(anchor, (paneId) => (area === "control" ? openControlPane : openOutputPane)(paneId));
@@ -176,7 +169,6 @@ export function WorkbenchMobileStageDeckV3({
   return (
     <main
       className="workbench-mobile-stage-deck"
-      data-graph-focused={graphFocused ? "true" : "false"}
       data-testid="workbench-mobile-stage-deck"
     >
       <section
@@ -191,8 +183,6 @@ export function WorkbenchMobileStageDeckV3({
           addOptions={graphAddOptions}
           onSelectPane={setGraphPaneId}
           onAddOption={(anchor) => onAddGraphPane(anchor, setGraphPaneId)}
-          graphFocused={graphFocused}
-          onToggleGraphFocus={() => setGraphFocused((current) => !current)}
         />
         <div
           id={`${tabId}-graph-panel`}
@@ -206,7 +196,7 @@ export function WorkbenchMobileStageDeckV3({
         </div>
       </section>
 
-      {!graphFocused && observedCount > 0 && (
+      {observedCount > 0 && (
         <ExperimentObservationV3
           className="workbench-mobile-observation"
           groups={observedGroups}
@@ -233,49 +223,47 @@ export function WorkbenchMobileStageDeckV3({
               aria-controls={`${tabId}-${task}-panel`}
               aria-selected={activeTask === task}
               className="workbench-mobile-task-tab"
-              onClick={() => chooseTask(task)}
+              onClick={() => setActiveTask(task)}
             >
               {t(`workbench.live.mobileTaskTabs.${task}`)}
             </button>
           ))}
         </div>
 
-        {!graphFocused && (
-          <div
-            id={`${tabId}-${activeTask}-panel`}
-            role="tabpanel"
-            aria-labelledby={`${tabId}-${activeTask}-tab`}
-            className="workbench-mobile-task-scroll"
-            data-testid="workbench-mobile-task-scroll"
-          >
-            {activeTask === "control" ? (
-              <MobilePaneListV3
-                area="control"
-                panes={controlPanes}
-                collapsedPaneIds={collapsedControlPaneIds}
-                renderPane={renderControlPane}
-                onTogglePane={toggleControlPane}
-                onOpenPaneSettings={onOpenPaneSettings}
-                onAddPane={(anchor) => addPane("control", anchor)}
-              />
-            ) : activeTask === "output" ? (
-              <MobilePaneListV3
-                area="output"
-                panes={outputPanes}
-                collapsedPaneIds={collapsedOutputPaneIds}
-                renderPane={(pane) => renderOutputPane(pane, outputSelectionFor(pane))}
-                onTogglePane={toggleOutputPane}
-                onOpenPaneSettings={onOpenPaneSettings}
-                onAddPane={(anchor) => addPane("output", anchor)}
-              />
-            ) : (
-              <div className="min-h-full">
-                {scenarioError}
-                {scenarioContent}
-              </div>
-            )}
-          </div>
-        )}
+        <div
+          id={`${tabId}-${activeTask}-panel`}
+          role="tabpanel"
+          aria-labelledby={`${tabId}-${activeTask}-tab`}
+          className="workbench-mobile-task-scroll"
+          data-testid="workbench-mobile-task-scroll"
+        >
+          {activeTask === "control" ? (
+            <MobilePaneListV3
+              area="control"
+              panes={controlPanes}
+              collapsedPaneIds={collapsedControlPaneIds}
+              renderPane={renderControlPane}
+              onTogglePane={toggleControlPane}
+              onOpenPaneSettings={onOpenPaneSettings}
+              onAddPane={(anchor) => addPane("control", anchor)}
+            />
+          ) : activeTask === "output" ? (
+            <MobilePaneListV3
+              area="output"
+              panes={outputPanes}
+              collapsedPaneIds={collapsedOutputPaneIds}
+              renderPane={(pane) => renderOutputPane(pane, outputSelectionFor(pane))}
+              onTogglePane={toggleOutputPane}
+              onOpenPaneSettings={onOpenPaneSettings}
+              onAddPane={(anchor) => addPane("output", anchor)}
+            />
+          ) : (
+            <div className="min-h-full">
+              {scenarioError}
+              {scenarioContent}
+            </div>
+          )}
+        </div>
       </section>
     </main>
   );
@@ -288,8 +276,6 @@ function MobileGraphViewRailV3({
   addOptions,
   onSelectPane,
   onAddOption,
-  graphFocused,
-  onToggleGraphFocus,
 }: Readonly<{
   tabId: string;
   panes: readonly WorkbenchPaneDefinitionV3[];
@@ -297,8 +283,6 @@ function MobileGraphViewRailV3({
   addOptions: readonly WorkbenchAddPaneOptionV3[];
   onSelectPane: (paneId: string) => void;
   onAddOption: (anchor: HTMLElement) => void;
-  graphFocused: boolean;
-  onToggleGraphFocus: () => void;
 }>) {
   const { t } = useTranslation();
   const tabRefs = React.useRef(new Map<string, HTMLButtonElement>());
@@ -349,8 +333,8 @@ function MobileGraphViewRailV3({
           );
         })}
       </div>
-      <div className="workbench-mobile-graph-view-actions">
-        {addOptions.length > 0 && (
+      {addOptions.length > 0 && (
+        <div className="workbench-mobile-graph-view-actions">
           <button
             type="button"
             className="workbench-mobile-graph-view-action"
@@ -360,19 +344,8 @@ function MobileGraphViewRailV3({
           >
             <Plus className="h-4 w-4" aria-hidden="true" />
           </button>
-        )}
-        <button
-          type="button"
-          className="workbench-mobile-graph-view-action"
-          aria-label={t(graphFocused ? "workbench.live.mobileShowTasks" : "workbench.live.mobileFocusGraph")}
-          aria-pressed={graphFocused}
-          onClick={onToggleGraphFocus}
-        >
-          {graphFocused
-            ? <ChevronsDown className="h-4 w-4" aria-hidden="true" />
-            : <ChevronsUp className="h-4 w-4" aria-hidden="true" />}
-        </button>
-      </div>
+        </div>
+      )}
     </div>
   );
 }

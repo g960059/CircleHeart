@@ -1765,11 +1765,7 @@ test("@mobile 390px Workbench uses a live Stage and one-scroll task deck", async
     page.getByRole("slider", { name: "HR" }),
   ).toBeHidden();
   await controlGroupToggle.click();
-  await graphRail.getByRole("button", { name: "グラフを拡大" }).click();
-  await expect(mobileShell).toHaveAttribute("data-graph-focused", "true");
-  await expect(taskScroll).toHaveCount(0);
   await taskDeck.getByRole("tab", { name: "出力" }).click();
-  await expect(mobileShell).toHaveAttribute("data-graph-focused", "false");
   const outputGroup = taskDeck.locator(
     '[data-mobile-pane-group-role="output"]',
   ).first();

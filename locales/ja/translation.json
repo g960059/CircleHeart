@@ -183,8 +183,6 @@
       "mobileGraphViews": "グラフビュー",
       "mobileEditGraphView": "グラフビュー「{{title}}」を編集",
       "mobileAddGraphView": "グラフビューを追加",
-      "mobileFocusGraph": "グラフを拡大",
-      "mobileShowTasks": "操作パネルを表示",
       "mobileTaskDeck": "操作パネル",
       "mobileControlGroups": "コントロールグループ",
       "mobileMetricGroups": "出力グループ",

@@ -312,7 +312,6 @@ body[data-app-theme="light"] {
   overflow: hidden;
   background: var(--wb-zone-aux-bg);
 }
-.workbench-mobile-stage-deck[data-graph-focused="true"] { grid-template-rows: minmax(0, 1fr) auto auto; }
 .workbench-mobile-stage-deck > .workbench-mobile-stage { grid-row: 1; }
 .workbench-mobile-stage-deck > .workbench-mobile-task-deck { grid-row: 3; }
 
@@ -713,7 +712,6 @@ body[data-app-theme="light"] {
   /* Short phones: the plot keeps close to half the screen, one observation
      group stays, and the deck's chrome tightens so the first control is in reach. */
   .workbench-mobile-stage-deck { grid-template-rows: clamp(14rem, 45dvh, 17.5rem) auto minmax(0, 1fr); }
-  .workbench-mobile-stage-deck[data-graph-focused="true"] { grid-template-rows: minmax(0, 1fr) auto auto; }
   .workbench-mobile-observation { max-block-size: 5.5rem; padding-block: 0.125rem; }
   .workbench-mobile-task-tabs { margin-block: 0.25rem 0; }
   .workbench-mobile-task-tab { min-block-size: 1.9rem; }
@@ -743,7 +741,6 @@ body[data-app-theme="light"] {
 .workbench-mobile-pane-group-body .workbench-control-label { font-size: 0.875rem; font-weight: 500; }
 .workbench-mobile-pane-group-body .workbench-control-value { font-size: 0.9375rem; }
 .workbench-mobile-pane-group-body .workbench-output-label { color: var(--wb-text-muted); font-size: 0.75rem; font-weight: 450; }
-.workbench-mobile-pane-group-body .workbench-output-value { font-size: 1rem; font-weight: 600; }
 .workbench-mobile-observation .experiment-observation-heading { font-size: 0.75rem; }
 
 /* Phones held sideways: the graph takes the left column at full height;
@@ -771,10 +768,6 @@ body[data-app-theme="light"] {
   .workbench-mobile-pane-group-header,
   .workbench-mobile-pane-group-toggle { min-block-size: 2rem; }
   .workbench-mobile-pane-group-body .workbench-pane-context-row { padding-block: 0; }
-  /* Graph focus: the plot spans the width; only the deck's switch remains beside it. */
-  .workbench-mobile-stage-deck[data-graph-focused="true"] { grid-template-columns: minmax(0, 1fr) 11rem; grid-template-rows: minmax(0, 1fr); }
-  .workbench-mobile-stage-deck[data-graph-focused="true"] > .workbench-mobile-stage { grid-row: 1; }
-  .workbench-mobile-stage-deck[data-graph-focused="true"] > .workbench-mobile-task-deck { grid-row: 1; }
 }
 
 @media (max-width: 1023px) {
@@ -1037,6 +1030,13 @@ body[data-app-theme="light"] {
   font-size: var(--wb-type-caption);
   font-weight: var(--wb-weight-regular);
   letter-spacing: 0;
+}
+
+/* Measurements use the same type scale as direct controller inputs. */
+.workbench-mobile-stage-deck .workbench-output-value,
+.article-reader-embed .workbench-output-value {
+  font-size: var(--wb-type-body);
+  font-weight: 400;
 }
 
 .workbench-output-item[data-output-stale="true"] .workbench-output-value {
@@ -3189,7 +3189,7 @@ body[data-app-theme="light"] .public-static-theme-moon {
 /* Tiles carry no dividers: label above value is rhythm enough. */
 .workbench-observation-grid .workbench-output-item { flex: 0 1 auto; min-inline-size: 4.75rem; max-inline-size: 9rem; padding: 0.2rem 0.35rem; border: 0; }
 .workbench-observation-grid .workbench-output-label { color: var(--wb-text-muted); font-size: 0.75rem; font-weight: 450; line-height: 1.3; }
-.workbench-observation-grid .workbench-output-value { font-size: 1.0625rem; font-weight: 600; line-height: 1.3; }
+.workbench-observation-grid .workbench-output-value { line-height: 1.3; }
 .workbench-observation-grid .workbench-output-unit { font-size: 0.6875rem; }
 /* Measurement tiles keep their own rhythm inside Article prose. */
 .article-reader-embed .workbench-output-item > p,
@@ -3249,7 +3249,6 @@ body[data-app-theme="light"] .public-static-theme-moon {
 @container article-embed (max-width: 22rem) {
   /* Three measurements per row on the narrowest phones keep the controls in reach. */
   .workbench-observation-grid .workbench-output-item { min-inline-size: 4.25rem; padding-inline: 0.25rem; }
-  .workbench-observation-grid .workbench-output-value { font-size: 0.95rem; }
   .experiment-observation-group:has(> .experiment-observation-heading) { grid-template-columns: minmax(3.25rem, 4.75rem) minmax(0, 1fr); }
 }
 
@@ -3324,7 +3323,6 @@ body[data-app-theme="light"] .public-static-theme-moon {
 }
 .article-reader-outputs .workbench-output-item { flex: 1 1 6.5rem; min-inline-size: 0; max-inline-size: 10rem; padding: 0.15rem 0.3rem; }
 .article-reader-outputs .workbench-output-label { font-size: 0.75rem; line-height: 1.3; }
-.article-reader-outputs .workbench-output-value { font-size: 1rem; }
 .article-reader-embed .workbench-output-item,
 .article-reader-embed .workbench-control-row,
 .article-reader-embed .article-reader-section-body { border: 0; }
