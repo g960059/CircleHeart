@@ -324,9 +324,16 @@ body[data-app-theme="light"] {
   background: var(--wb-zone-main-bg);
 }
 .workbench-mobile-stage-plot { min-block-size: 0; flex: 1 1 auto; overflow: hidden; background: var(--wb-canvas-bg, var(--wb-zone-main-bg)); }
-/* The plot takes what the stage leaves and never exceeds it. */
+/* The plot takes what the stage leaves and never exceeds it. The legend keeps
+   to one line that scrolls sideways, so a third Scenario costs no plot height. */
 .workbench-mobile-stage [data-chart-kind],
 .workbench-mobile-stage [data-workbench-graph-pane] .min-h-52 { min-block-size: 0; }
+.workbench-mobile-stage [data-experiment-graph-presentation="pane"] { padding: 0.35rem 0.5rem 0.25rem; }
+.workbench-mobile-stage [data-chart-legend-row] { padding-inline: 0.25rem; }
+.workbench-mobile-stage [data-legend-expanded] { max-block-size: none; overflow: visible; }
+.workbench-mobile-stage [data-chart-legend] { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.workbench-mobile-stage [data-chart-legend]::-webkit-scrollbar { display: none; }
+.workbench-mobile-stage [data-chart-legend] > * { flex: 0 0 auto; }
 
 /* Graph tabs read above the plot, away from the deck's own switch. */
 .workbench-mobile-graph-view-rail {
@@ -703,10 +710,49 @@ body[data-app-theme="light"] {
 }
 
 @media (max-width: 767px) and (max-height: 680px) {
-  .workbench-mobile-stage-deck { grid-template-rows: clamp(13rem, 40dvh, 17.5rem) auto minmax(0, 1fr); }
+  /* Short phones: the plot keeps close to half the screen, one observation
+     group stays, and the deck's chrome tightens so the first control is in reach. */
+  .workbench-mobile-stage-deck { grid-template-rows: clamp(14rem, 45dvh, 17.5rem) auto minmax(0, 1fr); }
   .workbench-mobile-stage-deck[data-graph-focused="true"] { grid-template-rows: minmax(0, 1fr) auto auto; }
-  /* One observation group stays; the count opens the rest in place. */
-  .workbench-mobile-observation { max-block-size: 5.5rem; }
+  .workbench-mobile-observation { max-block-size: 5.5rem; padding-block: 0.125rem; }
+  .workbench-mobile-task-tabs { margin-block: 0.25rem 0; }
+  .workbench-mobile-task-tab { min-block-size: 1.9rem; }
+  .workbench-mobile-pane-groups { padding-block-start: 0; }
+  .workbench-mobile-pane-group-header,
+  .workbench-mobile-pane-group-toggle { min-block-size: 2rem; }
+  .workbench-mobile-pane-group-body .workbench-pane-context-row { padding-block: 0; }
+  .workbench-mobile-pane-group-body .workbench-control-row { padding-block: 0.3rem; }
+}
+
+/* Phones held sideways: the graph takes the left column at full height;
+   the observation and the deck share the right column, so graph, observed
+   values and the current control stay on one screen. */
+@media (max-height: 520px) and (orientation: landscape) {
+  .workbench-mobile-stage-deck {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .workbench-mobile-stage-deck > .workbench-mobile-stage { grid-column: 1; grid-row: 1 / span 2; }
+  .workbench-mobile-observation {
+    grid-column: 2;
+    grid-row: 1;
+    /* One observation group; the deck below keeps the first control on screen. */
+    max-block-size: 33dvh;
+    border-top: 0;
+    border-left: 1px solid var(--wb-border);
+  }
+  .workbench-mobile-observation[data-observation-expanded="true"] { max-block-size: 72dvh; }
+  .workbench-mobile-stage-deck > .workbench-mobile-task-deck { grid-column: 2; grid-row: 2; border-top: 0; border-left: 1px solid var(--wb-border); }
+  .workbench-mobile-observation + .workbench-mobile-task-deck { border-top: 1px solid var(--wb-border); }
+  .workbench-mobile-task-tabs { margin: 0.25rem 0.5rem 0; }
+  .workbench-mobile-task-tab { min-block-size: 1.9rem; }
+  .workbench-mobile-pane-group-header,
+  .workbench-mobile-pane-group-toggle { min-block-size: 2rem; }
+  .workbench-mobile-pane-group-body .workbench-pane-context-row { padding-block: 0; }
+  /* Graph focus: the plot spans the width; only the deck's switch remains beside it. */
+  .workbench-mobile-stage-deck[data-graph-focused="true"] { grid-template-columns: minmax(0, 1fr) 11rem; grid-template-rows: minmax(0, 1fr); }
+  .workbench-mobile-stage-deck[data-graph-focused="true"] > .workbench-mobile-stage { grid-row: 1; }
+  .workbench-mobile-stage-deck[data-graph-focused="true"] > .workbench-mobile-task-deck { grid-row: 1; }
 }
 
 @media (max-width: 1023px) {
@@ -3132,16 +3178,26 @@ body[data-app-theme="light"] .public-static-theme-moon {
   padding-inline: 0.75rem;
   border-block-end: 1px solid var(--wb-line);
 }
-.article-reader-observation[data-observation-expanded="true"] { max-block-size: 70vh; }
-.experiment-observation-more {
+.article-reader-embed[data-reader-layout="peek"] .article-reader-observation[data-observation-expanded="true"] { max-block-size: 55vh; }
+.article-reader-embed[data-reader-layout="sheet"] .article-reader-observation[data-observation-expanded="true"] { max-block-size: none; }
+/* The count sits in a bar pinned to the strip's bottom edge. The groups
+   reserve its height, so no tile is ever covered and the last row scrolls
+   into view above it. */
+.experiment-observation-bar {
   position: sticky;
-  inset-block-end: 0.25rem;
-  float: inline-end;
+  inset-block-end: 0;
+  inset-inline: 0;
+  display: flex;
+  justify-content: flex-end;
+  margin-inline: -0.5rem;
+  padding: 0.125rem 0.5rem 0.25rem;
+  background: linear-gradient(to top, var(--wb-floating-bg) 70%, transparent);
+}
+.experiment-observation-more {
   display: inline-flex;
   min-block-size: 1.75rem;
   align-items: center;
   gap: 0.15rem;
-  margin: 0.25rem 0 0.125rem 0.5rem;
   padding-inline: 0.6rem 0.4rem;
   border: 1px solid var(--wb-border-strong);
   border-radius: 999px;
@@ -3149,17 +3205,19 @@ body[data-app-theme="light"] .public-static-theme-moon {
   color: var(--wb-text);
   font-size: 0.6875rem;
   font-weight: 600;
-  box-shadow: 0 1px 4px rgb(2 8 23 / 12%);
 }
 .experiment-observation-more svg { transition: transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .experiment-observation-more[aria-expanded="true"] svg { transform: rotate(90deg); }
 .experiment-observation-more:hover { background: var(--wb-hover-bg); }
-/* The sticky count never hides the last row: it gets its own space at the end. */
-.experiment-observation[data-observation-overflow="true"] .experiment-observation-groups,
-.experiment-observation[data-observation-expanded="true"] .experiment-observation-groups { padding-block-end: 2.25rem; }
 .experiment-observation-more:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--wb-accent); }
-.article-reader-embed[data-reader-layout="inline"] .experiment-observation-more,
-.article-reader-embed[data-reader-layout="workbench"] .experiment-observation-more { display: none; }
+.article-reader-embed[data-reader-layout="inline"] .experiment-observation-bar,
+.article-reader-embed[data-reader-layout="workbench"] .experiment-observation-bar { display: none; }
+/* Expanded in the phone sheet: the strip takes the height the graph leaves,
+   its collapse bar stays at its bottom edge, and the deck keeps a small,
+   scrollable remainder so the current control is one swipe away. */
+.article-reader-embed[data-reader-layout="sheet"]:has(.article-reader-observation[data-observation-expanded="true"]) .article-reader-deck { flex: 0 1 6rem; }
+.article-reader-embed[data-reader-layout="sheet"] .article-reader-observation[data-observation-expanded="true"] { flex: 1 1 auto; min-block-size: 0; }
+.workbench-mobile-observation .experiment-observation-bar { background: linear-gradient(to top, var(--wb-zone-main-bg) 70%, transparent); }
 .article-reader-embed[data-reader-layout="sheet"] .article-reader-observation { padding-inline: 0.625rem; }
 .article-reader-embed[data-reader-layout="inline"] .article-reader-observation { padding-inline: 0.5rem; }
 @container article-embed (max-width: 22rem) {
@@ -3288,8 +3346,7 @@ body[data-app-theme="light"] .public-static-theme-moon {
   .article-reader-embed[data-reader-layout="peek"] { --reader-stage-height: clamp(9.5rem, 30vh, 15rem); }
   .article-reader-embed[data-reader-layout="peek"] .article-reader-observation,
   .article-reader-embed[data-reader-layout="sheet"] .article-reader-observation { max-block-size: 8.25rem; }
-  .article-reader-embed[data-reader-layout="peek"] .article-reader-observation[data-observation-expanded="true"],
-  .article-reader-embed[data-reader-layout="sheet"] .article-reader-observation[data-observation-expanded="true"] { max-block-size: 55dvh; }
+  .article-reader-embed[data-reader-layout="peek"] .article-reader-observation[data-observation-expanded="true"] { max-block-size: 55dvh; }
 }
 /* Very short screens: one observation group stays beside the current control; the count opens the rest. */
 @media (max-height: 600px) {

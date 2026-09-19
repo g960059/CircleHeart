@@ -5,7 +5,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { chromium } from "@playwright/test";
 
-const [origin = "http://127.0.0.1:3037", outputDir = "/tmp/embed-study-shots", phaseList = "desktop,light,mobile,small,landscape,workbench"] = process.argv.slice(2);
+const [origin = "http://127.0.0.1:3037", outputDir = "/tmp/embed-study-shots", phaseList = "desktop,light,mobile,small,landscape,workbench,rotation"] = process.argv.slice(2);
 const phases = new Set(phaseList.split(","));
 await mkdir(outputDir, { recursive: true });
 const browser = await chromium.launch();
@@ -234,12 +234,20 @@ async function phone(name, viewport, { landscape = false } = {}) {
   const long = await loop(page, panel);
   record(`${name}-loop-long`, { ...long, more: await panel.locator("[data-observation-more]").allTextContents(),
     observationScrollable: await panel.locator("[data-reader-observation]").evaluate((el) => el.scrollHeight > el.clientHeight + 1) });
+  const affordance = () => panel.locator("[data-observation-more]").evaluate((el) => {
+    const r = el.getBoundingClientRect(); const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return { y: Math.round(r.y), bottom: Math.round(r.bottom), inViewport: r.y >= 0 && r.bottom <= window.innerHeight, visibleAtCenter: !!top && (el.contains(top) || top.contains(el)) };
+  }).catch(() => null);
+  record(`${name}-loop-long-affordance`, { affordance: await affordance() });
   if (await panel.locator("[data-observation-more]").count()) {
     await panel.locator("[data-observation-more]").click();
     await page.waitForTimeout(500);
     await page.screenshot({ path: join(outputDir, `${name}-loop-long-expanded.png`) });
     record(`${name}-loop-long-expanded`, { ...(await loop(page, panel)), expanded: await panel.locator("[data-reader-observation]").getAttribute("data-observation-expanded"),
-      observationScrollable: await panel.locator("[data-reader-observation]").evaluate((el) => el.scrollHeight > el.clientHeight + 1) });
+      affordance: await affordance(), observationScrollable: await panel.locator("[data-reader-observation]").evaluate((el) => el.scrollHeight > el.clientHeight + 1) });
+    await panel.locator("[data-observation-more]").click();
+    await page.waitForTimeout(300);
+    record(`${name}-loop-long-collapsed`, { expanded: await panel.locator("[data-reader-observation]").getAttribute("data-observation-expanded") });
   }
   await context.close();
   return errors;
@@ -290,9 +298,128 @@ async function workbench() {
     const rail = stage.querySelector("[data-testid='workbench-mobile-graph-view-rail']");
     return { stage: rect(stage), rail: rail ? rect(rail) : null, chart: chart ? { ...rect(chart), scrollHeight: chart.scrollHeight, clientHeight: chart.clientHeight } : null, canvas: canvas ? rect(canvas) : null };
   });
-  record("workbench-mobile-small", { ...stageBounds,
+  // The plotting region itself: the grid rectangle inside the canvas, found from its painted grid lines.
+  const plotRegion = await page.getByTestId("workbench-mobile-stage").locator("canvas").first().evaluate((canvas) => {
+    const context = canvas.getContext("2d");
+    const { width, height } = canvas;
+    const data = context.getImageData(0, 0, width, height).data;
+    const lum = (x, y) => { const i = (y * width + x) * 4; return data[i] + data[i + 1] + data[i + 2]; };
+    const background = lum(2, 2);
+    const differs = (x, y) => Math.abs(lum(x, y) - background) > 24;
+    // Column and row occupancy of any non-background paint.
+    const cols = Array.from({ length: width }, (_, x) => { let n = 0; for (let y = 0; y < height; y += 1) if (differs(x, y)) n += 1; return n; });
+    const rows = Array.from({ length: height }, (_, y) => { let n = 0; for (let x = 0; x < width; x += 1) if (differs(x, y)) n += 1; return n; });
+    const scale = canvas.width / canvas.getBoundingClientRect().width;
+    // Grid frame: the leftmost/rightmost columns and top/bottom rows painted along most of their length.
+    const gridCols = cols.map((n, x) => n > height * 0.4 ? x : -1).filter((x) => x >= 0);
+    const gridRows = rows.map((n, y) => n > width * 0.4 ? y : -1).filter((y) => y >= 0);
+    return { cssWidth: Math.round(width / scale), cssHeight: Math.round(height / scale),
+      plot: gridCols.length && gridRows.length ? { left: Math.round(gridCols[0] / scale), right: Math.round(gridCols.at(-1) / scale), top: Math.round(gridRows[0] / scale), bottom: Math.round(gridRows.at(-1) / scale),
+        width: Math.round((gridCols.at(-1) - gridCols[0]) / scale), height: Math.round((gridRows.at(-1) - gridRows[0]) / scale) } : null };
+  });
+  const affordance = async (scope) => scope.locator("[data-observation-more]").evaluate((el) => {
+    const r = el.getBoundingClientRect(); const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return { y: Math.round(r.y), bottom: Math.round(r.bottom), visibleAtCenter: !!top && (el.contains(top) || top.contains(el)) };
+  }).catch(() => null);
+  record("workbench-mobile-small", { ...stageBounds, plotRegion,
     plotInsideStage: stageBounds.canvas !== null && stageBounds.canvas.bottom <= stageBounds.stage.bottom && stageBounds.canvas.top >= (stageBounds.rail?.bottom ?? 0),
-    firstSlider: await box(page.getByRole("slider").first()), overflow: await overflow(page) });
+    firstSlider: await box(page.getByRole("slider").first()), affordance: await affordance(page), overflow: await overflow(page) });
+  // Expanding the count keeps its collapse target on screen; collapsing returns.
+  if (await page.locator("[data-observation-more]").count()) {
+    await page.locator("[data-observation-more]").click();
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: join(outputDir, "workbench-mobile-small-expanded.png") });
+    record("workbench-mobile-small-expanded", { affordance: await affordance(page), expanded: await page.getByTestId("workbench-mobile-observation").getAttribute("data-observation-expanded") });
+    await page.locator("[data-observation-more]").click();
+    await page.waitForTimeout(300);
+    record("workbench-mobile-small-collapsed", { expanded: await page.getByTestId("workbench-mobile-observation").getAttribute("data-observation-expanded") });
+  }
+  await context.close();
+  return errors;
+}
+
+/**
+ * A touch phone rotated portrait → landscape → portrait keeps the phone shell,
+ * its graph choice, observed selection, control values and targets, with no
+ * analysis requested merely by rotating.
+ */
+async function rotation() {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  await context.addInitScript(() => {
+    window.__workerMessages = [];
+    const Native = window.Worker;
+    window.Worker = class extends Native {
+      postMessage(message, ...rest) {
+        if (message?.kind !== "advance-presentation" && message?.kind !== "advance") window.__workerMessages.push({ kind: message?.kind, scenarioId: message?.scenarioId, scenarioIds: message?.scenarioIds, controlId: message?.controlId, value: message?.value });
+        return super.postMessage(message, ...rest);
+      }
+    };
+  });
+  const page = await context.newPage();
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await seed(page);
+  await page.goto(`${origin}/ja/snapshots/snapshot%2Fdev-article-embed-study-v3`);
+  await page.getByTestId("workbench-mobile-observation").waitFor({ timeout: 180_000 });
+  await page.waitForTimeout(2500);
+  const stripIds = () => page.locator("[data-testid='workbench-mobile-observation'] [data-output-id]").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-output-id")));
+  const analysisRequests = () => page.evaluate(() => window.__workerMessages.filter((m) => m.kind === "request-analysis").length);
+  const state = async () => {
+    const viewport = page.viewportSize();
+    const inside = (b) => b !== null && b.y >= 0 && b.bottom <= viewport.height && b.x >= 0 && b.x + b.width <= viewport.width;
+    const stage = page.getByTestId("workbench-mobile-stage");
+    const plot = await stage.locator("canvas").first().evaluate((canvas) => {
+      const r = canvas.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height), bottom: Math.round(r.bottom) };
+    }).catch(() => null);
+    const slider = await box(page.getByRole("slider").first());
+    return {
+      viewport, shell: await page.getByTestId("workbench-mobile-stage-deck").count(),
+      graphTab: await stage.locator("[role='tab'][aria-selected='true']").first().textContent().catch(() => null),
+      observed: await stripIds(), plot, plotInside: inside(plot), slider, sliderInside: inside(slider),
+      sliderValue: await page.getByRole("slider").first().inputValue().catch(() => null),
+      controlTarget: await page.locator("[data-mobile-pane-group-role='control'] [data-testid^='control-pane-binding-']").first().textContent().catch(() => null),
+      settingsReachable: await page.locator("[data-mobile-pane-group-role='control'] [data-testid='pane-settings-button-v3']").count(),
+      addPane: await page.locator(".workbench-mobile-pane-group-add").count(),
+      analysisRequests: await analysisRequests(), overflow: await overflow(page),
+    };
+  };
+  // Choose the second graph, adjust the observation, and move the first control.
+  await page.getByTestId("workbench-mobile-stage").locator("[role='tab']").nth(1).click();
+  await page.getByRole("tab", { name: "出力" }).click();
+  await page.waitForTimeout(500);
+  await page.locator("[data-mobile-pane-groups='output'] .workbench-output-toggle").first().click();
+  await page.getByRole("tab", { name: "コントロール" }).click();
+  await page.waitForTimeout(500);
+  await page.locator("[data-reader-runtime-status], [data-playback]").first().waitFor().catch(() => {});
+  const slider = page.getByRole("slider").first();
+  await slider.evaluate((el) => { el.value = String(Number(el.min) + (Number(el.max) - Number(el.min)) * 0.45); el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true })); });
+  await page.waitForTimeout(3000);
+  const portrait = await state();
+  await page.screenshot({ path: join(outputDir, "rotation-portrait.png") });
+  record("rotation-portrait", portrait);
+  await page.setViewportSize({ width: 844, height: 390 });
+  await page.waitForTimeout(1200);
+  const landscape = await state();
+  await page.screenshot({ path: join(outputDir, "rotation-landscape.png") });
+  record("rotation-landscape", { ...landscape,
+    kept: { graph: landscape.graphTab === portrait.graphTab, observed: JSON.stringify(landscape.observed) === JSON.stringify(portrait.observed), slider: landscape.sliderValue === portrait.sliderValue, target: landscape.controlTarget === portrait.controlTarget, noNewAnalysis: landscape.analysisRequests === portrait.analysisRequests } });
+  // Expand/collapse the count and open settings while sideways.
+  if (await page.locator("[data-observation-more]").count()) {
+    await page.locator("[data-observation-more]").click(); await page.waitForTimeout(300);
+    record("rotation-landscape-expanded", { expanded: await page.getByTestId("workbench-mobile-observation").getAttribute("data-observation-expanded"), affordance: await box(page.locator("[data-observation-more]")) });
+    await page.locator("[data-observation-more]").click(); await page.waitForTimeout(300);
+  }
+  await page.locator("[data-mobile-pane-group-role='control'] [data-testid^='control-pane-binding-']").first().click();
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: join(outputDir, "rotation-landscape-binding.png") });
+  record("rotation-landscape-binding-sheet", { dialog: await page.getByRole("dialog").count() });
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(400);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(1200);
+  const back = await state();
+  record("rotation-portrait-again", { ...back,
+    kept: { graph: back.graphTab === portrait.graphTab, observed: JSON.stringify(back.observed) === JSON.stringify(portrait.observed), slider: back.sliderValue === portrait.sliderValue, target: back.controlTarget === portrait.controlTarget, noNewAnalysis: back.analysisRequests === portrait.analysisRequests } });
   await context.close();
   return errors;
 }
@@ -359,6 +486,7 @@ const runners = {
   small: ["small", () => phone("small-320x568", { width: 320, height: 568 })],
   landscape: ["landscape", () => phone("landscape-844x390", { width: 844, height: 390 }, { landscape: true })],
   workbench: ["workbench", () => workbench()],
+  rotation: ["rotation", () => rotation()],
   editor: ["editor", () => editor()],
 };
 for (const [phase, [key, run]] of Object.entries(runners)) {

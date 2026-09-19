@@ -459,8 +459,16 @@ function MobileEmptyPaneV3({ message }: Readonly<{ message: string }>) {
   );
 }
 
+/**
+ * The phone shell serves phone-width viewports and touch devices held in
+ * landscape (wide but short). A mouse-driven desktop window of the same
+ * short height keeps the Dockview arrangement.
+ */
+export const MOBILE_WORKBENCH_SHELL_QUERY_V3 =
+  "(max-width: 767px), ((pointer: coarse) and (max-width: 1023px) and (max-height: 520px))";
+
 export function useMobileWorkbenchShellV3(): boolean {
-  const query = "(max-width: 767px)";
+  const query = MOBILE_WORKBENCH_SHELL_QUERY_V3;
   const [matches, setMatches] = React.useState(() =>
     typeof window !== "undefined" && window.matchMedia(query).matches);
   React.useEffect(() => {

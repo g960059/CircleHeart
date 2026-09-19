@@ -628,7 +628,11 @@ export function PressureVolumeLoopCanvasV3(
   ) => {
     const theme = readPvCanvasThemeV3(containerRef.current);
     context.font = theme.font;
-    const pressureAxisLines = wrapPvAxisTitleV3(context, pressureAxisTitle, Math.max(40, height - 56));
+    // A short canvas (phone stage) cannot afford a wrapped multi-column title
+    // beside the plot; it reads the compact title on one line instead.
+    const pressureAxisLines = height < PV_COMPACT_AXIS_TITLE_HEIGHT_PX_V3
+      ? [pvCompactPressureAxisTitleV3(traces)]
+      : wrapPvAxisTitleV3(context, pressureAxisTitle, Math.max(40, height - 56));
     const plot = pvPlotRectV3(width, height, pressureAxisLines.length);
     const domainPoints = workbenchPvLoopDomainPointsV3(visibleRenderedTraces);
     volumeDomainStateRef.current = nextZeroBasedPvDomainV3(
@@ -1069,6 +1073,17 @@ function pvPressureAxisTitleV3(
     : "intracavitary pressure";
   const chamber = chambers.size === 1 ? traces[0]?.chamberLabel : undefined;
   return `${chamber === undefined ? "" : `${chamber} `}${basis} (mmHg)`;
+}
+
+/** Below this canvas height the pressure axis title is one compact line. */
+const PV_COMPACT_AXIS_TITLE_HEIGHT_PX_V3 = 200;
+
+function pvCompactPressureAxisTitleV3(
+  traces: readonly WorkbenchPressureVolumeTraceV3[],
+): string {
+  const chambers = new Set(traces.map(({ chamberLabel }) => chamberLabel));
+  const chamber = chambers.size === 1 ? traces[0]?.chamberLabel : undefined;
+  return `${chamber === undefined ? "" : `${chamber} `}P (mmHg)`;
 }
 
 function pvStableDomainCommitKeyV3(

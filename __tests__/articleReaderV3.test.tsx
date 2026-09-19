@@ -26,6 +26,7 @@ import { reconcileWorkbenchBriefingV3 } from "@/components/workbench/WorkbenchBr
 import { ArticleBriefingEditorV3, articleBriefingEditorReferenceHandlersV3 } from "@/components/article/ArticleExperimentPlacementV3";
 import { WorkbenchMobileStageDeckV3 } from "@/components/workbench/WorkbenchMobileStageDeckV3";
 import { WorkbenchLastMeasuredOutputsV1 } from "@/components/workbench/presentation/WorkbenchLastMeasuredOutputsV1";
+import { ExperimentObservationV3 } from "@/components/workbench/ExperimentPanePresentationV3";
 import { workbenchObservedOutputKeyV3 } from "@/components/workbench/presentation/WorkbenchObservationV3";
 import {
   ArticleReaderAnalysisStatusV3,
@@ -1779,7 +1780,7 @@ describe("Article Reader observation rendering", () => {
     expect(html).toContain('data-observed-count="6"');
     // One heading per pane: the following pane says so beside its Scenario; the fixed pane just names it.
     expect(html.match(/data-observation-group=/g)).toHaveLength(2);
-    expect(html).toContain('<span class="experiment-observation-following">連動</span>基準');
+    expect(html).toContain('<span class="experiment-observation-following" data-observation-following="true">連動</span>基準');
     expect(html).toContain('<span class="experiment-observation-title">弁</span>');
     expect(html).not.toContain("data-output-scenario");
     // The graph tabs read above the graph; the control tab is active by default and the strip stays outside the tabs.
@@ -1791,6 +1792,30 @@ describe("Article Reader observation rendering", () => {
     expect(selected).toContain('data-observed-count="2"');
     expect(selected).toContain(`data-output-id="${workbenchObservedOutputKeyV3("pane/b", "b8")}"`);
     expect(render([])).not.toContain('data-testid="workbench-mobile-observation"');
+  });
+
+  it("keeps the following marker whether or not the pane title already names its Scenario", () => {
+    const item = { itemId: "co", outputId: "co", label: "CO", value: 5, unit: "L/min", availability: "available", quality: "assessed" };
+    const render = (title: string | undefined, following: boolean, scenario = "基準") => renderToStaticMarkup(
+      <ExperimentObservationV3
+        groups={[{ key: "g", ...(title === undefined ? {} : { title }), scenario: { label: scenario, colorHex: "#000" }, following, items: [item] }]}
+        label="observation" moreLabel={(count) => `${count}`} followingLabel="連動"
+      />,
+    );
+    // Title equals the Scenario: the name appears once, the mode still shows.
+    const same = render("基準", true);
+    expect(same.match(/基準/g)).toHaveLength(1);
+    expect(same).toContain('data-observation-following="true">連動</span>');
+    // Title contains the Scenario name: no repetition, mode shown.
+    const contains = render("弁（基準）", true);
+    expect(contains.match(/基準/g)).toHaveLength(1);
+    expect(contains).toContain("連動");
+    // Distinct labels: both names, mode shown; a fixed pane shows no mode.
+    const distinct = render("弁", true, "TBV +1000");
+    expect(distinct).toContain('<span class="experiment-observation-title">弁</span>');
+    expect(distinct).toContain("連動</span>TBV +1000");
+    expect(render("基準", false)).not.toContain("連動");
+    expect(render("弁", false, "TBV +1000")).toContain("TBV +1000");
   });
 
   it("edits one of two sealed references of the same pane item without touching its sibling", () => {

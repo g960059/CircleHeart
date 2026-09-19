@@ -279,12 +279,21 @@ export function ExperimentObservationV3({
                   {group.scenario && <span className="workbench-output-scenario-swatch" style={{ backgroundColor: group.scenario.colorHex }} aria-hidden="true" />}
                   <span className="experiment-observation-heading-text">
                     {group.title !== undefined && <span className="experiment-observation-title">{group.title}</span>}
-                    {group.scenario && !(group.title ?? "").includes(group.scenario.label) && (
-                      <span className="experiment-observation-scenario">
-                        {group.following && followingLabel !== undefined && <span className="experiment-observation-following">{followingLabel}</span>}
-                        {group.scenario.label}
-                      </span>
-                    )}
+                    {(() => {
+                      // The Scenario name is not repeated when the pane title already carries
+                      // it; the binding mode is shown regardless, so a following pane never
+                      // reads as fixed.
+                      const scenarioLabel = group.scenario !== undefined && !(group.title ?? "").includes(group.scenario.label)
+                        ? group.scenario.label : undefined;
+                      const following = group.following === true && followingLabel !== undefined ? followingLabel : undefined;
+                      if (scenarioLabel === undefined && following === undefined) return null;
+                      return (
+                        <span className="experiment-observation-scenario">
+                          {following !== undefined && <span className="experiment-observation-following" data-observation-following>{following}</span>}
+                          {scenarioLabel}
+                        </span>
+                      );
+                    })()}
                   </span>
                 </h4>
               )}
@@ -294,16 +303,20 @@ export function ExperimentObservationV3({
         })}
       </div>
       {(overflowing || expanded) && (
-        <button
-          type="button"
-          className="experiment-observation-more"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
-          data-observation-more
-        >
-          {moreLabel(count)}
-          <ChevronRight className="h-3 w-3" aria-hidden="true" />
-        </button>
+        // A bar at the strip's bottom edge, never over a tile: the groups
+        // reserve its height, so the last row scrolls fully into view.
+        <div className="experiment-observation-bar">
+          <button
+            type="button"
+            className="experiment-observation-more"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((current) => !current)}
+            data-observation-more
+          >
+            {moreLabel(count)}
+            <ChevronRight className="h-3 w-3" aria-hidden="true" />
+          </button>
+        </div>
       )}
     </section>
   );
