@@ -137,14 +137,13 @@ function hasCompactObservationV3(briefing: ArticleBriefingPresentationInputV3): 
 }
 
 /**
- * Reading projection for Placements without an explicit form only. An author
- * who sealed `inline` explicitly keeps the whole Briefing in flow; the stage
- * views own its density instead of a hidden trim.
+ * Reading projection for Placements without an explicit form only: the
+ * primary graph reads in flow while supporting graphs wait in Peek. Outputs
+ * are never trimmed; the sealed observation owns their density in every form.
  */
 export function articleBriefingInflowContentV3(briefing: ExperimentPlacementBriefingV2): ExperimentPlacementBriefingV2 {
   if (briefing.presentation !== undefined || !hasCompactObservationV3(briefing)) return briefing;
   const graphs = briefing.graphs.filter(graph => graph.emphasis === "primary");
-  const outputs = [...briefing.outputs].sort((a, b) => a.order - b.order).slice(0, 4);
-  if (graphs.length === briefing.graphs.length && outputs.length === briefing.outputs.length) return briefing;
-  return { ...briefing, graphs, outputs };
+  if (graphs.length === briefing.graphs.length) return briefing;
+  return { ...briefing, graphs };
 }

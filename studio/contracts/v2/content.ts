@@ -360,6 +360,19 @@ export type ExperimentPlacementBriefingGraphV2 = Readonly<{
   overrides?: ExperimentPlacementBriefingGraphOverridesV2;
 }>;
 
+/**
+ * Item-level reading emphasis shared by outputs and controls.
+ *
+ * `primary` items form the observation the reader keeps in view while
+ * operating: they sit beside the graph in every extent. `supporting` items
+ * remain sealed content that the reader opens from the same Placement and may
+ * bring into the observation. Emphasis never changes an item's Scenario
+ * binding, its value, or whether it can be operated. Placements sealed before
+ * item emphasis carry no value; the Reader then derives an initial
+ * observation from the sealed order.
+ */
+export type ExperimentPlacementBriefingItemEmphasisV2 = "primary" | "supporting";
+
 export type ExperimentPlacementBriefingOutputV2 = Readonly<{
   /** Source identity is provenance inside the pinned immutable Snapshot. */
   sourcePaneId: SurfacePaneIdV2;
@@ -369,6 +382,7 @@ export type ExperimentPlacementBriefingOutputV2 = Readonly<{
   scenarioId: ScenarioIdV2;
   label: string;
   order: number;
+  emphasis?: ExperimentPlacementBriefingItemEmphasisV2;
 }>;
 
 export type ExperimentPlacementBriefingControlButtonOptionV2 =
@@ -397,6 +411,7 @@ export type ExperimentPlacementBriefingControlV2 = Readonly<{
   order: number;
   presentation: ExperimentPlacementBriefingControlPresentationV2;
   binding: ExperimentPlacementBriefingControlBindingV2;
+  emphasis?: ExperimentPlacementBriefingItemEmphasisV2;
 }>;
 
 /**

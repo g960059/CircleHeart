@@ -23,11 +23,18 @@ import {
   createArticleExperimentBlockV3,
   defaultArticleBriefingV3,
 } from "@/studio/application/article/ArticleExperimentPlacementV3";
+import {
+  articleBriefingControlKeyV3,
+  articleBriefingOutputKeyV3,
+  withExplicitItemEmphasisV3,
+} from "@/studio/application/article/ArticleBriefingObservationV3";
 import { validateExperimentSnapshotV2 } from "@/studio/application/authoring/StudioExperimentDataV2";
 import {
+  ARTICLE_EMBED_STUDY_CONTROL_IDS_V1,
   ARTICLE_EMBED_STUDY_SURFACE_V1,
   ARTICLE_EMBED_STUDY_OUTPUT_IDS_V1,
   ARTICLE_EMBED_STUDY_PANE_IDS_V1,
+  ARTICLE_EMBED_STUDY_VALVE_OUTPUT_IDS_V1,
 } from "./embedStudyDefinitionV1";
 
 /**
@@ -43,6 +50,8 @@ export const ARTICLE_EMBED_STUDY_ARTICLE_ID_V1 = "dev-article-embed-study-v3";
 
 const P = ARTICLE_EMBED_STUDY_PANE_IDS_V1;
 const O = ARTICLE_EMBED_STUDY_OUTPUT_IDS_V1;
+const V = ARTICLE_EMBED_STUDY_VALVE_OUTPUT_IDS_V1;
+
 
 type StudyPlacementV1 = Readonly<{
   placementId: string;
@@ -64,16 +73,17 @@ const onlyGraphs = (briefing: ExperimentPlacementBriefingV2, paneIds: readonly s
   }),
 });
 
+/** Keeps the named outputs of the named panes, in pane order then output order. */
 const onlyOutputs = (
   briefing: ExperimentPlacementBriefingV2,
-  sourcePaneIds: readonly string[],
-  outputIds: readonly string[] = O,
+  selection: readonly Readonly<{ paneId: string; outputIds: readonly string[] }>[],
 ) => ({
   ...briefing,
-  outputs: [...briefing.outputs]
-    .filter((output) => sourcePaneIds.includes(output.sourcePaneId) && outputIds.includes(output.outputId))
-    .sort((left, right) => sourcePaneIds.indexOf(left.sourcePaneId) - sourcePaneIds.indexOf(right.sourcePaneId)
-      || outputIds.indexOf(left.outputId) - outputIds.indexOf(right.outputId))
+  outputs: selection
+    .flatMap(({ paneId, outputIds }) => outputIds.flatMap((outputId) => {
+      const output = briefing.outputs.find((candidate) => candidate.sourcePaneId === paneId && candidate.outputId === outputId);
+      return output === undefined ? [] : [output];
+    }))
     .map((output, order) => ({ ...output, order })),
 });
 
@@ -84,7 +94,45 @@ const onlyControls = (briefing: ExperimentPlacementBriefingV2, sourcePaneIds: re
     .map((control, order) => ({ ...control, order })),
 });
 
+/**
+ * Seals the observation: which outputs and controls stay beside the graph.
+ * Keys name a source pane and item; outputs resolve their sealed Scenario.
+ */
+const withPrimary = (
+  briefing: ExperimentPlacementBriefingV2,
+  outputs: readonly Readonly<{ paneId: string; outputIds: readonly string[] }>[],
+  controls: readonly Readonly<{ paneId: string; controlIds: readonly string[] }>[],
+): ExperimentPlacementBriefingV2 => {
+  const primaryOutputKeys = new Set(outputs.flatMap(({ paneId, outputIds }) => briefing.outputs
+    .filter((output) => output.sourcePaneId === paneId && outputIds.includes(output.outputId))
+    .map(articleBriefingOutputKeyV3)));
+  const primaryControlKeys = new Set(controls.flatMap(({ paneId, controlIds }) =>
+    controlIds.map((controlId) => articleBriefingControlKeyV3({ sourcePaneId: paneId, controlId }))));
+  return {
+    ...briefing,
+    outputs: withExplicitItemEmphasisV3(briefing.outputs, primaryOutputKeys, (output) => articleBriefingOutputKeyV3(output)),
+    controls: withExplicitItemEmphasisV3(briefing.controls, primaryControlKeys, (control) => articleBriefingControlKeyV3(control)),
+  };
+};
+
+/** A legacy reader-focus binding: the reader chooses which Scenario the control drives. */
+const withReaderFocus = (briefing: ExperimentPlacementBriefingV2, controlId: string): ExperimentPlacementBriefingV2 => ({
+  ...briefing,
+  controls: briefing.controls.map((control) => control.controlId === controlId
+    ? { ...control, binding: { mode: "reader-focus" as const, allowedScenarioIds: [...briefing.scenarioScope.visibleScenarioIds] } }
+    : control),
+});
+
 const KEY_OUTPUTS = [O[0], O[2], O[3], O[4]] as const;
+const COMPARE_OUTPUTS = [O[0], O[1], O[2], O[4]] as const;
+const ALL_VIEWS = [{ paneIds: [P.pv, P.starling] }, { paneIds: [P.pressure, P.flow] }];
+/** The heavy placements observe A.LVEDV/A.LVSV, B.LVEDV/B.LVSV and two valve gradients. */
+const HEAVY_PRIMARY_OUTPUTS = [
+  { paneId: P.outputsBaseline, outputIds: [O[0], O[2]] },
+  { paneId: P.outputsPlus500, outputIds: [O[0], O[2]] },
+  { paneId: P.outputsValvesPlus1000, outputIds: [V[0], V[1]] },
+];
+const HEAVY_PRIMARY_CONTROLS = [{ paneId: P.controlsBaseline, controlIds: ["hemodynamics.total-blood-volume-ml", "hemodynamics.systemic-resistance"] }];
 
 export const STUDY_PLACEMENTS_V1: readonly StudyPlacementV1[] = [
   {
@@ -92,44 +140,69 @@ export const STUDY_PLACEMENTS_V1: readonly StudyPlacementV1[] = [
     title: "循環血液量とPVループ",
     caption: "本文内・軽量。PVループ1枚に3つのScenarioを重ね、基準の主要4指標だけを読む。操作は持たない。",
     briefing: (base) => withPresentation(
-      onlyControls(onlyOutputs(onlyGraphs(base, [P.pv]), [P.outputsBaseline], KEY_OUTPUTS), []),
+      withPrimary(onlyControls(onlyOutputs(onlyGraphs(base, [P.pv]), [{ paneId: P.outputsBaseline, outputIds: KEY_OUTPUTS }]), []),
+        [{ paneId: P.outputsBaseline, outputIds: KEY_OUTPUTS }], []),
       { extent: "inline", analysisRecompute: "on-request" },
     ),
   },
   {
     placementId: "study-inline-compare",
-    title: "基準とTBV +1000 を並べて読む",
-    caption: "本文内・2列。PVループとGuyton/Starlingを1画面に2列で封入し、output paneを2つ（基準・TBV +1000）並べてScenario比較にする。",
+    title: "基準とTBV +500 を並べて読む",
+    caption: "本文内・2列。PVループとGuyton/Starlingを1画面に2列で封入し、基準とTBV +500 の同じ4指標と基準のTBV controllerを封入する。主要はLVEDVとLVSVの各2つ、残り4つは「すべての指標」から。スマートフォンの幅ではgraphと主要値を保ち、「開いて操作」から操作する。",
     briefing: (base) => withPresentation(
-      onlyControls(onlyOutputs(onlyGraphs(base, [P.pv, P.starling]), [P.outputsBaseline, P.outputsPlus1000], [O[0], O[1], O[2], O[4]]), []),
+      withPrimary(
+        onlyControls(onlyOutputs(onlyGraphs(base, [P.pv, P.starling]), [
+          { paneId: P.outputsBaseline, outputIds: COMPARE_OUTPUTS },
+          { paneId: P.outputsPlus500, outputIds: COMPARE_OUTPUTS },
+        ]), [P.controlsBaseline]),
+        [{ paneId: P.outputsBaseline, outputIds: [O[0], O[2]] }, { paneId: P.outputsPlus500, outputIds: [O[0], O[2]] }],
+        [{ paneId: P.controlsBaseline, controlIds: ["hemodynamics.total-blood-volume-ml"] }]),
       { extent: "inline", views: [{ paneIds: [P.pv, P.starling] }], analysisRecompute: "on-request" },
     ),
   },
   {
     placementId: "study-peek-heavy",
     title: "循環血液量の段階的増加（全部入り）",
-    caption: "本文の横。3 Scenario・4 graph（2画面×2列）・3 control pane・3 output pane×10 outputの負荷例。ESPVR/EDPVR・Starlingは封入時の測定済み結果を読み込み、操作後は読者が求めたときだけ再測定する。",
+    caption: "本文の横。3 Scenario・4 graph（2画面×2列）・3 control pane（8 control）・output pane 3つ（基準12・TBV +500 12・弁8 = 32指標）。主要は基準と+500のLVEDV/LVSVと弁の2指標、controllerは基準のTBVとSVR。ESPVR/EDPVR・Starlingは封入時の測定済み結果を読み込み、操作後は読者が求めたときだけ再測定する。",
     briefing: (base) => withPresentation(
-      base,
-      { extent: "peek", views: [{ paneIds: [P.pv, P.starling] }, { paneIds: [P.pressure, P.flow] }], analysisRecompute: "on-request" },
+      withPrimary(base, HEAVY_PRIMARY_OUTPUTS, HEAVY_PRIMARY_CONTROLS),
+      { extent: "peek", views: ALL_VIEWS, analysisRecompute: "on-request" },
     ),
   },
   {
     placementId: "study-full-heavy",
     title: "循環血液量の段階的増加（全幅）",
-    caption: "全幅。同じ負荷例をWorkbenchと同じ区画配置（graph 4枚をタイル、下にoutput、右にcontrol）で開く。",
+    caption: "全幅。同じ負荷例をWorkbenchと同じ区画配置（graph 4枚をタイル、下に観察中の指標とすべての指標、右にcontrol）で開く。",
     briefing: (base) => withPresentation(
-      base,
-      { extent: "full", views: [{ paneIds: [P.pv, P.starling] }, { paneIds: [P.pressure, P.flow] }], analysisRecompute: "on-request" },
+      withPrimary(base, HEAVY_PRIMARY_OUTPUTS, HEAVY_PRIMARY_CONTROLS),
+      { extent: "full", views: ALL_VIEWS, analysisRecompute: "on-request" },
     ),
   },
   {
     placementId: "study-peek-automatic",
     title: "操作のたびに自動で再測定する場合",
-    caption: "本文の横。比較用に再測定を「自動」で封入した配置。基準のcontrolを動かすたびに、基準のESPVR/EDPVR・Starlingを測り直す（数十秒）。",
+    caption: "本文の横。比較用に再測定を「自動」で封入した配置。基準の12指標のうち主要4つと基準の3 controlを封入し、controlを動かすたびに基準のESPVR/EDPVR・Starlingを測り直す（数十秒）。",
     briefing: (base) => withPresentation(
-      onlyControls(onlyOutputs(onlyGraphs(base, [P.pv, P.starling]), [P.outputsBaseline]), [P.controlsBaseline]),
+      withPrimary(
+        onlyControls(onlyOutputs(onlyGraphs(base, [P.pv, P.starling]), [{ paneId: P.outputsBaseline, outputIds: O }]), [P.controlsBaseline]),
+        [{ paneId: P.outputsBaseline, outputIds: [O[0], O[1], O[2], O[3]] }],
+        [{ paneId: P.controlsBaseline, controlIds: [...ARTICLE_EMBED_STUDY_CONTROL_IDS_V1] }]),
       { extent: "peek", analysisRecompute: "automatic" },
+    ),
+  },
+  {
+    placementId: "study-peek-reader-focus",
+    title: "読者が操作するScenarioを選ぶ",
+    caption: "本文の横。SVRのcontrollerだけ読者のフォーカスに追従させた連動教材。指標は基準と弁（TBV +1000）に固定したままなので、操作対象と固定参照値の違いが各項目のScenario表示で読める。",
+    briefing: (base) => withPresentation(
+      withPrimary(
+        withReaderFocus(onlyControls(onlyOutputs(onlyGraphs(base, [P.pv]), [
+          { paneId: P.outputsBaseline, outputIds: KEY_OUTPUTS },
+          { paneId: P.outputsValvesPlus1000, outputIds: [V[0], V[4]] },
+        ]), [P.controlsBaseline]), "hemodynamics.systemic-resistance"),
+        [{ paneId: P.outputsBaseline, outputIds: [O[0], O[2]] }, { paneId: P.outputsValvesPlus1000, outputIds: [V[0]] }],
+        [{ paneId: P.controlsBaseline, controlIds: ["hemodynamics.systemic-resistance"] }]),
+      { extent: "peek", analysisRecompute: "on-request" },
     ),
   },
 ];
@@ -155,7 +228,7 @@ export function buildArticleEmbedStudyArticleV1(snapshot: ExperimentSnapshotV2):
       placement: { ...block.placement, titleOverride: placement.title, caption: placement.caption },
     };
   };
-  const [inlineLight, inlineCompare, peekHeavy, fullHeavy, peekAutomatic] = STUDY_PLACEMENTS_V1.map(experimentBlock);
+  const [inlineLight, inlineCompare, peekHeavy, fullHeavy, peekAutomatic, peekReaderFocus] = STUDY_PLACEMENTS_V1.map(experimentBlock);
   return {
     schemaId: STUDIO_ARTICLE_DRAFT_V2_SCHEMA_ID,
     articleId: ARTICLE_EMBED_STUDY_ARTICLE_ID_V1,
@@ -168,18 +241,21 @@ export function buildArticleEmbedStudyArticleV1(snapshot: ExperimentSnapshotV2):
       heading("h-inline", "1. 本文内で一目で読む"),
       paragraph("p-inline-1", "静脈側に血液を足すと、まず右房圧が上がり、右室・左室の拡張末期容積が増えます。Frank–Starlingの関係により一回拍出量も増えますが、その増え方は容積が増えるほど鈍ります。下の埋め込みは、PVループ1枚に3つのScenarioを重ね、基準の4指標だけを添えた最小構成です。枠線もcontrolもありません。"),
       inlineLight!,
-      paragraph("p-inline-2", "比較したい値がある場合は、Workbenchでoutput paneを比較したいScenarioごとに作り、両方を封入します。paneのラベルがそのまま節の見出しになり、2つの節は幅があれば横に並び、同じ行に同じ指標が揃います。graphは2枚を1画面に2列で封入しました。スマートフォンの幅では自動で1枚ずつのタブになります。"),
+      paragraph("p-inline-2", "比較したい値がある場合は、Workbenchでoutput paneを比較したいScenarioごとに作り、両方を封入します。封入時に「主要」にした指標がgraphの横に残り、残りは「すべての指標」からpaneごとのまとまりで開けます。読者はそこで観察する指標を選び直せます。graphは2枚を1画面に2列で封入しました。スマートフォンの幅では自動で1枚ずつのタブになります。"),
       inlineCompare!,
       heading("h-peek", "2. 本文と並べる"),
-      paragraph("p-peek-1", "4枚のgraph、3つのcontrol pane、3つのoutput pane（10指標ずつ）を読む場合は本文内では長すぎます。下のアンカーから本文の横に開きます。graphは「PVループ + Guyton/Starling」「圧波形 + 弁流量」の2画面で、上に固定されます。比較する3つのScenarioは短い行に揃え、同じ指標の組を一緒に切り替えます。操作するpaneだけを下のタブで選びます。対象Scenarioは封入時のbindingのままで、グラフ・比較値・操作を同時に見られます。"),
+      paragraph("p-peek-1", "4枚のgraph、3つのcontrol pane、指標構成の異なる3つのoutput pane（基準12・TBV +500 12・弁8）を読む場合は本文内では長すぎます。下のアンカーから本文の横に開きます。graphは「PVループ + Guyton/Starling」「圧波形 + 弁流量」の2画面で上に固定され、その下に観察中の指標、最初に使うcontroller（基準のTBVとSVR）が並びます。対象Scenarioは封入時のbindingのままで、各指標は自分のScenarioを名乗ります。残りの指標と操作は同じ配置から開けます。"),
       peekHeavy!,
       paragraph("p-peek-2", "スライダーを動かすと拍ごとの応答（ループ、波形、出力値）はすぐに変わりますが、ESPVR/EDPVR・Starling曲線は封入時の条件の測定結果のまま薄く残り、graphの下に「操作後の条件はまだ測定していません」と再測定ボタンが出ます。再測定は1 Scenarioあたり数十秒から数分かかるので、読者が求めたときだけ走らせます。"),
       heading("h-full", "3. 全幅で開く"),
-      paragraph("p-full-1", "全幅は同じパネルを最大幅で開いた状態で、Workbenchと同じ区画（graphを左上にタイル、左下にoutput、右にcontrol）になります。ヘッダーの「記事と並べる」で並置に戻れます。"),
+      paragraph("p-full-1", "全幅は同じパネルを最大幅で開いた状態で、Workbenchと同じ区画（graphを左上にタイル、左下に観察中の指標とすべての指標、右にcontrol）になります。観察する指標の選択は並置・全幅・スマートフォンの間で保たれます。ヘッダーの「記事と並べる」で並置に戻れます。"),
       fullHeavy!,
       heading("h-auto", "4. 比較用：自動で再測定する封入"),
       paragraph("p-auto-1", "著者が「操作のたびに自動」で封入した場合の配置です。操作のたびに対象Scenarioの測定が走り、その間はcontrolが使えません。デスクトップ向けの記事や、controlが1つだけの短い実験ではこちらが自然な場合もあります。"),
       peekAutomatic!,
+      heading("h-focus", "5. 読者が操作対象を選ぶ教材"),
+      paragraph("p-focus-1", "controllerを読者のフォーカスに追従させると、同じスライダーで基準・TBV +500・TBV +1000 のどれを動かすかを読者が選びます。指標は封入時のScenarioに固定されたままなので、観察中の各項目に書かれたScenarioと、controllerの「対象」を見比べれば、どの値が動くはずかが分かります。"),
+      peekReaderFocus!,
       paragraph("p-tail", "ここまでの埋め込みは、どれも同じ数値lane・同じrenderer・同じBriefingデータを使っています。変わるのは封入した読み方だけです。"),
     ],
   };

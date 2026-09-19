@@ -5,6 +5,12 @@ import { loadPreparedScenarioAnalysisV1 } from "./runtime/PreparedModelAnalysisR
 import type { StudioJsonObjectV2 } from "@/studio/contracts/v2/json";
 import { workbenchPresentationAnalysisSelectionV1, workbenchModelCyclePhaseOutputIdV3 } from "./presentation/WorkbenchPresentationOutputSelectionV3";
 import { WorkbenchLastMeasuredOutputsV1 } from "./presentation/WorkbenchLastMeasuredOutputsV1";
+import { workbenchScenarioColorSeedV3 } from "./presentation/WorkbenchGraphColorV3";
+import { resolveWorkbenchAutomaticGraphColorV3 } from "@/components/workbench/presentation";
+import { materializeWorkbenchOutputPresentationItemsV3 } from "@/components/workbench/WorkbenchItemPresentation";
+import { workbenchPreviousMeasurementNoticeV3 } from "@/components/workbench/WorkbenchPaneBodiesV3";
+import type { ExperimentOutputSelectionV3 } from "@/components/workbench/ExperimentPanePresentationV3";
+import { workbenchMeasurementScopeKeyV3, type WorkbenchOutputPaneReadingV3 } from "@/components/workbench/presentation/WorkbenchObservationV3";
 import { registeredCurrentBaselinePresentationV1 } from "@/studio/presentation/CurrentBaselinePresentationV1";
 import { REGISTERED_CURRENT_MODEL_BASELINE_V1 } from "@/studio/registry/RegisteredCurrentModelBaselineV1";
 import { workbenchReferencePresetsV1 } from "./WorkbenchReferencePresetsV1";
@@ -438,6 +444,10 @@ export const WorkbenchSession = ({
   const [backgroundWorkerPool, setBackgroundWorkerPool] =
     React.useState<WorkbenchBackgroundWorkerPoolV3 | null>(null);
   const [runtimeGeneration, setRuntimeGeneration] = React.useState(0);
+  // Phone observation: which output-pane items stay beside the graph. It is
+  // Session presentation state, kept across breakpoints; the mobile shell
+  // reconciles it against the panes that exist.
+  const [observedOutputSelection, setObservedOutputSelection] = React.useState<readonly string[] | null>(null);
   const [, setControlValues] = React.useState<ExactModelControlValuesV1>(
     {},
   );
@@ -3070,20 +3080,18 @@ export const WorkbenchSession = ({
       />
     );
   };
-  const renderOutputPaneV3 = (
-    paneDefinition: WorkbenchPaneDefinitionV3,
-    scrollMode: "contained" | "parent" | "section" = "contained",
-  ) => {
+  /** One output pane's live reading context: Scenario, frame, settled analysis, retained values. */
+  const projectOutputPaneV3 = (paneDefinition: WorkbenchPaneDefinitionV3) => {
     const pane = outputPanes.find(
       ({ paneId }) => paneId === paneDefinition.paneId,
     );
-    if (pane === undefined || contract === null) return <PaneLoadingV3 kind="output" itemCount={pane?.items.length} />;
+    if (pane === undefined || contract === null) return null;
     const scenarioId = resolveWorkbenchOutputPaneScenarioIdV3(
       pane,
       activeScenarioId,
       scenarios,
     );
-    const scopeKey = JSON.stringify([pane.paneId, scenarioId]);
+    const scopeKey = workbenchMeasurementScopeKeyV3(pane.paneId, scenarioId);
     let scope = lastMeasurementsByScope.get(scopeKey);
     if (scope === undefined) {
       scope = { paneId: pane.paneId, scenarioId, memory: new WorkbenchLastMeasuredOutputsV1() };
@@ -3110,24 +3118,42 @@ export const WorkbenchSession = ({
             "left",
             periodicPvaDerivationRef.current,
           );
+    return {
+      pane,
+      contract,
+      scenarioId,
+      scope,
+      frame,
+      periodicPva,
+      periodicPvaAnalysisError: periodicPvaAnalysisKey === null ? undefined : analysisErrorByKey[periodicPvaAnalysisKey],
+      presentationAnalyses: scenarioId === null ? undefined : runtimeRef.current?.presentationAnalyses(scenarioId) ?? retainedPresentationRef.current.get(scenarioId)?.analyses,
+    };
+  };
+  const renderOutputPaneV3 = (
+    paneDefinition: WorkbenchPaneDefinitionV3,
+    scrollMode: "contained" | "parent" | "section" = "contained",
+    selection?: ExperimentOutputSelectionV3,
+  ) => {
+    const projected = projectOutputPaneV3(paneDefinition);
+    if (projected === null) {
+      return <PaneLoadingV3 kind="output" itemCount={outputPanes.find(({ paneId }) => paneId === paneDefinition.paneId)?.items.length} />;
+    }
+    const { pane, scenarioId, scope } = projected;
     return (
       <OutputPaneBodyV3
-        contract={contract}
+        contract={projected.contract}
         lastMeasurements={scope.memory}
-        presentationAnalyses={scenarioId === null ? undefined : runtimeRef.current?.presentationAnalyses(scenarioId) ?? retainedPresentationRef.current.get(scenarioId)?.analyses}
-        frame={frame}
+        presentationAnalyses={projected.presentationAnalyses}
+        frame={projected.frame}
         locale={resolvedLocale}
         onAddItem={() => openPaneSettings(pane.paneId, "items", "add")}
         onOpenBindingSettings={() => openPaneSettings(pane.paneId, "binding")}
         settingsAction={paneSettingsActions.get(pane.paneId)}
         pane={pane}
-        periodicPva={periodicPva}
-        periodicPvaAnalysisError={
-          periodicPvaAnalysisKey === null
-            ? undefined
-            : analysisErrorByKey[periodicPvaAnalysisKey]
-        }
+        periodicPva={projected.periodicPva}
+        periodicPvaAnalysisError={projected.periodicPvaAnalysisError}
         scrollMode={scrollMode}
+        selection={selection}
         showBinding={scenarios.length > 1}
         scenarioLabel={
           scenarios.find((scenario) => scenario.scenarioId === scenarioId)
@@ -3135,6 +3161,44 @@ export const WorkbenchSession = ({
         }
       />
     );
+  };
+  /**
+   * One output pane's live reading for the phone observation strip: the same
+   * tiles the pane shows, its pane-and-Scenario display memory, and the
+   * pane's Scenario in the colour the graphs use for it.
+   */
+  const readOutputPaneV3 = (paneDefinition: WorkbenchPaneDefinitionV3): WorkbenchOutputPaneReadingV3 | null => {
+    const projected = projectOutputPaneV3(paneDefinition);
+    if (projected === null) return null;
+    const measured = materializeWorkbenchOutputPresentationItemsV3({
+      contract: projected.contract,
+      frame: projected.frame,
+      locale: resolvedLocale,
+      notAssessedNotice: t("workbench.live.outputNotAssessed"),
+      pane: projected.pane,
+      periodicPva: projected.periodicPva,
+      presentationAnalyses: projected.presentationAnalyses,
+      periodicPvaAnalysisError: projected.periodicPvaAnalysisError,
+    });
+    const scenarioIndex = scenarios.findIndex((scenario) => scenario.scenarioId === projected.scenarioId);
+    const scenario = scenarios[scenarioIndex];
+    const scenarioMeta = scenarios.length > 1 && scenario !== undefined && surface !== null ? {
+      label: scenario.label,
+      colorHex: resolveWorkbenchAutomaticGraphColorV3({
+        colorHex: workbenchScenarioColorSeedV3({ surface, scenarioId: scenario.scenarioId, scenarioIndex }),
+        appTheme,
+      }),
+    } : undefined;
+    return {
+      paneId: projected.pane.paneId,
+      title: projected.pane.label,
+      bindingMode: projected.pane.binding.mode,
+      scenarioId: projected.scenarioId,
+      measured,
+      memory: projected.scope.memory,
+      previousValueNotice: workbenchPreviousMeasurementNoticeV3(resolvedLocale),
+      ...(scenarioMeta === undefined ? {} : { scenario: scenarioMeta }),
+    };
   };
   const renderControlPaneV3 = (
     paneDefinition: WorkbenchPaneDefinitionV3,
@@ -3542,7 +3606,10 @@ export const WorkbenchSession = ({
               scenarioContent={renderScenarioManagerV3("embedded-mobile")}
               scenarioError={scenarioErrorNotice}
               renderGraphPane={renderGraphPaneV3}
-              renderOutputPane={(pane) => renderOutputPaneV3(pane, "section")}
+              renderOutputPane={(pane, selection) => renderOutputPaneV3(pane, "section", selection)}
+              readOutputPane={readOutputPaneV3}
+              observedSelection={observedOutputSelection}
+              onObservedSelectionChange={setObservedOutputSelection}
               renderControlPane={(pane) => renderControlPaneV3(pane, "section")}
               onOpenPaneSettings={openPaneSettings}
               onAddGraphPane={(anchor, onCreated) =>

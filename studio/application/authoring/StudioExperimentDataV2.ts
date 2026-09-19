@@ -1667,11 +1667,13 @@ function assertPlacementBriefingV2(
   const outputOrders = new Set<number>();
   briefing.outputs.forEach((output, index) => {
     const outputPath = `${path}.outputs[${index}]`;
-    assertExactKeysV2(
+    assertRequiredOptionalKeysV2(
       output,
       ["sourcePaneId", "outputId", "scenarioId", "label", "order"],
+      ["emphasis"],
       outputPath,
     );
+    assertBriefingItemEmphasisV2(output, outputPath);
     const sourcePaneId = requiredPortableIdV2(
       output.sourcePaneId,
       `${outputPath}.sourcePaneId`,
@@ -1699,7 +1701,7 @@ function assertPlacementBriefingV2(
   const controlOrders = new Set<number>();
   briefing.controls.forEach((control, index) => {
     const controlPath = `${path}.controls[${index}]`;
-    assertExactKeysV2(
+    assertRequiredOptionalKeysV2(
       control,
       [
         "sourcePaneId",
@@ -1709,8 +1711,10 @@ function assertPlacementBriefingV2(
         "presentation",
         "binding",
       ],
+      ["emphasis"],
       controlPath,
     );
+    assertBriefingItemEmphasisV2(control, controlPath);
     const sourcePaneId = requiredPortableIdV2(
       control.sourcePaneId,
       `${controlPath}.sourcePaneId`,
@@ -1733,6 +1737,17 @@ function assertPlacementBriefingV2(
     );
     assertControlBriefingBindingV2(control.binding, `${controlPath}.binding`);
   });
+}
+
+/** Item emphasis is reading density only; absent means sealed before emphasis. */
+function assertBriefingItemEmphasisV2(
+  item: Readonly<{ emphasis?: unknown }>,
+  path: string,
+): void {
+  if (!hasOwnV2(item, "emphasis")) return;
+  if (item.emphasis !== "primary" && item.emphasis !== "supporting") {
+    throw validationErrorV2(`${path}.emphasis`, "must be primary or supporting");
+  }
 }
 
 /**

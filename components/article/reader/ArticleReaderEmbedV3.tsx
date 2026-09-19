@@ -1,4 +1,5 @@
 import React from "react";
+import { ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { WorkbenchAreaLayoutV3 } from "@/components/workbench/WorkbenchAreaLayoutV3";
@@ -8,10 +9,11 @@ import { articleBriefingSplitViewsV3 } from "@/studio/application/authoring/Stud
 /**
  * Reading layouts shared by every extent of an embedded experiment.
  *
- * `inline`     lives in the Article column: stage, then controls, then outputs.
- * `peek`       beside the Article: the stage stays put while the deck scrolls.
- * `sheet`      phone-width Peek/Full: the smartphone Workbench shell (fixed
- *              stage, view rail, task tabs).
+ * `inline`     lives in the Article column: stage, observation, then the
+ *              primary controls and the sealed reference in flow.
+ * `peek`       beside the Article: stage and observation stay put while the
+ *              deck (primary controls, reference) scrolls.
+ * `sheet`      phone-width Peek/Full: the same order as Peek in one sheet.
  * `workbench`  maximized on a desktop: the Workbench area arrangement (graphs
  *              tiled top-left, outputs bottom-left, controls right).
  *
@@ -22,6 +24,33 @@ import { articleBriefingSplitViewsV3 } from "@/studio/application/authoring/Stud
 export type ArticleReaderEmbedLayoutV3 = "inline" | "peek" | "sheet" | "workbench";
 
 export type ArticleReaderStageViewV3 = ExperimentPlacementBriefingViewV2;
+
+/**
+ * What the reader keeps while moving between extents and viewports: the
+ * selected graph pane, the observed outputs (null until the reader changes
+ * the author's observation), and which reference groups are open. It is a
+ * mutable per-Placement memory, not durable content.
+ */
+export type ArticleReaderObservationMemoryV3 = {
+  activePaneId: string | null;
+  observedOutputKeys: readonly string[] | null;
+  referenceOpen: { outputs: boolean; controls: boolean };
+};
+
+export function createArticleReaderObservationMemoryV3(): ArticleReaderObservationMemoryV3 {
+  return { activePaneId: null, observedOutputKeys: null, referenceOpen: { outputs: false, controls: false } };
+}
+
+export const ArticleReaderObservationMemoryContextV3 =
+  React.createContext<ArticleReaderObservationMemoryV3 | null>(null);
+
+export function useArticleReaderObservationMemoryV3(): ArticleReaderObservationMemoryV3 {
+  const shared = React.useContext(ArticleReaderObservationMemoryContextV3);
+  const local = React.useRef<ArticleReaderObservationMemoryV3 | null>(null);
+  if (shared !== null) return shared;
+  if (local.current === null) local.current = createArticleReaderObservationMemoryV3();
+  return local.current;
+}
 
 /** Below this stage width a sealed pair is read as two consecutive views. */
 export const ARTICLE_READER_STAGE_PAIR_MIN_WIDTH_PX_V3 = 560;
@@ -245,93 +274,50 @@ export function ArticleReaderSectionsV3({
   );
 }
 
-/** Switching a controller pane never changes its sealed Scenario binding. */
-export function ArticleReaderControlSectionsV3({ sections }: Readonly<{ sections: readonly ArticleReaderSectionV3[] }>) {
-  const { t } = useTranslation();
-  const [selected, setSelected] = React.useState<string | null>(null);
-  const index = Math.max(0, sections.findIndex(s => s.key === selected));
-  const active = sections[index];
+/**
+ * The sealed reference behind the observation: every output or every
+ * remaining control, grouped by source pane. One disclosure per role; the
+ * count names what is inside without a second explanation.
+ */
+export function ArticleReaderReferenceV3({
+  kind,
+  label,
+  count,
+  open,
+  onToggle,
+  action,
+  children,
+}: Readonly<{
+  kind: "outputs" | "controls";
+  label: string;
+  count: number;
+  open: boolean;
+  onToggle: (open: boolean) => void;
+  /** Optional secondary action beside the summary, e.g. reset the observation. */
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}>) {
   const id = React.useId();
-  const buttons = React.useRef<(HTMLButtonElement | null)[]>([]);
-  if (!active) return null;
-  if (sections.length === 1) return <ArticleReaderSectionsV3 kind="controls" label={t("articleReader.controls")} sections={sections} showHeaders />;
   return (
-    <section className="article-reader-control-deck" aria-label={t("articleReader.controls")}>
-      <div role="tablist" aria-label={t("articleReader.controls")} className="article-reader-control-tabs">
-        {sections.map((section, i) => <button key={section.key} type="button" role="tab"
-          ref={element => { buttons.current[i] = element; }} id={`${id}-tab-${i}`} aria-controls={`${id}-panel`}
-          aria-selected={i === index} tabIndex={i === index ? 0 : -1} onClick={() => setSelected(section.key)}
-          onKeyDown={event => {
-            const next = event.key === "ArrowRight" ? (i + 1) % sections.length : event.key === "ArrowLeft" ? (i + sections.length - 1) % sections.length
-              : event.key === "Home" ? 0 : event.key === "End" ? sections.length - 1 : null;
-            if (next === null) return;
-            event.preventDefault(); setSelected(sections[next]!.key); buttons.current[next]?.focus();
-          }} title={section.scenario?.label}>
-          {section.scenario && <span className="article-reader-scenario-swatch" style={{ backgroundColor: section.scenario.colorHex }} aria-hidden="true" />}
-          {section.title}
-        </button>)}
+    <section className="article-reader-reference" data-reader-reference={kind} data-reader-reference-open={open ? "true" : "false"}>
+      <div className="article-reader-reference-summary">
+        <button
+          type="button"
+          className="article-reader-reference-toggle"
+          aria-expanded={open}
+          aria-controls={`${id}-body`}
+          onClick={() => onToggle(!open)}
+        >
+          <ChevronRight className="article-reader-reference-chevron h-3.5 w-3.5" aria-hidden="true" />
+          <span>{label}</span>
+          <span className="article-reader-reference-count">{count}</span>
+        </button>
+        {action}
       </div>
-      <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-tab-${index}`} data-reader-control-section={active.key}>
-        {active.lead}{active.body}
+      <div id={`${id}-body`} className="article-reader-reference-body" hidden={!open}>
+        {open && children}
       </div>
     </section>
-  );
-}
-
-export type ArticleReaderSheetTaskV3 = "controls" | "outputs";
-
-/** Phone deck beneath the fixed stage: the smartphone Workbench task tabs. */
-export function ArticleReaderSheetDeckV3({
-  controls,
-  outputs,
-  task,
-  onTaskChange,
-}: Readonly<{
-  controls: React.ReactNode;
-  outputs: React.ReactNode;
-  task: ArticleReaderSheetTaskV3;
-  onTaskChange: (task: ArticleReaderSheetTaskV3) => void;
-}>) {
-  const { t } = useTranslation();
-  const tabId = React.useId();
-  const tasks = ([
-    ["controls", controls, t("articleReader.sheetControls")],
-    ["outputs", outputs, t("articleReader.sheetOutputs")],
-  ] as const).filter(([, node]) => node !== null && node !== undefined && node !== false);
-  const activeTask = tasks.some(([name]) => name === task) ? task : tasks[0]?.[0];
-  return (
-    <div className="article-reader-sheet-deck workbench-mobile-task-deck" data-reader-sheet-task={activeTask}>
-      {tasks.length > 1 && (
-        <div className="workbench-mobile-task-tabs article-reader-sheet-tabs" role="tablist" aria-label={t("workbench.live.mobileTaskDeck")}>
-          {tasks.map(([name, , tabLabel]) => (
-            <button
-              key={name}
-              id={`${tabId}-${name}-tab`}
-              type="button"
-              role="tab"
-              aria-controls={`${tabId}-${name}-panel`}
-              aria-selected={activeTask === name}
-              className="workbench-mobile-task-tab"
-              onClick={() => onTaskChange(name)}
-            >
-              {tabLabel}
-            </button>
-          ))}
-        </div>
-      )}
-      {tasks.map(([name, node]) => (
-        <div
-          key={name}
-          id={`${tabId}-${name}-panel`}
-          role={tasks.length > 1 ? "tabpanel" : undefined}
-          aria-labelledby={tasks.length > 1 ? `${tabId}-${name}-tab` : undefined}
-          hidden={activeTask !== name}
-          className="workbench-mobile-task-scroll article-reader-sheet-panel min-h-0 flex-1 overflow-y-auto overscroll-contain"
-        >
-          {activeTask === name && node}
-        </div>
-      ))}
-    </div>
   );
 }
 

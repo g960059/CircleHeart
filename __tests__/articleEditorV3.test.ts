@@ -330,7 +330,7 @@ describe("Article Editor V3 briefing", () => {
     })).toBe("peek");
   });
 
-  it("projects one primary observation without changing the full authored Briefing", () => {
+  it("projects one primary graph in flow without trimming the sealed outputs", () => {
     const base = focusedBriefingV3();
     const briefing: ExperimentPlacementBriefingV2 = {
       ...base,
@@ -341,7 +341,8 @@ describe("Article Editor V3 briefing", () => {
     expect(articleBriefingPresentationV3(briefing)).toBe("inflow");
     const reading = articleBriefingInflowContentV3(briefing);
     expect(reading.graphs).toEqual(base.graphs);
-    expect(reading.outputs.map(output => output.outputId)).toEqual(["output/5", "output/4", "output/3", "output/2"]);
+    // Outputs are never trimmed: the sealed observation owns their density.
+    expect(reading.outputs).toBe(briefing.outputs);
     expect(briefing.graphs).toHaveLength(2);
     expect(briefing.outputs).toHaveLength(6);
     expect(articleBriefingPresentationV3({ ...briefing, controls: base.controls })).toBe("peek");
@@ -895,6 +896,7 @@ describe("Article Editor V3 briefing", () => {
         scenarioId: "scenario/baseline",
         label: "MAP",
         order: 0,
+        emphasis: "primary",
       }],
       controls: [{
         sourcePaneId: "pane/controls",
@@ -907,6 +909,7 @@ describe("Article Editor V3 briefing", () => {
           scenarioIds: ["scenario/baseline"],
           application: "absolute",
         },
+        emphasis: "primary",
       }],
     });
   });
@@ -1032,6 +1035,7 @@ describe("Article Editor V3 briefing", () => {
         scenarioId: "scenario/baseline",
         label: "MAP",
         order: 0,
+        emphasis: "primary",
       },
       {
         sourcePaneId: "pane/outputs-duplicate",
@@ -1039,6 +1043,7 @@ describe("Article Editor V3 briefing", () => {
         scenarioId: "scenario/baseline",
         label: "MAP duplicate",
         order: 1,
+        emphasis: "primary",
       },
     ]);
     expect(briefing.controls.map(({ sourcePaneId }) => sourcePaneId)).toEqual([

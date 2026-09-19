@@ -3,6 +3,7 @@ import {
   materializeSurfaceControlPaneBindingV3,
 } from "@/studio/application/article/ArticleExperimentPlacementV3";
 import { reconcileWorkbenchGraphColorsV3 } from "@/components/workbench/presentation/WorkbenchGraphColorV3";
+import { articleBriefingOutputKeyV3 } from "@/studio/application/article/ArticleBriefingObservationV3";
 import { validateExperimentPlacementBriefingV2 } from "@/studio/application/authoring/StudioExperimentDataV2";
 import {
   STUDIO_EXPERIMENT_SNAPSHOT_V2_SCHEMA_ID,
@@ -180,19 +181,22 @@ export function reconcileWorkbenchBriefingV3(
       ),
     ),
   );
+  // An output reference is pane, item and sealed Scenario: the same pane item
+  // read for two Scenarios stays two references.
   const seenOutputKeys = new Set<string>();
   const outputs = [...authored.outputs]
     .sort(compareBriefingOrderV3)
-    .filter(({ sourcePaneId, outputId, scenarioId }) => {
-      const key = workbenchBriefingOutputKeyV3(sourcePaneId, outputId);
+    .filter((output) => {
+      const { sourcePaneId, outputId, scenarioId } = output;
+      const reference = articleBriefingOutputKeyV3(output);
       if (
-        !availableOutputKeys.has(key) ||
-        seenOutputKeys.has(key) ||
+        !availableOutputKeys.has(workbenchBriefingOutputKeyV3(sourcePaneId, outputId)) ||
+        seenOutputKeys.has(reference) ||
         !visibleScenarioIds.includes(scenarioId)
       ) {
         return false;
       }
-      seenOutputKeys.add(key);
+      seenOutputKeys.add(reference);
       return true;
     })
     .map((output, order) => Object.freeze({ ...output, order }));

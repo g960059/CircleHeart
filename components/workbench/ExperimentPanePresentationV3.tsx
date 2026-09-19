@@ -1,5 +1,5 @@
 import React from "react";
-import { Plus, Undo2 } from "lucide-react";
+import { Check, ChevronRight, Plus, Undo2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { studioNumericControlValueIssueV2 } from "@/studio/contracts/v2/control";
@@ -29,6 +29,33 @@ export type ExperimentOutputPresentationItemV3 = Readonly<{
   qualityNotice?: string;
   /** Previous display value only; availability/quality still describe the current result. */
   staleNotice?: string;
+}>;
+
+/**
+ * One group of observed measurements: a source pane read for one Scenario.
+ * The heading names the pane once (and its Scenario when several are open),
+ * so tiles keep to label and value. `following` marks a pane whose Scenario
+ * follows the Workbench active slot; sealed Article references never follow.
+ */
+export type ExperimentObservationGroupV3 = Readonly<{
+  key: string;
+  /** Pane label; omitted when the Scenario alone names the group. */
+  title?: string;
+  scenario?: Readonly<{ label: string; colorHex: string }>;
+  following?: boolean;
+  items: readonly ExperimentOutputPresentationItemV3[];
+}>;
+
+/**
+ * Ephemeral observation selection shared by Article Reader and Workbench:
+ * a measurement tile toggles its membership in the observation kept beside
+ * the graph. Selection is presentation state only; it never changes the
+ * sealed pane, the Scenario binding, or the value.
+ */
+export type ExperimentOutputSelectionV3 = Readonly<{
+  selectedItemIds: ReadonlySet<string>;
+  onToggle: (itemId: string) => void;
+  toggleLabel: (label: string, selected: boolean) => string;
 }>;
 
 export type ExperimentPaneAddItemActionV3 = Readonly<{
@@ -83,6 +110,7 @@ export function ExperimentOutputGridV3({
   emptyMessage,
   items,
   scrollMode = "contained",
+  selection,
   variant,
 }: Readonly<{
   addItemAction?: ExperimentPaneAddItemActionV3;
@@ -90,6 +118,8 @@ export function ExperimentOutputGridV3({
   emptyMessage?: string;
   items: readonly ExperimentOutputPresentationItemV3[];
   scrollMode?: "contained" | "parent";
+  /** When present every tile is a toggle for the observation. */
+  selection?: ExperimentOutputSelectionV3;
   variant: "pane" | "article";
 }>) {
   const { i18n } = useTranslation();
@@ -105,6 +135,7 @@ export function ExperimentOutputGridV3({
     <div
       className={`workbench-output-grid grid ${layoutClassName} ${className}`.trim()}
       data-experiment-output-presentation={variant}
+      data-output-selection={selection === undefined ? undefined : "true"}
     >
       {items.length === 0 && emptyMessage !== undefined && (
         <p className="col-span-full p-4 text-xs text-wb-subtle">
@@ -113,6 +144,7 @@ export function ExperimentOutputGridV3({
       )}
       {items.map((item) => {
         const display = resolveExperimentOutputDisplayV3(item);
+        const selected = selection?.selectedItemIds.has(item.itemId);
         return (
           <ExperimentOutputTileV3
             key={item.itemId}
@@ -125,6 +157,9 @@ export function ExperimentOutputGridV3({
             methodLabel={item.outputId ? methodLabels.get(item.outputId) : undefined}
             contextLabel={item.staleNotice ? (japanese ? "前回値" : "Previous")
               : item.outputId && studioOutputReadingV1(item.outputId) === "waveform" ? (japanese ? "現在値" : "Current") : undefined}
+            selected={selected}
+            toggleLabel={selection === undefined ? undefined : selection.toggleLabel(item.label, selected === true)}
+            onToggle={selection?.onToggle}
           />
         );
       })}
@@ -144,18 +179,24 @@ export function ExperimentOutputGridV3({
 const ExperimentOutputTileV3 = React.memo(function ExperimentOutputTileV3({
   itemId, label, value, unit, availability, quality,
   description, descriptionAriaLabel, qualityNotice, staleNotice, contextLabel, methodLabel,
+  selected, toggleLabel, onToggle,
 }: Readonly<{
   itemId: string; label: string; value: string; unit: string;
   availability: string; quality: string; description?: string;
   descriptionAriaLabel?: string; qualityNotice?: string; staleNotice?: string;
   contextLabel?: string;
   methodLabel?: string;
+  selected?: boolean;
+  toggleLabel?: string;
+  onToggle?: (itemId: string) => void;
 }>) {
   incrementWorkbenchPerformanceCounterV3("react.output-tile.render");
   const disclosure = [staleNotice ?? qualityNotice, description].filter(Boolean).join("\n\n");
+  const selectable = onToggle !== undefined && toggleLabel !== undefined;
   return <div className="workbench-output-item min-w-0"
     data-output-id={itemId} data-output-availability={availability}
-    data-output-quality={quality} data-output-stale={staleNotice !== undefined ? "true" : "false"}>
+    data-output-quality={quality} data-output-stale={staleNotice !== undefined ? "true" : "false"}
+    data-output-selected={selectable ? (selected ? "true" : "false") : undefined}>
     <div className="flex min-w-0 items-center gap-1">
       {disclosure ? <WorkbenchItemDescriptionPopoverV3
         ariaLabel={descriptionAriaLabel ?? label} description={disclosure}>
@@ -163,6 +204,14 @@ const ExperimentOutputTileV3 = React.memo(function ExperimentOutputTileV3({
       </WorkbenchItemDescriptionPopoverV3>
         : <p className="workbench-output-label min-w-0 truncate">{label}</p>}
       {contextLabel && <span data-testid="output-value-context-v3" className="shrink-0 text-[10px] text-wb-subtle">{contextLabel}</span>}
+      {selectable && (
+        // The tile itself is the target: the button stretches over the tile
+        // while the description trigger stays above it.
+        <button type="button" className="workbench-output-toggle" aria-pressed={selected === true}
+          aria-label={toggleLabel} title={toggleLabel} onClick={() => onToggle(itemId)}>
+          <Check className="h-2.5 w-2.5" aria-hidden="true" strokeWidth={3} />
+        </button>
+      )}
     </div>
     {methodLabel && <p data-testid="output-method-context-v3" className="text-[10px] leading-tight text-wb-subtle">{methodLabel}</p>}
     <p className="workbench-output-value mt-0.5 tabular-nums"
@@ -172,6 +221,93 @@ const ExperimentOutputTileV3 = React.memo(function ExperimentOutputTileV3({
     </p>
   </div>;
 });
+
+/**
+ * The observation kept beside the graph: grouped measurement tiles in a
+ * bounded strip. When the strip cannot show every observed value, the count
+ * says so and opens the whole selection in place; nothing is dropped. The
+ * caller bounds the strip (Article Peek/sheet, phone Workbench); unbounded
+ * containers never overflow, so no affordance appears.
+ */
+export function ExperimentObservationV3({
+  groups,
+  label,
+  moreLabel,
+  className = "",
+  followingLabel,
+  ...sectionProps
+}: Readonly<{
+  groups: readonly ExperimentObservationGroupV3[];
+  label: string;
+  /** Count affordance text, e.g. "7 observed". */
+  moreLabel: (count: number) => string;
+  className?: string;
+  /** Word shown beside a Scenario that follows the active slot. */
+  followingLabel?: string;
+}> & Omit<React.HTMLAttributes<HTMLElement>, "children" | "className">) {
+  const rootRef = React.useRef<HTMLElement>(null);
+  const [overflowing, setOverflowing] = React.useState(false);
+  const [expanded, setExpanded] = React.useState(false);
+  const count = groups.reduce((total, group) => total + group.items.length, 0);
+  React.useLayoutEffect(() => {
+    const element = rootRef.current;
+    if (element === null || typeof ResizeObserver === "undefined") return undefined;
+    const measure = () => setOverflowing(element.scrollHeight > element.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [count, expanded]);
+  if (count === 0) return null;
+  return (
+    <section
+      ref={rootRef}
+      {...sectionProps}
+      className={`experiment-observation ${className}`.trim()}
+      aria-label={label}
+      data-observation-count={count}
+      data-observation-expanded={expanded ? "true" : undefined}
+      data-observation-overflow={overflowing ? "true" : undefined}
+    >
+      <div className="experiment-observation-groups">
+        {groups.filter((group) => group.items.length > 0).map((group) => {
+          const heading = group.title !== undefined || group.scenario !== undefined;
+          return (
+            <div key={group.key} className="experiment-observation-group" data-observation-group={group.key}>
+              {heading && (
+                <h4 className="experiment-observation-heading">
+                  {group.scenario && <span className="workbench-output-scenario-swatch" style={{ backgroundColor: group.scenario.colorHex }} aria-hidden="true" />}
+                  <span className="experiment-observation-heading-text">
+                    {group.title !== undefined && <span className="experiment-observation-title">{group.title}</span>}
+                    {group.scenario && !(group.title ?? "").includes(group.scenario.label) && (
+                      <span className="experiment-observation-scenario">
+                        {group.following && followingLabel !== undefined && <span className="experiment-observation-following">{followingLabel}</span>}
+                        {group.scenario.label}
+                      </span>
+                    )}
+                  </span>
+                </h4>
+              )}
+              <ExperimentOutputGridV3 variant="article" className="workbench-observation-grid" items={group.items} />
+            </div>
+          );
+        })}
+      </div>
+      {(overflowing || expanded) && (
+        <button
+          type="button"
+          className="experiment-observation-more"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+          data-observation-more
+        >
+          {moreLabel(count)}
+          <ChevronRight className="h-3 w-3" aria-hidden="true" />
+        </button>
+      )}
+    </section>
+  );
+}
 
 /** Shared low-emphasis path from a live output/control pane to its item catalog. */
 export function ExperimentPaneAddItemButtonV3({
@@ -256,6 +392,7 @@ export function resolveExperimentOutputDisplayV3(
 }
 
 export function ExperimentNumericControlV3({
+  contextColorHex,
   contextLabel,
   control,
   description,
@@ -269,6 +406,8 @@ export function ExperimentNumericControlV3({
   presentation,
   value,
 }: Readonly<{
+  /** Scenario colour beside the context label, matching graph traces. */
+  contextColorHex?: string;
   contextLabel?: string;
   control: ControlDefinitionV2;
   description?: string;
@@ -329,8 +468,11 @@ export function ExperimentNumericControlV3({
           ) : <span className="min-w-0 truncate" title={label}>{label}</span>}
         </span>
         {contextLabel !== undefined && (
-          <span className="workbench-control-context block truncate">
-            {contextLabel}
+          <span className="workbench-control-context flex min-w-0 items-center gap-1">
+            {contextColorHex !== undefined && (
+              <span className="workbench-output-scenario-swatch" style={{ backgroundColor: contextColorHex }} aria-hidden="true" />
+            )}
+            <span className="truncate">{contextLabel}</span>
           </span>
         )}
       </div>

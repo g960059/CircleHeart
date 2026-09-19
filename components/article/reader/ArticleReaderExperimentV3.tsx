@@ -5,6 +5,7 @@ import { selectPresentationAnalysisIdsV1, workbenchModelCyclePhaseOutputIdV3 } f
 import { CompletedEjectionWaveformV1 } from "@/components/workbench/presentation/CompletedEjectionWaveformV1";
 import { createPortal } from "react-dom";
 import {
+  ChevronRight,
   PanelRightOpen,
   MoreHorizontal,
   LoaderCircle,
@@ -41,8 +42,11 @@ import {
 import {
   ExperimentGraphPresentationV3,
   ExperimentNumericControlV3,
+  ExperimentObservationV3,
   ExperimentOutputGridV3,
+  type ExperimentObservationGroupV3,
   type ExperimentOutputPresentationItemV3,
+  type ExperimentOutputSelectionV3,
 } from "@/components/workbench/ExperimentPanePresentationV3";
 import {
   resolveWorkbenchControlPresentationV3,
@@ -100,22 +104,31 @@ import {
 import { articleReaderPresentationOutputSelectionV3 } from "./ArticleReaderPresentationOutputSelectionV3";
 import { type ArticleReaderSessionMemoryV3, useArticleReaderLiveRuntimeV3 } from "./useArticleReaderLiveRuntimeV3";
 import {
+  ArticleReaderObservationMemoryContextV3,
+  ArticleReaderReferenceV3,
   ArticleReaderScenarioSelectorV3,
   ArticleReaderSectionsV3,
-  ArticleReaderControlSectionsV3,
-  ArticleReaderSheetDeckV3,
   ArticleReaderStageV3,
   ArticleReaderWorkbenchLayoutV3,
+  createArticleReaderObservationMemoryV3,
+  useArticleReaderObservationMemoryV3,
   type ArticleReaderEmbedLayoutV3,
   type ArticleReaderSectionV3,
-  type ArticleReaderSheetTaskV3,
 } from "./ArticleReaderEmbedV3";
 import {
   articleBriefingAnalysisRecomputeV3,
   articleBriefingViewsV3,
   type ArticleBriefingAnalysisRecomputeV3,
 } from "@/studio/application/authoring/StudioArticleBriefingPresentationV3";
-import { ArticleReaderOutputSelectionV3, ArticleReaderOutputComparisonV3, articleReaderComparableOutputIdsV3, type ArticleReaderOutputSectionV3 } from "./ArticleReaderOutputComparisonV3";
+import {
+  ARTICLE_OBSERVATION_DEFAULT_BUDGET_V3,
+  articleBriefingControlKeyV3,
+  articleBriefingOutputGroupKeyV3,
+  articleBriefingOutputKeyV3,
+  articleBriefingPrimaryControlKeysV3,
+  articleBriefingPrimaryOutputKeysV3,
+  articleReaderObservedOutputKeysV3,
+} from "@/studio/application/article/ArticleBriefingObservationV3";
 import { workbenchScenarioColorSeedV3 } from "@/components/workbench/presentation/WorkbenchGraphColorV3";
 
 export type ArticleReaderExperimentV3Props = Readonly<{
@@ -185,7 +198,9 @@ export function ArticleReaderExperimentV3({
   React.useEffect(() => { if (live) setStarted(true); }, [live]);
   const inlinePresentation = forceInline || articleBriefingPresentationV3(block.placement.briefing) === "inflow";
   const [restartGeneration, setRestartGeneration] = React.useState(0);
-  const outputSelection = React.useMemo(() => ({ current: 0 }), [snapshot?.snapshotId, restartGeneration]);
+  // The reader's observation (selected graph, observed outputs, open
+  // reference) follows the placement through inline, Peek, sheet and full.
+  const observationMemory = React.useMemo(createArticleReaderObservationMemoryV3, [snapshot?.snapshotId, restartGeneration]);
   const playbackPreference = React.useMemo(() => ({ current: { playing: true, rate: 1 } }), [snapshot?.snapshotId, restartGeneration]);
   const sessionMemory = React.useMemo<ArticleReaderSessionMemoryV3>(() => ({ pending: null, error: null }), [snapshot?.snapshotId, restartGeneration]);
   const [inlineHeight, setInlineHeight] = React.useState(0);
@@ -306,7 +321,7 @@ export function ArticleReaderExperimentV3({
       style={inlinePresentation && !live && inlineHeight > 0 ? { minHeight: inlineHeight } : undefined}
     >
       {(live || started) && contract !== null ? (
-        <ArticleReaderOutputSelectionV3.Provider value={outputSelection}>
+        <ArticleReaderObservationMemoryContextV3.Provider value={observationMemory}>
           <ArticleReaderLiveOwnerV3
             active={live}
             key={restartGeneration}
@@ -329,7 +344,7 @@ export function ArticleReaderExperimentV3({
             onOpenExperimentSession={onOpenExperimentSession}
             onPeekMaximizedChange={onPeekMaximizedChange}
           />
-        </ArticleReaderOutputSelectionV3.Provider>
+        </ArticleReaderObservationMemoryContextV3.Provider>
       ) : (
         <ArticleReaderStaticExperimentV3
           briefing={briefing}
@@ -608,17 +623,20 @@ function ArticleReaderLiveOwnerV3({
 
   if (expandedPresentation === null) {
     if (forceInline || presentation === "inflow") {
-      // Inline is a reading instrument: title, stage, controls, outputs. Playback
+      // Inline is a reading instrument: title, stage, observation, then the
+      // primary controls when the column is wide enough to operate. Playback
       // pace and model disclosure wait until the reader opens the panel.
       return (
         <ArticleReaderEmbedSurfaceV3
           layout="inline"
+          narrow={narrow}
           analysisRecompute={analysisRecompute}
           briefing={readingBriefing}
           contract={contract}
           runtime={runtime}
           snapshot={snapshot}
           onRestart={onRestart}
+          onOpen={forceInline ? undefined : () => onExpand("peek")}
           header={
             <div className="article-reader-inflow-header">
               <p className="reader-experiment-title min-w-0 flex-1">{title}</p>
@@ -678,6 +696,7 @@ function ArticleReaderLiveOwnerV3({
           {handoffError && <p role="alert" className="px-4 text-sm text-wb-danger">{handoffError}</p>}
           <ArticleReaderEmbedSurfaceV3
             layout={layout}
+            narrow={narrow}
             analysisRecompute={analysisRecompute}
             briefing={briefing}
             contract={contract}
@@ -767,8 +786,11 @@ function ArticleReaderExperimentToolbarV3({ runtime, contract, snapshot }: Reado
 
 /**
  * The one reading surface behind every extent: a graph stage (sealed views,
- * one or two graphs at a time), then controls and outputs as pane sections.
- * `layout` changes density and scroll ownership only.
+ * one or two graphs at a time), the observation (outputs kept beside the
+ * graph), the primary controls, then the sealed reference (every output,
+ * every other control) grouped by source pane. `layout` changes density and
+ * scroll ownership only; the observation and the reader's selections are the
+ * same in every extent.
  */
 function ArticleReaderEmbedSurfaceV3({
   analysisRecompute,
@@ -776,6 +798,8 @@ function ArticleReaderEmbedSurfaceV3({
   contract,
   header,
   layout,
+  narrow = false,
+  onOpen,
   onRestart,
   runtime,
   snapshot,
@@ -785,15 +809,26 @@ function ArticleReaderEmbedSurfaceV3({
   contract: ModelContractV2;
   header?: React.ReactNode;
   layout: ArticleReaderEmbedLayoutV3;
+  /** Phone-width page: an inline instrument shows graph and observation, and opens to operate. */
+  narrow?: boolean;
+  onOpen?(): void;
   onRestart?(): void;
   runtime: ArticleReaderRuntimeHookV3;
   snapshot: ExperimentSnapshotV2;
 }>) {
   const { t } = useTranslation();
   const { appTheme } = useAppTheme();
+  const memory = useArticleReaderObservationMemoryV3();
   // The selection is a pane, not a view index: pairs split and rejoin with width.
-  const [activePaneId, setActivePaneId] = React.useState<string | null>(null);
-  const [sheetTask, setSheetTask] = React.useState<ArticleReaderSheetTaskV3>("controls");
+  const [activePaneId, setActivePaneIdState] = React.useState<string | null>(memory.activePaneId);
+  const setActivePaneId = (paneId: string) => { memory.activePaneId = paneId; setActivePaneIdState(paneId); };
+  const [observedSelection, setObservedSelectionState] = React.useState<readonly string[] | null>(memory.observedOutputKeys);
+  const setObservedSelection = (keys: readonly string[] | null) => { memory.observedOutputKeys = keys; setObservedSelectionState(keys); };
+  const [referenceOpen, setReferenceOpenState] = React.useState(memory.referenceOpen);
+  const setReferenceOpen = (kind: "outputs" | "controls", open: boolean) => {
+    memory.referenceOpen = { ...memory.referenceOpen, [kind]: open };
+    setReferenceOpenState(memory.referenceOpen);
+  };
   const views = React.useMemo(() => articleBriefingViewsV3(briefing), [briefing]);
   const graphs = [...briefing.graphs].sort(compareOrderV3);
   const labelForPane = (paneId: string) => {
@@ -834,41 +869,96 @@ function ArticleReaderEmbedSurfaceV3({
       snapshot={snapshot}
     />
   );
-  const groupedOutputs = new Map<string, { scenarioId: string; outputIds: string[] }>();
-  for (const output of [...briefing.outputs].sort(compareOrderV3)) {
-    const key = `${output.sourcePaneId}\u001f${output.scenarioId}`;
-    const group = groupedOutputs.get(key) ?? { scenarioId: output.scenarioId, outputIds: [] };
-    group.outputIds.push(output.outputId); groupedOutputs.set(key, group);
-  }
-  const denseComparison = articleReaderComparableOutputIdsV3([...groupedOutputs.values()]) !== null;
+  const scenarioLabels = Object.fromEntries(snapshot.content.scenarios.map(scenario => [scenario.scenarioId, scenario.label]));
+  const observedKeys = articleReaderObservedOutputKeysV3(briefing, observedSelection);
+  const authoredKeys = articleBriefingPrimaryOutputKeysV3(briefing);
+  const primaryControlKeys = new Set(articleBriefingPrimaryControlKeysV3(briefing));
+  const primaryControls = briefing.controls.filter((control) => primaryControlKeys.has(articleBriefingControlKeyV3(control)));
+  const otherControls = briefing.controls.filter((control) => !primaryControlKeys.has(articleBriefingControlKeyV3(control)));
   const singlePv = graphs.length === 1 && contract.graphCatalog.find(graph => graph.graphId === snapshot.content.surface.graphPanes.find(pane => pane.paneId === graphs[0]?.paneId)?.graphId)?.renderer === "pressure-volume";
-  const lightInstrument = singlePv && briefing.controls.length === 0 && briefing.outputs.length <= 6;
-  const controls = briefing.controls.length > 0 ? (
-    <ArticleReaderControlsV3
-      tabbed={layout !== "workbench"}
+  const lightInstrument = layout === "inline" && singlePv && briefing.controls.length === 0 && observedKeys.length <= 6;
+  // A phone-width inline instrument keeps the graph and the observation; it
+  // opens into the sheet to operate instead of squeezing controls in flow.
+  const inlineOperable = layout !== "inline" || !narrow || onOpen === undefined;
+  const controlProps = { briefing, contract, runtime, scenarioColor, snapshot } as const;
+  useArticleReaderOutputAnalysisRequestsV3(briefing, runtime);
+  const observation = observedKeys.length > 0 ? (
+    <ArticleReaderObservationV3
       briefing={briefing}
       contract={contract}
       runtime={runtime}
+      observedKeys={observedKeys}
       scenarioColor={scenarioColor}
+      scenarioLabels={scenarioLabels}
       snapshot={snapshot}
     />
   ) : null;
-  const outputs = briefing.outputs.length > 0 ? (
-    <ArticleReaderOutputsV3
-      briefing={briefing}
-      contract={contract}
-      runtime={runtime}
-      scenarioColor={scenarioColor}
-      snapshot={snapshot}
-      scenarioLabels={Object.fromEntries(snapshot.content.scenarios.map(scenario => [scenario.scenarioId, scenario.label]))}
-    />
+  const controls = primaryControls.length > 0 && inlineOperable ? (
+    <ArticleReaderControlsV3 {...controlProps} controls={primaryControls} />
+  ) : null;
+  const openToOperate = !inlineOperable && briefing.controls.length > 0 && onOpen !== undefined ? (
+    <button type="button" className="article-reader-open-operate" onClick={onOpen} data-reader-open-operate>
+      {t("articleReader.openToOperate")}
+      <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+    </button>
+  ) : null;
+  // The reference is where the rest lives. A small all-primary instrument has
+  // nothing further to open; a large all-primary seal still lets the reader
+  // reduce what stays beside the graph.
+  const outputReference = briefing.outputs.length > 0
+    && (observedSelection !== null
+      || observedKeys.length < briefing.outputs.length
+      || observedKeys.length > ARTICLE_OBSERVATION_DEFAULT_BUDGET_V3);
+  const outputReferenceNode = outputReference ? (
+    <ArticleReaderReferenceV3
+      kind="outputs"
+      label={t("articleReader.allOutputs")}
+      count={briefing.outputs.length}
+      open={referenceOpen.outputs}
+      onToggle={(open) => setReferenceOpen("outputs", open)}
+      action={observedSelection !== null && observedKeys.join("\n") !== authoredKeys.join("\n") ? (
+        <button type="button" className="article-reader-reference-action" onClick={() => setObservedSelection(null)} data-reader-observation-reset>
+          {t("articleReader.resetObservation")}
+        </button>
+      ) : undefined}
+    >
+      <ArticleReaderOutputsV3
+        briefing={briefing}
+        contract={contract}
+        runtime={runtime}
+        scenarioColor={scenarioColor}
+        snapshot={snapshot}
+        scenarioLabels={scenarioLabels}
+        selection={{
+          selectedItemIds: new Set(observedKeys),
+          onToggle: (key) => setObservedSelection(observedKeys.includes(key)
+            ? observedKeys.filter((candidate) => candidate !== key)
+            : [...observedKeys, key]),
+          toggleLabel: (label, selected) => t(selected ? "articleReader.unobserve" : "articleReader.observe", { label }),
+        }}
+      />
+    </ArticleReaderReferenceV3>
+  ) : null;
+  const controlReferenceNode = otherControls.length > 0 && inlineOperable ? (
+    <ArticleReaderReferenceV3
+      kind="controls"
+      label={t("articleReader.moreControls")}
+      count={otherControls.length}
+      open={referenceOpen.controls}
+      onToggle={(open) => setReferenceOpen("controls", open)}
+    >
+      <ArticleReaderControlsV3 {...controlProps} controls={otherControls} />
+    </ArticleReaderReferenceV3>
+  ) : null;
+  const reference = outputReferenceNode !== null || controlReferenceNode !== null ? (
+    <div className="article-reader-references">{outputReferenceNode}{controlReferenceNode}</div>
   ) : null;
   const rootProps = {
     "data-reader-runtime-status": runtime.state.status,
     "data-reader-playback-rate": runtime.state.playbackRate.playbackRate,
     "data-reader-layout": layout,
     "data-reader-analysis-recompute": analysisRecompute,
-    "data-reader-comparison-layout": denseComparison ? "true" : undefined,
+    "data-reader-observed-count": observedKeys.length,
     className: `article-reader-embed min-w-0 ${layout === "inline" ? "article-reader-inflow" : "article-reader-live"}`,
   } as const;
 
@@ -883,7 +973,7 @@ function ArticleReaderEmbedSurfaceV3({
       </div>
     );
   }
-  if (graphs.length === 0 && controls === null && outputs === null) {
+  if (graphs.length === 0 && briefing.controls.length === 0 && briefing.outputs.length === 0) {
     return <div {...rootProps}>{header}<p className="py-12 text-sm text-wb-subtle">{t("articleReader.noGraphs")}</p></div>;
   }
   if (layout === "workbench") {
@@ -891,8 +981,8 @@ function ArticleReaderEmbedSurfaceV3({
       <div {...rootProps}>
         <ArticleReaderWorkbenchLayoutV3
           graphs={graphs.map((graph) => ({ paneId: graph.paneId, node: renderGraph(graph.paneId) }))}
-          outputs={outputs}
-          controls={controls}
+          outputs={<>{observation}{outputReferenceNode !== null && <div className="article-reader-references">{outputReferenceNode}</div>}</>}
+          controls={<>{controls}{controlReferenceNode !== null && <div className="article-reader-references">{controlReferenceNode}</div>}</>}
           status={status}
         />
       </div>
@@ -909,31 +999,212 @@ function ArticleReaderEmbedSurfaceV3({
       status={status}
     />
   );
-  if ((layout === "peek" || layout === "sheet") && denseComparison) {
-    return <div {...rootProps}>
-      {stage}
-      <div className="article-reader-interaction-deck">
-        <div className="article-reader-observation-dock">{outputs}</div>
-        {controls !== null && <div className="article-reader-operation-dock">{controls}</div>}
-      </div>
-    </div>;
-  }
-  if (layout === "sheet") {
+  if (layout === "inline") {
     return (
       <div {...rootProps}>
-        {stage}
-        <ArticleReaderSheetDeckV3 controls={controls} outputs={outputs} task={sheetTask} onTaskChange={setSheetTask} />
+        {header}
+        <div className={lightInstrument ? "article-reader-inline-instrument" : undefined}>
+          {stage}
+          <div className="article-reader-deck">{observation}{openToOperate}{controls}{reference}</div>
+        </div>
       </div>
     );
   }
+  // Peek and the phone sheet share one shell: stage and observation stay in
+  // place; the primary controls and the reference scroll beneath them.
   return (
     <div {...rootProps}>
-      {header}
-      {layout === "inline" ? <div className={lightInstrument ? "article-reader-inline-instrument" : undefined}>
-        {stage}<div className="article-reader-deck">{controls}{outputs}</div>
-      </div> : <>{stage}{(controls !== null || outputs !== null) && <div className="article-reader-deck">{controls}{outputs}</div>}</>}
+      {stage}
+      {observation}
+      <div className="article-reader-deck">{controls}{reference}</div>
     </div>
   );
+}
+
+/**
+ * Surface-pinned outputs (PVA energetics) read a settled analysis. Missing
+ * measurements of the sealed state are requested once; changed Scenarios wait
+ * for the reader's request unless the Placement re-measures automatically.
+ */
+function useArticleReaderOutputAnalysisRequestsV3(
+  briefing: ExperimentPlacementBriefingV2,
+  runtime: ArticleReaderRuntimeHookV3,
+): void {
+  const analysisScenarioIds = React.useMemo(
+    () => Object.freeze([...new Set(briefing.outputs.flatMap(({ outputId, scenarioId }) =>
+      ARTICLE_READER_PERIODIC_PVA_OUTPUT_ID_SET_V3.has(outputId) ? [scenarioId] : []))]),
+    [briefing.outputs],
+  );
+  const analysisId = mainWireFormalPvAnalysisIdV1(runtime.periodicPvaDerivation);
+  const automatic = articleBriefingAnalysisRecomputeV3(briefing) === "automatic";
+  const missingScenarioIds = analysisScenarioIds.filter((scenarioId) => {
+    if (runtime.state.changedScenarioIds.includes(scenarioId) && !automatic) return false;
+    const key = articleReaderAnalysisKeyV3(scenarioId, analysisId);
+    return runtime.state.analysisByKey[key] === undefined
+      && runtime.state.analysisErrorByKey[key] === undefined
+      && !runtime.state.pendingAnalysisKeys.includes(key);
+  });
+  const missingKey = JSON.stringify(missingScenarioIds);
+  const canRequest = runtime.state.status === "playing" || runtime.state.status === "paused";
+  React.useEffect(() => {
+    if (!canRequest || missingScenarioIds.length === 0) return;
+    void runtime.requestAnalysis({ analysisId, scenarioIds: missingScenarioIds }).catch(() => {
+      // Per-Scenario errors are rendered as unavailable outputs.
+    });
+  }, [analysisId, canRequest, missingKey, runtime.requestAnalysis]);
+}
+
+/**
+ * The observation: outputs the reader keeps beside the graph, grouped by
+ * source pane and sealed Scenario. The group heading names the pane once and
+ * its Scenario when several are open; tiles keep to label and value.
+ * Unselected outputs are simply absent here; they remain in the reference
+ * with their own values.
+ */
+export function ArticleReaderObservationV3({
+  briefing,
+  contract,
+  observedKeys,
+  runtime,
+  sampleStore,
+  scenarioColor,
+  scenarioLabels,
+  snapshot,
+}: Readonly<{
+  briefing: ExperimentPlacementBriefingV2;
+  contract: ModelContractV2;
+  observedKeys: readonly string[];
+  runtime?: ArticleReaderRuntimeHookV3;
+  sampleStore?: ArticleReaderRuntimeHookV3["sampleStore"];
+  scenarioColor?: (scenarioId: string) => string;
+  scenarioLabels?: Readonly<Record<string, string>>;
+  /** Source pane labels become group headings when provided. */
+  snapshot?: Pick<ExperimentSnapshotV2, "content">;
+}>) {
+  const { t } = useTranslation();
+  const observed = new Set(observedKeys);
+  const outputs = briefing.outputs.filter((output) => observed.has(articleBriefingOutputKeyV3(output)));
+  const items = useArticleReaderOutputItemsV3(outputs, contract, runtime, sampleStore);
+  const groups = articleReaderObservationGroupsV3(items, {
+    multiScenario: briefing.scenarioScope.visibleScenarioIds.length > 1,
+    paneLabel: (paneId) => snapshot?.content.surface.outputPanes.find((pane) => pane.paneId === paneId)?.label?.trim() || undefined,
+    scenarioLabel: (scenarioId) => scenarioLabels?.[scenarioId] ?? scenarioId,
+    scenarioColor: (scenarioId) => scenarioColor?.(scenarioId) ?? "#64748b",
+  });
+  if (items.length === 0) return null;
+  return (
+    <ExperimentObservationV3
+      className="article-reader-observation"
+      groups={groups}
+      label={t("articleReader.observation")}
+      moreLabel={(count) => t("articleReader.observedCount", { count })}
+      data-reader-observation
+      data-reader-observed-count={items.length}
+    />
+  );
+}
+
+/**
+ * Groups observed items by source pane and Scenario. Headings appear only
+ * where they distinguish: the Scenario whenever several are open, the pane
+ * label whenever it differs from the Scenario name or several panes are
+ * observed. A single pane read for a single Scenario shows tiles alone.
+ */
+export function articleReaderObservationGroupsV3(
+  items: readonly ArticleReaderOutputItemV3[],
+  naming: Readonly<{
+    multiScenario: boolean;
+    paneLabel: (paneId: string) => string | undefined;
+    scenarioLabel: (scenarioId: string) => string;
+    scenarioColor: (scenarioId: string) => string;
+  }>,
+): readonly ExperimentObservationGroupV3[] {
+  const groups = new Map<string, { sourcePaneId: string; scenarioId: string; items: ArticleReaderOutputItemV3[] }>();
+  for (const item of items) {
+    const key = articleBriefingOutputGroupKeyV3(item.sourcePaneId, item.scenarioId);
+    const group = groups.get(key) ?? { sourcePaneId: item.sourcePaneId, scenarioId: item.scenarioId, items: [] };
+    group.items.push(item);
+    groups.set(key, group);
+  }
+  const several = groups.size > 1;
+  return [...groups].map(([key, group]) => {
+    const paneLabel = naming.paneLabel(group.sourcePaneId);
+    const scenarioLabel = naming.scenarioLabel(group.scenarioId);
+    const title = paneLabel !== undefined && (several || naming.multiScenario) && paneLabel !== scenarioLabel ? paneLabel : undefined;
+    return {
+      key,
+      ...(title === undefined ? {} : { title }),
+      ...(naming.multiScenario ? { scenario: { label: scenarioLabel, colorHex: naming.scenarioColor(group.scenarioId) } } : {}),
+      items: group.items,
+    };
+  });
+}
+
+export type ArticleReaderOutputItemV3 = ExperimentOutputPresentationItemV3 & Readonly<{ scenarioId: string; sourcePaneId: string }>;
+
+/** Live values for sealed outputs, keyed by their Article-local identity. */
+function useArticleReaderOutputItemsV3(
+  outputs: readonly ExperimentPlacementBriefingV2["outputs"][number][],
+  contract: ModelContractV2,
+  runtime: ArticleReaderRuntimeHookV3 | undefined,
+  sampleStore: ArticleReaderRuntimeHookV3["sampleStore"] | undefined,
+): readonly ArticleReaderOutputItemV3[] {
+  const { i18n } = useTranslation();
+  const locale = i18n.language.startsWith("ja") ? "ja" : "en";
+  const ownedSampleStore = runtime?.sampleStore ?? sampleStore;
+  if (ownedSampleStore === undefined) {
+    throw new Error("Article Reader outputs require a sample store");
+  }
+  const samples = useWorkbenchScenarioPresentationSamplesV3(ownedSampleStore);
+  const analysisId = mainWireFormalPvAnalysisIdV1(runtime?.periodicPvaDerivation);
+  return [...outputs].sort(compareOrderV3).map((output): ArticleReaderOutputItemV3 => {
+    const definition = contract.outputCatalog.find(
+      ({ outputId }) => outputId === output.outputId,
+    );
+    const latest = samples[output.scenarioId]?.at(-1);
+    const analysisKey = articleReaderAnalysisKeyV3(output.scenarioId, analysisId);
+    const periodicPva =
+      runtime !== undefined &&
+      ARTICLE_READER_PERIODIC_PVA_OUTPUT_ID_SET_V3.has(output.outputId)
+        ? periodicPvaFromAnalysisV3(
+            runtime.state.analysisByKey[analysisKey],
+            "left",
+            runtime.periodicPvaDerivation,
+          )
+        : undefined;
+    const presentationOutput = runtime?.presentationOutput?.(output.scenarioId, output.outputId);
+    const value = ARTICLE_READER_PERIODIC_PVA_OUTPUT_ID_SET_V3.has(output.outputId)
+      ? articleReaderPeriodicPvaScalarV3(periodicPva, output.outputId)
+      : presentationOutput === undefined ? latest?.values[output.outputId] : presentationOutput.value;
+    const scalar = typeof value === "number" && Number.isFinite(value) ? value : null;
+    const presentation = resolveWorkbenchOutputPresentationV3({
+      locale,
+      outputId: output.outputId,
+      outputKind: definition?.kind,
+      storedLabel: output.label,
+    });
+    return {
+      itemId: articleBriefingOutputKeyV3(output),
+      outputId: output.outputId,
+      scenarioId: output.scenarioId,
+      sourcePaneId: output.sourcePaneId,
+      label: presentation.label,
+      ...(presentation.description
+        ? {
+            description: presentation.description,
+            descriptionAriaLabel:
+              locale === "ja"
+                ? `${presentation.label}の説明`
+                : `About ${presentation.label}`,
+          }
+        : {}),
+      value: scalar,
+      unit: definition?.unit ?? "",
+      significantDigits: definition?.significantDigits,
+      availability: scalar === null ? "unavailable" : "available",
+      quality: scalar === null ? "not-assessed" : "assessed",
+    };
+  });
 }
 
 /** Scenario colour as the graphs allocate it, for section swatches. */
@@ -1033,9 +1304,9 @@ export function ArticleReaderAnalysisStatusV3({
       <div className="article-reader-analysis-status" data-reader-analysis-state="error">
         <CircleAlert className="h-3.5 w-3.5 text-wb-danger" aria-hidden="true" />
         <span title={failed[0]!.error}>{t("articleReader.analysisError")}</span>
-        <button type="button" disabled={!canRequest} onClick={() => request(failed.map(({ scenarioId }) => scenarioId))}>
+        <button type="button" disabled={!canRequest} onClick={() => request(failed.map(({ scenarioId }) => scenarioId))} aria-label={t("articleReader.recomputeAnalysis")}>
           <RotateCw className="h-3.5 w-3.5" aria-hidden="true" />
-          {t("articleReader.recomputeAnalysis")}
+          <span className="article-reader-analysis-action-label">{t("articleReader.recomputeAnalysis")}</span>
         </button>
       </div>
     );
@@ -1044,9 +1315,9 @@ export function ArticleReaderAnalysisStatusV3({
     return (
       <div className="article-reader-analysis-status" data-reader-analysis-state="stale" data-reader-analysis-stale-scenarios={stale.map(({ scenarioId }) => scenarioId).join(" ")}>
         <span title={t("articleReader.analysisStaleHint")}>{t("articleReader.analysisStale")}</span>
-        <button type="button" disabled={!canRequest} onClick={() => request(stale.map(({ scenarioId }) => scenarioId))} data-reader-recompute-analysis>
+        <button type="button" disabled={!canRequest} onClick={() => request(stale.map(({ scenarioId }) => scenarioId))} data-reader-recompute-analysis aria-label={t("articleReader.recomputeAnalysis")}>
           <RotateCw className="h-3.5 w-3.5" aria-hidden="true" />
-          {t("articleReader.recomputeAnalysis")}
+          <span className="article-reader-analysis-action-label">{t("articleReader.recomputeAnalysis")}</span>
         </button>
       </div>
     );
@@ -1773,164 +2044,54 @@ export function ArticleReaderStructuralReturnGraphV3({
   );
 }
 
+/**
+ * Every sealed output, grouped by source pane and Scenario. With `selection`
+ * each tile toggles its membership in the observation; the sealed content
+ * and each item's Scenario never change.
+ */
 export function ArticleReaderOutputsV3({
   briefing,
-  compact = false,
   contract,
   runtime,
   sampleStore,
   scenarioColor,
   scenarioLabels,
+  selection,
   snapshot,
 }: Readonly<{
   briefing: ExperimentPlacementBriefingV2;
-  compact?: boolean;
   contract: ModelContractV2;
   runtime?: ArticleReaderRuntimeHookV3;
-  /** @deprecated Direct rendering tests may provide a store without a runtime. */
+  /** Direct rendering tests may provide a store without a runtime. */
   sampleStore?: ArticleReaderRuntimeHookV3["sampleStore"];
   scenarioColor?: (scenarioId: string) => string;
   scenarioLabels?: Readonly<Record<string, string>>;
+  selection?: ExperimentOutputSelectionV3;
   /** Source pane labels become section titles when provided. */
   snapshot?: Pick<ExperimentSnapshotV2, "content">;
 }>) {
-  const { i18n, t } = useTranslation();
-  const locale = i18n.language.startsWith("ja") ? "ja" : "en";
-  const ownedSampleStore = runtime?.sampleStore ?? sampleStore;
-  if (ownedSampleStore === undefined) {
-    throw new Error("Article Reader outputs require a sample store");
-  }
-  const samples = useWorkbenchScenarioPresentationSamplesV3(ownedSampleStore);
-  const analysisScenarioIds = React.useMemo(
-    () =>
-      Object.freeze([
-        ...new Set(
-          briefing.outputs.flatMap(({ outputId, scenarioId }) =>
-            ARTICLE_READER_PERIODIC_PVA_OUTPUT_ID_SET_V3.has(outputId)
-              ? [scenarioId]
-              : [],
-          ),
-        ),
-      ]),
-    [briefing.outputs],
-  );
-  const analysisId =
-    mainWireFormalPvAnalysisIdV1(runtime?.periodicPvaDerivation);
-  const missingAnalysisScenarioIds = analysisScenarioIds.filter(
-    (scenarioId) => {
-      if (runtime === undefined) return false;
-      // Changed Scenarios wait for the reader's request unless automatic.
-      if (runtime.state.changedScenarioIds.includes(scenarioId) && articleBriefingAnalysisRecomputeV3(briefing) !== "automatic") return false;
-      const key = articleReaderAnalysisKeyV3(scenarioId, analysisId);
-      return (
-        runtime.state.analysisByKey[key] === undefined &&
-        runtime.state.analysisErrorByKey[key] === undefined &&
-        !runtime.state.pendingAnalysisKeys.includes(key)
-      );
-    },
-  );
-  const missingAnalysisKey = JSON.stringify(missingAnalysisScenarioIds);
-  const canRequestAnalysis =
-    runtime?.state.status === "playing" || runtime?.state.status === "paused";
-  React.useEffect(() => {
-    if (
-      runtime === undefined ||
-      !canRequestAnalysis ||
-      missingAnalysisScenarioIds.length === 0
-    )
-      return;
-    void runtime
-      .requestAnalysis({
-        analysisId,
-        scenarioIds: missingAnalysisScenarioIds,
-      })
-      .catch(() => {
-        // Per-Scenario errors are rendered as unavailable outputs below.
-      });
-  }, [
-    analysisId,
-    canRequestAnalysis,
-    missingAnalysisKey,
-    runtime?.requestAnalysis,
-  ]);
-  const items = [...briefing.outputs].sort(compareOrderV3).map((output): ExperimentOutputPresentationItemV3 & { scenarioId: string; sourcePaneId: string } => {
-    const definition = contract.outputCatalog.find(
-      ({ outputId }) => outputId === output.outputId,
-    );
-    const latest = samples[output.scenarioId]?.at(-1);
-    const analysisKey = articleReaderAnalysisKeyV3(
-      output.scenarioId,
-      analysisId,
-    );
-    const periodicPva =
-      runtime !== undefined &&
-      ARTICLE_READER_PERIODIC_PVA_OUTPUT_ID_SET_V3.has(output.outputId)
-        ? periodicPvaFromAnalysisV3(
-            runtime.state.analysisByKey[analysisKey],
-            "left",
-            runtime.periodicPvaDerivation,
-          )
-        : undefined;
-    const presentationOutput = runtime?.presentationOutput?.(output.scenarioId, output.outputId);
-    const value = ARTICLE_READER_PERIODIC_PVA_OUTPUT_ID_SET_V3.has(
-      output.outputId,
-    )
-      ? articleReaderPeriodicPvaScalarV3(periodicPva, output.outputId)
-      : presentationOutput === undefined ? latest?.values[output.outputId] : presentationOutput.value;
-    const scalar =
-      typeof value === "number" && Number.isFinite(value) ? value : null;
-    const presentation = resolveWorkbenchOutputPresentationV3({
-      locale,
-      outputId: output.outputId,
-      outputKind: definition?.kind,
-      storedLabel: output.label,
-    });
-    return {
-      itemId: `${output.sourcePaneId}:${output.outputId}:${output.scenarioId}`,
-      outputId: output.outputId,
-      scenarioId: output.scenarioId,
-      sourcePaneId: output.sourcePaneId,
-      label: presentation.label,
-      ...(presentation.description
-        ? {
-            description: presentation.description,
-            descriptionAriaLabel:
-              locale === "ja"
-                ? `${presentation.label}の説明`
-                : `About ${presentation.label}`,
-          }
-        : {}),
-      value: scalar,
-      unit: definition?.unit ?? "",
-      significantDigits: definition?.significantDigits,
-      availability: scalar === null ? "unavailable" : "available",
-      quality: scalar === null ? "not-assessed" : "assessed",
-    };
-  });
+  const { t } = useTranslation();
+  const items = useArticleReaderOutputItemsV3(briefing.outputs, contract, runtime, sampleStore);
   // A section is one source output pane read for one Scenario: the pane label
   // is the section title, so authors group by meaning or by Scenario simply
   // by composing panes in the Workbench.
-  const sectionKey = (item: { sourcePaneId: string; scenarioId: string }) => `${item.sourcePaneId}${item.scenarioId}`;
+  const sectionKey = (item: { sourcePaneId: string; scenarioId: string }) => articleBriefingOutputGroupKeyV3(item.sourcePaneId, item.scenarioId);
   const sectionKeys = [...new Set(items.map(sectionKey))];
   const multiScenario = briefing.scenarioScope.visibleScenarioIds.length > 1;
-  const outputSections: ArticleReaderOutputSectionV3[] = sectionKeys.map((key) => {
+  const sections: ArticleReaderSectionV3[] = sectionKeys.map((key) => {
     const sectionItems = items.filter(item => sectionKey(item) === key);
     const first = sectionItems[0]!;
     const paneLabel = snapshot?.content.surface.outputPanes.find(pane => pane.paneId === first.sourcePaneId)?.label?.trim();
     const scenarioLabel = scenarioLabels?.[first.scenarioId] ?? first.scenarioId;
-    return { key, scenarioId: first.scenarioId, title: paneLabel || (multiScenario ? scenarioLabel : t("articleReader.outputs")),
-      scenarioLabel, color: scenarioColor?.(first.scenarioId) ?? "#64748b", items: sectionItems };
+    return {
+      key,
+      title: paneLabel || (multiScenario ? scenarioLabel : t("articleReader.outputs")),
+      ...(multiScenario ? { scenario: { label: scenarioLabel, colorHex: scenarioColor?.(first.scenarioId) ?? "#64748b" } } : {}),
+      body: <ExperimentOutputGridV3 variant="article" className="article-reader-outputs" items={sectionItems} selection={selection} />,
+    };
   });
-  const comparableIds = articleReaderComparableOutputIdsV3(outputSections.map(section => ({
-    scenarioId: section.scenarioId, outputIds: section.items.map(item => item.outputId!),
-  })));
-  if (comparableIds) return <ArticleReaderOutputComparisonV3 sections={outputSections} outputIds={comparableIds} />;
   return <ArticleReaderSectionsV3 kind="outputs" label={t("articleReader.outputs")}
-    showHeaders={outputSections.length > 1 || multiScenario}
-    sections={outputSections.map(section => ({ key: section.key, title: section.title,
-      ...(multiScenario ? { scenario: { label: section.scenarioLabel, colorHex: section.color } } : {}),
-      body: <ExperimentOutputGridV3 variant="article" className="article-reader-outputs" items={section.items} />,
-    }))} />;
+    showHeaders={sections.length > 1 || multiScenario} sections={sections} />;
 }
 
 function articleReaderPeriodicPvaScalarV3(
@@ -1966,16 +2127,21 @@ function articleReaderPeriodicPvaScalarV3(
   }
 }
 
+/**
+ * Controls grouped by source pane. The pane's sealed Scenario binding is the
+ * section heading, never a reader choice; when a section drives several
+ * targets or a legacy reader-focus binding, every row names its own target.
+ */
 function ArticleReaderControlsV3({
-  tabbed = false,
   briefing,
+  controls: selectedControls,
   contract,
   runtime,
   scenarioColor,
   snapshot,
 }: Readonly<{
-  tabbed?: boolean;
   briefing: ExperimentPlacementBriefingV2;
+  controls: readonly ExperimentPlacementBriefingControlV2[];
   contract: ModelContractV2;
   runtime: ArticleReaderRuntimeHookV3;
   scenarioColor: (scenarioId: string) => string;
@@ -1988,25 +2154,25 @@ function ArticleReaderControlsV3({
   const scenarioLabel = (scenarioId: string) =>
     snapshot.content.scenarios.find((scenario) => scenario.scenarioId === scenarioId)?.label ?? scenarioId;
   const selectionDisabled = runtime.state.status !== "playing" && runtime.state.status !== "paused";
-  const sourcePaneIds = [...new Set([...briefing.controls].sort(compareOrderV3).map(({ sourcePaneId }) => sourcePaneId))];
-  // A section is one source control pane. Its Scenario binding was sealed
-  // with the Briefing, so the target is a heading, not a reader choice. Legacy
-  // reader-focus bindings keep a selector directly above their controls.
+  const sourcePaneIds = [...new Set([...selectedControls].sort(compareOrderV3).map(({ sourcePaneId }) => sourcePaneId))];
   const sections: ArticleReaderSectionV3[] = sourcePaneIds.map((sourcePaneId) => {
-    const controls = [...briefing.controls].filter((control) => control.sourcePaneId === sourcePaneId).sort(compareOrderV3);
+    const controls = [...selectedControls].filter((control) => control.sourcePaneId === sourcePaneId).sort(compareOrderV3);
     const pane = snapshot.content.surface.controlPanes.find((candidate) => candidate.paneId === sourcePaneId);
     const readerFocusBinding = controls.map(({ binding }) => binding).find((binding) => binding.mode === "reader-focus");
-    const fixedTargets = [...new Set(controls.flatMap((control) =>
-      control.binding.mode === "fixed" ? control.binding.scenarioIds : []))]
-      .filter((scenarioId) => briefing.scenarioScope.visibleScenarioIds.includes(scenarioId));
+    // One heading names the target only when every control in the pane
+    // shares the same sealed binding; otherwise each row names its own.
+    const bindingSignatures = new Set(controls.map((control) => articleReaderControlBindingSignatureV3(control, briefing.scenarioScope.visibleScenarioIds)));
+    const sharedFixedTargets = bindingSignatures.size === 1 && controls[0]?.binding.mode === "fixed"
+      ? controls[0].binding.scenarioIds.filter((scenarioId) => briefing.scenarioScope.visibleScenarioIds.includes(scenarioId))
+      : [];
     const allowed = readerFocusBinding?.mode === "reader-focus"
       ? visibleScenarios.filter(({ scenarioId }) => readerFocusBinding.allowedScenarioIds.includes(scenarioId))
       : [];
     return {
       key: sourcePaneId,
       title: pane?.label?.trim() || t("articleReader.controls"),
-      ...(multiScenario && fixedTargets.length > 0 && readerFocusBinding === undefined
-        ? { scenario: { label: fixedTargets.map(scenarioLabel).join(", "), colorHex: scenarioColor(fixedTargets[0]!) } }
+      ...(multiScenario && sharedFixedTargets.length > 0
+        ? { scenario: { label: sharedFixedTargets.map(scenarioLabel).join(", "), colorHex: scenarioColor(sharedFixedTargets[0]!) } }
         : {}),
       ...(readerFocusBinding !== undefined && allowed.length > 1 ? {
         lead: (
@@ -2033,7 +2199,8 @@ function ArticleReaderControlsV3({
                 control={control}
                 definition={definition}
                 runtime={runtime}
-                showTarget={multiScenario && readerFocusBinding !== undefined && allowed.length <= 1}
+                scenarioColor={scenarioColor}
+                showTarget={multiScenario && (readerFocusBinding !== undefined || bindingSignatures.size > 1)}
                 snapshot={snapshot}
               />
             );
@@ -2042,7 +2209,6 @@ function ArticleReaderControlsV3({
       ),
     };
   });
-  if (tabbed) return <ArticleReaderControlSectionsV3 sections={sections} />;
   return (
     <ArticleReaderSectionsV3
       kind="controls"
@@ -2053,11 +2219,22 @@ function ArticleReaderControlsV3({
   );
 }
 
+/** Two controls share a heading only when they read and drive the same Scenarios the same way. */
+export function articleReaderControlBindingSignatureV3(
+  control: Pick<ExperimentPlacementBriefingControlV2, "binding">,
+  visibleScenarioIds: readonly string[],
+): string {
+  const scenarioIds = (control.binding.mode === "fixed" ? control.binding.scenarioIds : control.binding.allowedScenarioIds)
+    .filter((scenarioId) => visibleScenarioIds.includes(scenarioId));
+  return `${control.binding.mode}\u001f${[...scenarioIds].sort().join("\u001e")}`;
+}
+
 export function ArticleReaderControlV3({
   briefing,
   control,
   definition,
   runtime,
+  scenarioColor,
   showTarget = true,
   snapshot,
 }: Readonly<{
@@ -2065,6 +2242,7 @@ export function ArticleReaderControlV3({
   control: ExperimentPlacementBriefingControlV2;
   definition: ControlDefinitionV2;
   runtime: ArticleReaderRuntimeHookV3;
+  scenarioColor?: (scenarioId: string) => string;
   /** The section heading already names the target when false. */
   showTarget?: boolean;
   snapshot: ExperimentSnapshotV2;
@@ -2168,7 +2346,7 @@ export function ArticleReaderControlV3({
   });
   const contextLabel =
     targetLabels.length > 0
-      ? showTarget ? targetLabels.join(", ") : undefined
+      ? showTarget ? t("articleReader.controlTarget", { scenarios: targetLabels.join(", ") }) : undefined
       : control.binding.mode === "reader-focus"
         ? t("articleReader.noControlTarget")
         : undefined;
@@ -2178,6 +2356,7 @@ export function ArticleReaderControlV3({
   return (
     <ExperimentNumericControlV3
       contextLabel={contextLabel}
+      contextColorHex={showTarget && targetIds[0] !== undefined ? scenarioColor?.(targetIds[0]) : undefined}
       control={definition}
       {...(presentation.description
         ? {
