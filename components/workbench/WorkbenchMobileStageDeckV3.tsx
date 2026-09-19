@@ -148,7 +148,9 @@ export function WorkbenchMobileStageDeckV3({
   useWorkbenchRememberedReadingsV3(readings);
   const observedKeys = resolveWorkbenchObservedKeysV3(observedSelection, readings);
   const observedSet = new Set(observedKeys);
-  const observedGroups = projectWorkbenchObservationV3(readings, observedKeys);
+  const observedGroups = projectWorkbenchObservationV3(readings, observedKeys, {
+    genericTitles: [t("workbench.live.mobilePaneAreas.output"), t("workbench.live.outputArea")],
+  });
   const observedCount = observedGroups.reduce((total, group) => total + group.items.length, 0);
   const outputSelectionFor = (pane: WorkbenchPaneDefinitionV3): ExperimentOutputSelectionV3 | undefined =>
     readOutputPane === undefined || onObservedSelectionChange === undefined ? undefined : {

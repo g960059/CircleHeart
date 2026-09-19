@@ -428,6 +428,9 @@ const OUTPUT_LABEL_BY_ID_V3: Readonly<Record<string, string>> = Object.freeze({
   "oxygen.delivery-to-consumption-ratio": "O₂ delivery / consumption",
 });
 
+/** Stored label of an output pane the Workbench creates; it names the role, not a target. */
+export const WORKBENCH_DEFAULT_OUTPUT_PANE_LABEL_V3 = "Outputs";
+
 export function createDefaultExperimentSurfaceV3(
   contract: ModelContractV2,
   initialScenarioId: string = WORKBENCH_SCENARIO_ID_V3,
@@ -504,7 +507,7 @@ export function createDefaultExperimentSurfaceV3(
   const outputPane: ExperimentSurfaceOutputPaneV2 = Object.freeze({
     paneId: "outputs-primary",
     role: "output",
-    label: "Outputs",
+    label: WORKBENCH_DEFAULT_OUTPUT_PANE_LABEL_V3,
     order: 0,
     priority: 40,
     binding: Object.freeze({ mode: "active-slot" as const }),

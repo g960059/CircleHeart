@@ -118,6 +118,29 @@ describe("phone Workbench observation over pane readings", () => {
     expect(workbenchObservedOutputKeyV3("pane/a", "b")).not.toBe(workbenchObservedOutputKeyV3("pane/ab", ""));
   });
 
+  it("hides a heading on screen only when one group, one Scenario and a title that only repeats the target", () => {
+    const memory = new WorkbenchLastMeasuredOutputsV1();
+    const single = (title: string, extra: Partial<WorkbenchOutputPaneReadingV3> = {}): WorkbenchOutputPaneReadingV3 => ({
+      ...reading([current], memory), title, scenarioLabel: "基準", scenario: undefined, ...extra,
+    });
+    const options = { genericTitles: ["出力"] };
+    // Title repeats the only Scenario, or is the generic role word: hidden, still titled for assistive technology.
+    expect(projectWorkbenchObservationV3([single("基準")], [key], options)[0]).toMatchObject({ title: "基準", headingHidden: true });
+    expect(projectWorkbenchObservationV3([single("出力")], [key], options)[0]).toMatchObject({ headingHidden: true });
+    // The stored default title of a Workbench output pane is generic in every locale.
+    expect(projectWorkbenchObservationV3([single("Outputs")], [key])[0]).toMatchObject({ headingHidden: true });
+    expect(projectWorkbenchObservationV3([single(" outputs ")], [key])[0]).toMatchObject({ headingHidden: true });
+    expect(projectWorkbenchObservationV3([single("  ")], [key], options)[0]).toMatchObject({ headingHidden: true });
+    // A semantic title stays visible even alone.
+    expect(projectWorkbenchObservationV3([single("弁関連")], [key], options)[0]?.headingHidden).toBeUndefined();
+    // Several open Scenarios: the pane's Scenario identifies the values, so the heading stays.
+    expect(projectWorkbenchObservationV3([single("基準", { scenario: { label: "基準", colorHex: "#000" } })], [key], options)[0]?.headingHidden).toBeUndefined();
+    // Two groups: both headings stay even when titles only name the Scenario.
+    const second: WorkbenchOutputPaneReadingV3 = { ...single("基準"), paneId: "pane/b" };
+    const two = projectWorkbenchObservationV3([single("基準"), second], [key, workbenchObservedOutputKeyV3("pane/b", "co")], options);
+    expect(two.map((group) => group.headingHidden)).toEqual([undefined, undefined]);
+  });
+
   it("resolves the Session selection against the panes that exist and keeps an explicit empty choice", () => {
     const readings = [reading([current, { ...current, itemId: "sv", outputId: "sv" }], new WorkbenchLastMeasuredOutputsV1())];
     expect(resolveWorkbenchObservedKeysV3(null, readings)).toEqual([key, workbenchObservedOutputKeyV3("pane/a", "sv")]);

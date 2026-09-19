@@ -43,6 +43,11 @@ export type ExperimentObservationGroupV3 = Readonly<{
   title?: string;
   scenario?: Readonly<{ label: string; colorHex: string }>;
   following?: boolean;
+  /**
+   * The heading adds nothing on screen (one group, one Scenario, a title
+   * that only repeats it): it is kept for assistive technology only.
+   */
+  headingHidden?: boolean;
   items: readonly ExperimentOutputPresentationItemV3[];
 }>;
 
@@ -272,10 +277,11 @@ export function ExperimentObservationV3({
       <div className="experiment-observation-groups">
         {groups.filter((group) => group.items.length > 0).map((group) => {
           const heading = group.title !== undefined || group.scenario !== undefined;
+          const hidden = group.headingHidden === true;
           return (
-            <div key={group.key} className="experiment-observation-group" data-observation-group={group.key}>
+            <div key={group.key} className="experiment-observation-group" data-observation-group={group.key} data-observation-heading={heading ? (hidden ? "hidden" : "visible") : "none"}>
               {heading && (
-                <h4 className="experiment-observation-heading">
+                <h4 className={hidden ? "sr-only" : "experiment-observation-heading"}>
                   {group.scenario && <span className="workbench-output-scenario-swatch" style={{ backgroundColor: group.scenario.colorHex }} aria-hidden="true" />}
                   <span className="experiment-observation-heading-text">
                     {group.title !== undefined && <span className="experiment-observation-title">{group.title}</span>}

@@ -6,6 +6,18 @@ import type {
 } from "../ExperimentPanePresentationV3";
 import type { WorkbenchLastMeasuredOutputsV1 } from "./WorkbenchLastMeasuredOutputsV1";
 import { defaultObservedItemKeysV3 } from "@/studio/application/article/ArticleBriefingObservationV3";
+import { WORKBENCH_DEFAULT_OUTPUT_PANE_LABEL_V3 } from "@/components/workbench/WorkbenchSurfaceV3";
+
+/**
+ * Whether a pane label only names the output role (the stored default
+ * `Outputs`, or the current locale's role words) rather than a subject such
+ * as valves or a Scenario. Compared trimmed and case-insensitively.
+ */
+export function isGenericOutputPaneLabelV3(label: string, localeRoleWords: readonly string[] = []): boolean {
+  const normalized = label.trim().toLowerCase();
+  if (normalized.length === 0) return true;
+  return [WORKBENCH_DEFAULT_OUTPUT_PANE_LABEL_V3, ...localeRoleWords].some((word) => word.trim().toLowerCase() === normalized);
+}
 
 /**
  * The phone Workbench observation: a few measurement tiles kept between the
@@ -34,6 +46,8 @@ export type WorkbenchOutputPaneReadingV3 = Readonly<{
   /** Whether the pane's Scenario follows the active slot or is fixed. */
   bindingMode: "active-slot" | "fixed";
   scenarioId: string | null;
+  /** Label of the resolved Scenario, whatever the number of Scenarios. */
+  scenarioLabel?: string;
   /** Tiles as materialized for this render; not yet projected through memory. */
   measured: readonly Item[];
   memory: WorkbenchLastMeasuredOutputsV1;
@@ -61,24 +75,38 @@ export function resolveWorkbenchObservedKeysV3(
  * Render-phase projection only: retained previous values are read from
  * memory, never written. One group per pane keeps the pane's title and its
  * resolved Scenario once; tiles carry a Session-unique identity.
+ *
+ * The heading is hidden on screen (kept for assistive technology) only when
+ * it would add nothing: a single observed group, a single open Scenario, and
+ * a title that merely repeats that Scenario or the generic role word. A
+ * semantic title, a second group, or a pane scoped to one of several
+ * Scenarios keeps its heading.
  */
 export function projectWorkbenchObservationV3(
   readings: readonly WorkbenchOutputPaneReadingV3[],
   observedKeys: readonly string[],
+  options: Readonly<{ genericTitles?: readonly string[] }> = {},
 ): readonly ExperimentObservationGroupV3[] {
   const observed = new Set(observedKeys);
-  return readings.flatMap((reading) => {
+  const groups = readings.flatMap((reading) => {
     const items = reading.memory.project(reading.measured, reading.previousValueNotice)
       .filter((item) => observed.has(workbenchObservedOutputKeyV3(reading.paneId, item.itemId)))
       .map((item) => ({ ...item, itemId: workbenchObservedOutputKeyV3(reading.paneId, item.itemId) }));
-    if (items.length === 0) return [];
-    return [{
+    return items.length === 0 ? [] : [{ reading, items }];
+  });
+  return groups.map(({ reading, items }) => {
+    const title = reading.title.trim();
+    const titleOnlyNamesTarget = isGenericOutputPaneLabelV3(title, options.genericTitles ?? [])
+      || (reading.scenarioLabel !== undefined && title === reading.scenarioLabel.trim());
+    const headingHidden = groups.length === 1 && reading.scenario === undefined && titleOnlyNamesTarget;
+    return {
       key: reading.paneId,
       title: reading.title,
       ...(reading.scenario === undefined ? {} : { scenario: reading.scenario }),
       following: reading.bindingMode === "active-slot",
+      ...(headingHidden ? { headingHidden: true } : {}),
       items,
-    }];
+    };
   });
 }
 

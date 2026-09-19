@@ -3194,6 +3194,7 @@ export const WorkbenchSession = ({
       title: projected.pane.label,
       bindingMode: projected.pane.binding.mode,
       scenarioId: projected.scenarioId,
+      ...(scenario === undefined ? {} : { scenarioLabel: scenario.label }),
       measured,
       memory: projected.scope.memory,
       previousValueNotice: workbenchPreviousMeasurementNoticeV3(resolvedLocale),

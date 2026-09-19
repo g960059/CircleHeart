@@ -130,6 +130,7 @@ import {
   articleReaderObservedOutputKeysV3,
 } from "@/studio/application/article/ArticleBriefingObservationV3";
 import { workbenchScenarioColorSeedV3 } from "@/components/workbench/presentation/WorkbenchGraphColorV3";
+import { isGenericOutputPaneLabelV3 } from "@/components/workbench/presentation/WorkbenchObservationV3";
 
 export type ArticleReaderExperimentV3Props = Readonly<{
   block: StudioArticleExperimentBlockV2;
@@ -1090,6 +1091,7 @@ export function ArticleReaderObservationV3({
     paneLabel: (paneId) => snapshot?.content.surface.outputPanes.find((pane) => pane.paneId === paneId)?.label?.trim() || undefined,
     scenarioLabel: (scenarioId) => scenarioLabels?.[scenarioId] ?? scenarioId,
     scenarioColor: (scenarioId) => scenarioColor?.(scenarioId) ?? "#64748b",
+    genericTitles: [t("articleReader.outputs"), t("workbench.live.mobilePaneAreas.output")],
   });
   if (items.length === 0) return null;
   return (
@@ -1117,6 +1119,8 @@ export function articleReaderObservationGroupsV3(
     paneLabel: (paneId: string) => string | undefined;
     scenarioLabel: (scenarioId: string) => string;
     scenarioColor: (scenarioId: string) => string;
+    /** Current-locale role words that, as a pane title, name nothing beyond the role. */
+    genericTitles?: readonly string[];
   }>,
 ): readonly ExperimentObservationGroupV3[] {
   const groups = new Map<string, { sourcePaneId: string; scenarioId: string; items: ArticleReaderOutputItemV3[] }>();
@@ -1130,11 +1134,19 @@ export function articleReaderObservationGroupsV3(
   return [...groups].map(([key, group]) => {
     const paneLabel = naming.paneLabel(group.sourcePaneId);
     const scenarioLabel = naming.scenarioLabel(group.scenarioId);
-    const title = paneLabel !== undefined && (several || naming.multiScenario) && paneLabel !== scenarioLabel ? paneLabel : undefined;
+    const distinguishes = (several || naming.multiScenario) && paneLabel !== scenarioLabel;
+    // One pane, one Scenario: the heading is visible only when the title
+    // says more than the target (a subject such as valves); a title that
+    // repeats the Scenario or merely names the role remains for assistive
+    // technology so the group is still named.
+    const title = paneLabel !== undefined && (distinguishes || !naming.multiScenario) ? paneLabel : undefined;
+    const headingHidden = title !== undefined && !several && !naming.multiScenario
+      && (paneLabel === scenarioLabel || isGenericOutputPaneLabelV3(paneLabel ?? "", naming.genericTitles ?? []));
     return {
       key,
       ...(title === undefined ? {} : { title }),
       ...(naming.multiScenario ? { scenario: { label: scenarioLabel, colorHex: naming.scenarioColor(group.scenarioId) } } : {}),
+      ...(headingHidden ? { headingHidden: true } : {}),
       items: group.items,
     };
   });

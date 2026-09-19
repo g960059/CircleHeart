@@ -424,6 +424,91 @@ async function rotation() {
   return errors;
 }
 
+/**
+ * Typography and heading rules on the phone Workbench: the study Snapshot
+ * (three Scenarios, three panes) and browser-local variants of it with one
+ * Scenario, seeded only into this isolated context.
+ */
+async function typography() {
+  const errors = [];
+  const variants = [
+    { id: "snapshot/dev-typography-single-baseline", panes: [{ paneId: "output-baseline", label: "基準" }] },
+    { id: "snapshot/dev-typography-single-valves", panes: [{ paneId: "output-baseline", label: "弁関連", outputs: "valves" }] },
+    { id: "snapshot/dev-typography-two-panes", panes: [{ paneId: "output-baseline", label: "基準" }, { paneId: "output-valves", label: "弁関連", outputs: "valves" }] },
+  ];
+  const seedVariants = (page) => page.evaluate((variants) => {
+    const key = "circleheart.studio.browser-content.v9";
+    const store = JSON.parse(localStorage.getItem(key));
+    const source = store.snapshots.find((s) => s.snapshotId === "snapshot/dev-article-embed-study-v3");
+    const valveItems = source.content.surface.outputPanes.find((p) => p.paneId === "output-valves-tbv-plus-1000").items;
+    const baselineItems = source.content.surface.outputPanes.find((p) => p.paneId === "output-baseline").items;
+    for (const variant of variants) {
+      const snapshot = structuredClone(source);
+      snapshot.snapshotId = variant.id;
+      snapshot.content.scenarios = snapshot.content.scenarios.filter((s) => s.scenarioId === "scenario/baseline");
+      snapshot.content.surface.outputPanes = variant.panes.map((pane, order) => ({
+        paneId: pane.paneId, role: "output", label: pane.label, order, priority: 100 - order,
+        binding: { mode: "fixed", scenarioId: "scenario/baseline" },
+        items: (pane.outputs === "valves" ? valveItems : baselineItems).slice(0, 6),
+      }));
+      snapshot.content.surface.controlPanes = snapshot.content.surface.controlPanes.filter((p) => p.paneId === "control-baseline");
+      store.snapshots = [...store.snapshots.filter((s) => s.snapshotId !== variant.id), snapshot];
+    }
+    localStorage.setItem(key, JSON.stringify(store));
+  }, variants);
+  const headings = (page) => page.locator("[data-testid='workbench-mobile-observation'] [data-observation-group]").evaluateAll((nodes) =>
+    nodes.map((node) => ({ group: node.getAttribute("data-observation-group"), heading: node.getAttribute("data-observation-heading"), text: node.querySelector("h4")?.textContent ?? null })));
+  const styles = (page) => page.evaluate(() => {
+    const pick = (selector) => { const el = document.querySelector(selector); if (!el) return null; const s = getComputedStyle(el); return { fontSize: s.fontSize, fontWeight: s.fontWeight, lineHeight: s.lineHeight, color: s.color, borderBottom: s.borderBottomWidth }; };
+    return {
+      observationHeading: pick(".workbench-mobile-observation .experiment-observation-heading"),
+      observationLabel: pick(".workbench-mobile-observation .workbench-output-label"),
+      observationValue: pick(".workbench-mobile-observation .workbench-output-value"),
+      observationTile: pick(".workbench-mobile-observation .workbench-output-item"),
+      graphTab: pick(".workbench-mobile-graph-view-tab[aria-selected='true']"),
+      taskTab: pick(".workbench-mobile-task-tab[aria-selected='true']"),
+      paneTitle: pick(".workbench-mobile-pane-group-toggle"),
+      controlLabel: pick(".workbench-mobile-pane-group-body .workbench-control-label"),
+      controlValue: pick(".workbench-mobile-pane-group-body .workbench-control-number"),
+    };
+  });
+  for (const theme of ["dark", "light"]) {
+    for (const viewport of [{ width: 390, height: 844 }, { width: 320, height: 568 }, { width: 844, height: 390 }]) {
+      const context = await browser.newContext({ viewport, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+      await context.addInitScript((value) => localStorage.setItem("circleheart.app.theme", value), theme);
+      const page = await context.newPage();
+      page.on("pageerror", (error) => errors.push(error.message));
+      await seed(page);
+      await seedVariants(page);
+      const tag = `${theme}-${viewport.width}x${viewport.height}`;
+      const open = async (snapshotId, name) => {
+        await page.goto(`${origin}/ja/snapshots/${encodeURIComponent(snapshotId)}`);
+        await page.getByTestId("workbench-mobile-observation").waitFor({ timeout: 180_000 });
+        await page.waitForTimeout(2500);
+        await page.screenshot({ path: join(outputDir, `typography-${name}-${tag}.png`) });
+        record(`typography-${name}-${tag}`, { headings: await headings(page), styles: await styles(page), overflow: await overflow(page),
+          firstSlider: await box(page.getByRole("slider").first()) });
+      };
+      await open("snapshot/dev-article-embed-study-v3", "multi");
+      if (viewport.width === 390) {
+        // The ordinary fresh Workbench: one Scenario, one pane stored as "Outputs" (following the active slot).
+        await page.goto(`${origin}/ja/experiments/new`);
+        await page.getByTestId("workbench-mobile-observation").waitFor({ timeout: 180_000 });
+        await page.waitForTimeout(2500);
+        await page.screenshot({ path: join(outputDir, `typography-fresh-default-${tag}.png`) });
+        record(`typography-fresh-default-${tag}`, { headings: await headings(page), overflow: await overflow(page), firstSlider: await box(page.getByRole("slider").first()) });
+      }
+      if (viewport.width === 390 || theme === "light") {
+        await open("snapshot/dev-typography-single-baseline", "single-baseline");
+        await open("snapshot/dev-typography-single-valves", "single-valves");
+        await open("snapshot/dev-typography-two-panes", "two-panes");
+      }
+      await context.close();
+    }
+  }
+  return errors;
+}
+
 /** Authoring: the Briefing editor's item emphasis toggles and phone-width preview. */
 async function editor() {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -487,6 +572,7 @@ const runners = {
   landscape: ["landscape", () => phone("landscape-844x390", { width: 844, height: 390 }, { landscape: true })],
   workbench: ["workbench", () => workbench()],
   rotation: ["rotation", () => rotation()],
+  typography: ["typography", () => typography()],
   editor: ["editor", () => editor()],
 };
 for (const [phase, [key, run]] of Object.entries(runners)) {

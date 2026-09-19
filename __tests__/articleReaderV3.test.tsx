@@ -36,6 +36,7 @@ import {
   ArticleReaderObservationV3,
   ArticleReaderOutputsV3,
   articleReaderControlBindingSignatureV3,
+  articleReaderObservationGroupsV3,
   ArticleReaderStructuralReturnGraphV3,
   articleReaderAnalysisScenarioIdsV3,
   articleReaderPeriodicPvaEnabledV3,
@@ -1792,6 +1793,37 @@ describe("Article Reader observation rendering", () => {
     expect(selected).toContain('data-observed-count="2"');
     expect(selected).toContain(`data-output-id="${workbenchObservedOutputKeyV3("pane/b", "b8")}"`);
     expect(render([])).not.toContain('data-testid="workbench-mobile-observation"');
+  });
+
+  it("names a lone single-Scenario group for assistive technology only, and shows semantic or distinguishing titles", () => {
+    const item = (sourcePaneId: string, scenarioId: string, outputId: string) => ({
+      itemId: `${sourcePaneId}/${outputId}/${scenarioId}`, outputId, sourcePaneId, scenarioId, label: outputId, value: 1, unit: "mL",
+    });
+    const naming = (multiScenario: boolean, labels: Record<string, string | undefined>) => ({
+      multiScenario, paneLabel: (paneId: string) => labels[paneId], scenarioLabel: (scenarioId: string) => scenarioId === "s/a" ? "基準" : "TBV +500", scenarioColor: () => "#000",
+    });
+    // One pane, one Scenario, title equal to the Scenario: hidden heading, still titled.
+    const lone = articleReaderObservationGroupsV3([item("pane/a", "s/a", "o1")], naming(false, { "pane/a": "基準" }));
+    expect(lone[0]).toMatchObject({ title: "基準", headingHidden: true });
+    expect(lone[0]?.scenario).toBeUndefined();
+    // The stored default pane title names only the role: hidden like the Scenario name.
+    expect(articleReaderObservationGroupsV3([item("pane/o", "s/a", "o1")], naming(false, { "pane/o": "Outputs" }))[0]).toMatchObject({ title: "Outputs", headingHidden: true });
+    expect(articleReaderObservationGroupsV3([item("pane/o", "s/a", "o1")], { ...naming(false, { "pane/o": "出力" }), genericTitles: ["出力"] })[0]?.headingHidden).toBe(true);
+    // One pane, one Scenario, semantic title: visible heading.
+    expect(articleReaderObservationGroupsV3([item("pane/v", "s/a", "o1")], naming(false, { "pane/v": "弁関連" }))[0]).toMatchObject({ title: "弁関連" });
+    expect(articleReaderObservationGroupsV3([item("pane/v", "s/a", "o1")], naming(false, { "pane/v": "弁関連" }))[0]?.headingHidden).toBeUndefined();
+    // Two panes, one Scenario: both titles visible.
+    const two = articleReaderObservationGroupsV3([item("pane/a", "s/a", "o1"), item("pane/v", "s/a", "o2")], naming(false, { "pane/a": "基準", "pane/v": "弁関連" }));
+    expect(two.map((group) => [group.title, group.headingHidden])).toEqual([["基準", undefined], ["弁関連", undefined]]);
+    // One observed group among several Scenarios: the Scenario names it; a title equal to it is dropped.
+    const amid = articleReaderObservationGroupsV3([item("pane/b", "s/b", "o1")], naming(true, { "pane/b": "TBV +500" }));
+    expect(amid[0]).toMatchObject({ scenario: { label: "TBV +500" } });
+    expect(amid[0]?.title).toBeUndefined();
+    expect(amid[0]?.headingHidden).toBeUndefined();
+    const rendered = renderToStaticMarkup(<ExperimentObservationV3 groups={lone} label="obs" moreLabel={(count) => `${count}`} />);
+    expect(rendered).toContain('data-observation-heading="hidden"');
+    expect(rendered).toContain('<h4 class="sr-only">');
+    expect(rendered).not.toContain("experiment-observation-heading\"");
   });
 
   it("keeps the following marker whether or not the pane title already names its Scenario", () => {
