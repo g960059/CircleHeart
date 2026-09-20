@@ -1,8 +1,10 @@
-import type {
-  ExperimentPlacementBriefingControlV2,
-  ExperimentPlacementBriefingItemEmphasisV2,
-  ExperimentPlacementBriefingOutputV2,
-  ExperimentPlacementBriefingV2,
+import {
+  STUDIO_BRIEFING_PRIMARY_CONTROL_LIMIT_V2,
+  STUDIO_BRIEFING_PRIMARY_OUTPUT_LIMIT_V2,
+  type ExperimentPlacementBriefingControlV2,
+  type ExperimentPlacementBriefingItemEmphasisV2,
+  type ExperimentPlacementBriefingOutputV2,
+  type ExperimentPlacementBriefingV2,
 } from "@/studio/contracts/v2/content";
 
 /**
@@ -12,8 +14,8 @@ import type {
  * Emphasis is item-level and Article-local. It never changes an item's
  * Scenario binding, its value, or whether it can be operated; every sealed
  * item stays reachable from the same Placement. The author's primary marks
- * are the initial observation; a reader may re-select outputs during reading
- * without changing the sealed Briefing.
+ * are the first screen and the initial observation; a reader may re-select
+ * outputs in an opened form without changing the sealed Briefing.
  */
 
 /** Item keys are Article-local identities; outputs include their sealed Scenario. */
@@ -29,8 +31,19 @@ export function articleBriefingControlKeyV3(
   return `${control.sourcePaneId}\u001f${control.controlId}`;
 }
 
+/**
+ * Bounds of the primary sets, counted in sealed references (an output read
+ * for two Scenarios is two). Six tiles are about two rows of three on a
+ * 320px phone and two controllers are two slider rows; the budget keeps the
+ * first screen short without promising that every device shows all of it at
+ * once (three headed groups on a short phone scroll inside the observation's
+ * bound). The sealed content behind them has no such bound.
+ */
+export const ARTICLE_PRIMARY_OUTPUT_LIMIT_V3 = STUDIO_BRIEFING_PRIMARY_OUTPUT_LIMIT_V2;
+export const ARTICLE_PRIMARY_CONTROL_LIMIT_V3 = STUDIO_BRIEFING_PRIMARY_CONTROL_LIMIT_V2;
+
 /** Comfortable observation on a phone: two rows of three measurements. */
-export const ARTICLE_OBSERVATION_DEFAULT_BUDGET_V3 = 6;
+export const ARTICLE_OBSERVATION_DEFAULT_BUDGET_V3 = ARTICLE_PRIMARY_OUTPUT_LIMIT_V3;
 
 /**
  * Initial observation for content sealed without emphasis. Each group (a
@@ -60,9 +73,10 @@ export function articleBriefingHasItemEmphasisV3(
 }
 
 /**
- * Output keys the author placed in the observation, in sealed order. Content
+ * Output keys the author placed on the first screen, in sealed order. Content
  * sealed before item emphasis derives the initial observation from its
- * groups; an explicit all-supporting seal yields an empty observation.
+ * groups, bounded by the primary limit; an explicit all-supporting seal
+ * yields an empty observation.
  */
 export function articleBriefingPrimaryOutputKeysV3(
   briefing: Pick<ExperimentPlacementBriefingV2, "outputs">,
@@ -73,14 +87,15 @@ export function articleBriefingPrimaryOutputKeysV3(
       .filter((output) => output.emphasis === "primary")
       .map(articleBriefingOutputKeyV3));
   }
-  return defaultObservedItemKeysV3(articleBriefingOutputGroupsV3(outputs).map((group) => ({
+  return Object.freeze(defaultObservedItemKeysV3(articleBriefingOutputGroupsV3(outputs).map((group) => ({
     keys: group.outputs.map(articleBriefingOutputKeyV3),
-  })));
+  }))).slice(0, ARTICLE_PRIMARY_OUTPUT_LIMIT_V3));
 }
 
 /**
- * Control keys the author placed in the observation. Without emphasis the
- * first sealed controller pane is the one the reader uses first.
+ * Control keys the author placed on the first screen. Without emphasis the
+ * first sealed controller pane is the one the reader uses first, bounded by
+ * the primary limit.
  */
 export function articleBriefingPrimaryControlKeysV3(
   briefing: Pick<ExperimentPlacementBriefingV2, "controls">,
@@ -94,7 +109,17 @@ export function articleBriefingPrimaryControlKeysV3(
   const firstPaneId = controls[0]?.sourcePaneId;
   return Object.freeze(controls
     .filter((control) => control.sourcePaneId === firstPaneId)
+    .slice(0, ARTICLE_PRIMARY_CONTROL_LIMIT_V3)
     .map(articleBriefingControlKeyV3));
+}
+
+/** Whether one more item may join the primary set of its role. */
+export function articleBriefingPrimaryRoomV3(
+  role: "outputs" | "controls",
+  primaryCount: number,
+): boolean {
+  const limit = role === "outputs" ? ARTICLE_PRIMARY_OUTPUT_LIMIT_V3 : ARTICLE_PRIMARY_CONTROL_LIMIT_V3;
+  return primaryCount < limit;
 }
 
 /** One reading group is a source pane read for one Scenario. */
@@ -126,8 +151,9 @@ export function articleBriefingOutputGroupsV3(
 /**
  * Resolves a reader's ephemeral output selection against the sealed
  * Briefing: unknown keys are dropped and sealed order is restored, so a
- * selection made in one extent reads identically in every other extent.
- * `null` means the reader has not changed the author's observation.
+ * selection made in one opened form reads identically in every other.
+ * `null` means the reader has not changed the author's observation; an
+ * explicit empty selection stays empty.
  */
 export function articleReaderObservedOutputKeysV3(
   briefing: Pick<ExperimentPlacementBriefingV2, "outputs">,
@@ -138,6 +164,23 @@ export function articleReaderObservedOutputKeysV3(
   return Object.freeze(sortedByOrderV3(briefing.outputs)
     .map(articleBriefingOutputKeyV3)
     .filter((key) => selected.has(key)));
+}
+
+/**
+ * Source panes whose controllers open first in an opened form: every pane
+ * holding a primary controller, or the first sealed pane when none is
+ * primary. The other panes wait collapsed one tap away.
+ */
+export function articleBriefingInitialOpenControlPaneIdsV3(
+  briefing: Pick<ExperimentPlacementBriefingV2, "controls">,
+): readonly string[] {
+  const controls = sortedByOrderV3(briefing.controls);
+  const primary = new Set(articleBriefingPrimaryControlKeysV3(briefing));
+  const open = new Set(controls
+    .filter((control) => primary.has(articleBriefingControlKeyV3(control)))
+    .map((control) => control.sourcePaneId));
+  if (open.size === 0 && controls[0] !== undefined) open.add(controls[0].sourcePaneId);
+  return Object.freeze([...open]);
 }
 
 /** Seals explicit emphasis for every item so a later edit is never ambiguous. */

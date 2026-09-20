@@ -363,15 +363,22 @@ export type ExperimentPlacementBriefingGraphV2 = Readonly<{
 /**
  * Item-level reading emphasis shared by outputs and controls.
  *
- * `primary` items form the observation the reader keeps in view while
- * operating: they sit beside the graph in every extent. `supporting` items
- * remain sealed content that the reader opens from the same Placement and may
- * bring into the observation. Emphasis never changes an item's Scenario
- * binding, its value, or whether it can be operated. Placements sealed before
- * item emphasis carry no value; the Reader then derives an initial
- * observation from the sealed order.
+ * `primary` items form the first screen: they sit beside the graph in every
+ * extent, and in the Article column they are all the reader sees. `supporting`
+ * items remain sealed content that the reader opens from the same Placement
+ * and may bring into the observation. Emphasis never changes an item's
+ * Scenario binding, its value, or whether it can be operated. Placements
+ * sealed before item emphasis carry no value; the Reader then derives an
+ * initial observation from the sealed order.
+ *
+ * The primary sets are bounded to keep the first screen short: six output
+ * references (pane, item and Scenario each) and two controllers. This is the
+ * agreed reading budget, not a fit guarantee; a short phone still scrolls the
+ * observation inside its bound. The sealed content itself is unbounded.
  */
 export type ExperimentPlacementBriefingItemEmphasisV2 = "primary" | "supporting";
+export const STUDIO_BRIEFING_PRIMARY_OUTPUT_LIMIT_V2 = 6;
+export const STUDIO_BRIEFING_PRIMARY_CONTROL_LIMIT_V2 = 2;
 
 export type ExperimentPlacementBriefingOutputV2 = Readonly<{
   /** Source identity is provenance inside the pinned immutable Snapshot. */

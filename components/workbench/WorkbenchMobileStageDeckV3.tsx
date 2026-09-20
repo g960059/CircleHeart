@@ -201,7 +201,6 @@ export function WorkbenchMobileStageDeckV3({
           className="workbench-mobile-observation"
           groups={observedGroups}
           label={t("workbench.live.observation")}
-          moreLabel={(count) => t("workbench.live.observedCount", { count })}
           followingLabel={t("workbench.live.paneBindingModeActive")}
           data-testid="workbench-mobile-observation"
           data-observed-count={observedCount}

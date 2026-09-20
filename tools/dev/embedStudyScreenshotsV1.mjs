@@ -59,9 +59,11 @@ async function overflow(page) {
   // Visually hidden (sr-only) text is clipped and never paints; only painted boxes count.
   return page.evaluate(() => ({
     documentWider: document.documentElement.scrollWidth > window.innerWidth,
+    // The graph tab strip scrolls sideways by design; anything else past the panel edge is a defect.
     panelWider: [...document.querySelectorAll(".article-reader-embed")].some((embed) => {
       const limit = embed.getBoundingClientRect().right;
-      return [...embed.querySelectorAll("*")].some((el) => !el.closest(".sr-only") && el.getClientRects().length > 0 && el.getBoundingClientRect().right > limit + 1);
+      return [...embed.querySelectorAll("*")].some((el) => !el.closest(".sr-only") && !el.closest(".workbench-mobile-graph-view-tabs")
+        && el.getClientRects().length > 0 && el.getBoundingClientRect().right > limit + 1);
     }),
   }));
 }
@@ -80,7 +82,11 @@ async function loop(page, scope) {
     viewport, stage, stageVisible: inside(stage), observation, observationVisible: inside(observation),
     observedCount: observedTiles.length, observedTiles,
     slidersVisible: sliderBoxes.filter(inside).length, sliderCount: sliderBoxes.length,
-    referenceSummaries: await scope.locator(".article-reader-reference-toggle").allTextContents(),
+    deckTabs: await scope.locator("[data-reader-deck-tab]").allTextContents(),
+    deckTask: await scope.locator("[data-reader-deck]").getAttribute("data-reader-deck-task").catch(() => null),
+    controlPanes: await scope.locator("[data-reader-sections='controls'] .article-reader-section").evaluateAll((nodes) =>
+      nodes.map((node) => `${node.getAttribute("data-reader-section")}:${node.getAttribute("data-reader-section-collapsed")}`)),
+    observationScrollable: await scope.locator("[data-reader-observation]").evaluate((el) => el.scrollHeight > el.clientHeight + 1).catch(() => false),
     overflow: await overflow(page),
   };
 }
@@ -98,10 +104,14 @@ async function moveFirstSlider(page, scope, from = 0.27, to = 0.45) {
   }
   return { sliderValue: await slider.inputValue(), afterMs: null };
 }
+/** Opened forms: the deck's outputs task lists every sealed output as an observation toggle. */
+async function showDeckTask(scope, task) {
+  const tab = scope.locator(`[data-reader-deck-tab='${task}']`);
+  if (await tab.count() && (await tab.getAttribute("aria-selected")) !== "true") await tab.click();
+}
 async function toggleOutput(scope, label) {
-  const ref = scope.locator("[data-reader-reference='outputs']");
-  if ((await ref.getAttribute("data-reader-reference-open")) !== "true") await ref.locator(".article-reader-reference-toggle").click();
-  const tile = ref.locator(".workbench-output-item").filter({ has: scope.page().locator(`.workbench-output-label:text-is("${label}")`) }).first();
+  await showDeckTask(scope, "outputs");
+  const tile = scope.locator("[data-reader-sections='outputs'] .workbench-output-item").filter({ has: scope.page().locator(`.workbench-output-label:text-is("${label}")`) }).first();
   await tile.locator(".workbench-output-toggle").click();
 }
 
@@ -154,7 +164,7 @@ async function desktop(theme) {
   const full = await loop(page, panel);
   record("desktop-dark-full", { ...full, overflowSources: await overflowSources(panel),
     selectionKept: JSON.stringify(full.observedTiles.map((t) => t.label)) === JSON.stringify(reselected.observedTiles.map((t) => t.label)),
-    sliderValue: await panel.getByRole("slider").first().inputValue(), referenceOpen: await panel.locator("[data-reader-reference='outputs']").getAttribute("data-reader-reference-open") });
+    sliderValue: await panel.getByRole("slider").first().inputValue(), outputToggles: await panel.locator("[data-reader-sections='outputs'] .workbench-output-toggle").count() });
   await page.setViewportSize({ width: 1100, height: 700 });
   await page.waitForTimeout(1200);
   await page.screenshot({ path: join(outputDir, "desktop-dark-full-1100x700.png") });
@@ -164,12 +174,19 @@ async function desktop(theme) {
   await page.waitForTimeout(1500);
   const back = await loop(page, panel);
   record("desktop-dark-back-to-peek", { selectionKept: JSON.stringify(back.observedTiles.map((t) => t.label)) === JSON.stringify(reselected.observedTiles.map((t) => t.label)),
-    activePane: await panel.locator(".article-reader-stage").getAttribute("data-reader-stage-active-pane"), sliderValue: await panel.getByRole("slider").first().inputValue() });
+    activePane: await panel.locator(".article-reader-stage").getAttribute("data-reader-stage-active-pane"), sliderValue: await panel.getByRole("slider").first().inputValue(),
+    deckTask: back.deckTask });
+  await showDeckTask(panel, "outputs");
   await panel.locator("[data-reader-observation-reset]").click();
   await page.waitForTimeout(500);
   record("desktop-dark-reset", { observedTiles: (await loop(page, panel)).observedTiles.map((t) => t.label) });
+  // Closing returns the Article column to the author's first screen; reopening restores the reader's deck.
   await page.keyboard.press("Escape");
   await page.waitForTimeout(800);
+  const inlineCompare = placement(page, "study-inline-compare");
+  await inlineCompare.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(800);
+  record("desktop-dark-inline-after-close", { ...(await loop(page, inlineCompare)), openToOperate: await inlineCompare.locator("[data-reader-open-operate]").count() });
 
   // Reader-focus placement: the control names its target; outputs keep their sealed Scenario.
   const focusAnchor = await anchorOf(page, "study-peek-reader-focus");
@@ -194,11 +211,18 @@ async function phone(name, viewport, { landscape = false } = {}) {
   await seed(page);
   await page.goto(ARTICLE);
   if (!landscape) {
+    // The Article column: the author's primary outputs and controllers at phone width, nothing folded.
     const inline = await focusPlacement(page, "study-inline-compare");
     await waitLive(inline);
     await page.waitForTimeout(3500);
     await page.screenshot({ path: join(outputDir, `${name}-inline.png`) });
     record(`${name}-inline`, { ...(await loop(page, inline)), openToOperate: await inline.locator("[data-reader-open-operate]").count() });
+    // Sealed controllers without a primary mark: graph and values, and one row to open.
+    const openOperate = await focusPlacement(page, "study-inline-open-operate");
+    await waitLive(openOperate);
+    await page.waitForTimeout(2500);
+    await page.screenshot({ path: join(outputDir, `${name}-inline-open-operate.png`) });
+    record(`${name}-inline-open-operate`, { ...(await loop(page, openOperate)), openToOperate: await openOperate.locator("[data-reader-open-operate]").count() });
   }
   const anchor = await anchorOf(page, "study-peek-heavy");
   await anchor.click();
@@ -214,41 +238,41 @@ async function phone(name, viewport, { landscape = false } = {}) {
   record(`${name}-sheet-after-control`, { ...moved, ...(await loop(page, panel)) });
   await toggleOutput(panel, "LVEF");
   await page.waitForTimeout(800);
-  await page.screenshot({ path: join(outputDir, `${name}-sheet-reference.png`) });
-  record(`${name}-sheet-reference`, { ...(await loop(page, panel)), referenceTiles: await panel.locator("[data-reader-reference='outputs'] .workbench-output-item").count() });
+  await page.screenshot({ path: join(outputDir, `${name}-sheet-outputs.png`) });
+  record(`${name}-sheet-outputs`, { ...(await loop(page, panel)), outputToggles: await panel.locator("[data-reader-sections='outputs'] .workbench-output-toggle").count(),
+    reset: await panel.locator("[data-reader-observation-reset]").count() });
   // The loop after a control change: graph, bounded observation, analysis strip
-  // and the current control on one screen, with the reference collapsed.
-  await panel.locator("[data-reader-reference='outputs'] .article-reader-reference-toggle").click();
-  await panel.locator(".article-reader-deck").evaluate((deck) => deck.scrollTo(0, 0));
+  // and the current control on one screen, with the controls task showing.
+  await showDeckTask(panel, "controls");
+  await panel.locator(".article-reader-deck-panel").evaluate((deck) => deck.scrollTo(0, 0));
   await page.waitForTimeout(500);
   await page.screenshot({ path: join(outputDir, `${name}-loop.png`) });
-  record(`${name}-loop`, { ...(await loop(page, panel)), status: await box(panel.locator("[data-reader-analysis-state]").first()),
-    observationScrollable: await panel.locator("[data-reader-observation]").evaluate((el) => el.scrollHeight > el.clientHeight + 1),
-    more: await panel.locator("[data-observation-more]").count() });
-  // A long reader selection stays bounded and honest: the count opens the rest in place.
+  record(`${name}-loop`, { ...(await loop(page, panel)), status: await box(panel.locator("[data-reader-analysis-state]").first()) });
+  // A long reader selection stays bounded: the strip scrolls inside its bound and never covers the controls.
   for (const label of ["LVEDP", "AV 拍出量/分", "平均AoP", "AoP max", "CVP", "mLAP"]) await toggleOutput(panel, label);
-  await panel.locator("[data-reader-reference='outputs'] .article-reader-reference-toggle").click();
-  await panel.locator(".article-reader-deck").evaluate((deck) => deck.scrollTo(0, 0));
+  await showDeckTask(panel, "controls");
+  await panel.locator(".article-reader-deck-panel").evaluate((deck) => deck.scrollTo(0, 0));
   await page.waitForTimeout(700);
   await page.screenshot({ path: join(outputDir, `${name}-loop-long.png`) });
   const long = await loop(page, panel);
-  record(`${name}-loop-long`, { ...long, more: await panel.locator("[data-observation-more]").allTextContents(),
-    observationScrollable: await panel.locator("[data-reader-observation]").evaluate((el) => el.scrollHeight > el.clientHeight + 1) });
-  const affordance = () => panel.locator("[data-observation-more]").evaluate((el) => {
-    const r = el.getBoundingClientRect(); const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-    return { y: Math.round(r.y), bottom: Math.round(r.bottom), inViewport: r.y >= 0 && r.bottom <= window.innerHeight, visibleAtCenter: !!top && (el.contains(top) || top.contains(el)) };
-  }).catch(() => null);
-  record(`${name}-loop-long-affordance`, { affordance: await affordance() });
-  if (await panel.locator("[data-observation-more]").count()) {
-    await panel.locator("[data-observation-more]").click();
-    await page.waitForTimeout(500);
-    await page.screenshot({ path: join(outputDir, `${name}-loop-long-expanded.png`) });
-    record(`${name}-loop-long-expanded`, { ...(await loop(page, panel)), expanded: await panel.locator("[data-reader-observation]").getAttribute("data-observation-expanded"),
-      affordance: await affordance(), observationScrollable: await panel.locator("[data-reader-observation]").evaluate((el) => el.scrollHeight > el.clientHeight + 1) });
-    await panel.locator("[data-observation-more]").click();
-    await page.waitForTimeout(300);
-    record(`${name}-loop-long-collapsed`, { expanded: await panel.locator("[data-reader-observation]").getAttribute("data-observation-expanded") });
+  const deckTop = (await box(panel.locator("[data-reader-deck]")))?.y ?? null;
+  record(`${name}-loop-long`, { ...long, deckTop, observationBelowDeck: long.observation !== null && deckTop !== null && long.observation.bottom <= deckTop + 1 });
+  // Folding the open pane and opening another keeps the deck in place.
+  const otherPane = panel.locator("[data-reader-sections='controls'] .article-reader-section[data-reader-section-collapsed='true'] .article-reader-section-toggle").first();
+  if (await otherPane.count()) {
+    await otherPane.click();
+    await page.waitForTimeout(400);
+    record(`${name}-loop-other-pane`, { ...(await loop(page, panel)) });
   }
+  // Closing returns the Article column to the author's first screen; reopening restores the reader's selection.
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(800);
+  await anchor.click();
+  await panel.waitFor();
+  await page.waitForTimeout(1200);
+  const reopened = await loop(page, panel);
+  record(`${name}-sheet-reopened`, { observedTiles: reopened.observedTiles.map((t) => t.label), deckTask: reopened.deckTask,
+    selectionKept: JSON.stringify(reopened.observedTiles.map((t) => t.label)) === JSON.stringify(long.observedTiles.map((t) => t.label)) });
   await context.close();
   return errors;
 }
@@ -317,23 +341,11 @@ async function workbench() {
       plot: gridCols.length && gridRows.length ? { left: Math.round(gridCols[0] / scale), right: Math.round(gridCols.at(-1) / scale), top: Math.round(gridRows[0] / scale), bottom: Math.round(gridRows.at(-1) / scale),
         width: Math.round((gridCols.at(-1) - gridCols[0]) / scale), height: Math.round((gridRows.at(-1) - gridRows[0]) / scale) } : null };
   });
-  const affordance = async (scope) => scope.locator("[data-observation-more]").evaluate((el) => {
-    const r = el.getBoundingClientRect(); const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-    return { y: Math.round(r.y), bottom: Math.round(r.bottom), visibleAtCenter: !!top && (el.contains(top) || top.contains(el)) };
-  }).catch(() => null);
   record("workbench-mobile-small", { ...stageBounds, plotRegion,
     plotInsideStage: stageBounds.canvas !== null && stageBounds.canvas.bottom <= stageBounds.stage.bottom && stageBounds.canvas.top >= (stageBounds.rail?.bottom ?? 0),
-    firstSlider: await box(page.getByRole("slider").first()), affordance: await affordance(page), overflow: await overflow(page) });
-  // Expanding the count keeps its collapse target on screen; collapsing returns.
-  if (await page.locator("[data-observation-more]").count()) {
-    await page.locator("[data-observation-more]").click();
-    await page.waitForTimeout(400);
-    await page.screenshot({ path: join(outputDir, "workbench-mobile-small-expanded.png") });
-    record("workbench-mobile-small-expanded", { affordance: await affordance(page), expanded: await page.getByTestId("workbench-mobile-observation").getAttribute("data-observation-expanded") });
-    await page.locator("[data-observation-more]").click();
-    await page.waitForTimeout(300);
-    record("workbench-mobile-small-collapsed", { expanded: await page.getByTestId("workbench-mobile-observation").getAttribute("data-observation-expanded") });
-  }
+    firstSlider: await box(page.getByRole("slider").first()),
+    observationScrollable: await page.getByTestId("workbench-mobile-observation").evaluate((el) => el.scrollHeight > el.clientHeight + 1).catch(() => null),
+    overflow: await overflow(page) });
   await context.close();
   return errors;
 }
@@ -403,12 +415,7 @@ async function rotation() {
   await page.screenshot({ path: join(outputDir, "rotation-landscape.png") });
   record("rotation-landscape", { ...landscape,
     kept: { graph: landscape.graphTab === portrait.graphTab, observed: JSON.stringify(landscape.observed) === JSON.stringify(portrait.observed), slider: landscape.sliderValue === portrait.sliderValue, target: landscape.controlTarget === portrait.controlTarget, noNewAnalysis: landscape.analysisRequests === portrait.analysisRequests } });
-  // Expand/collapse the count and open settings while sideways.
-  if (await page.locator("[data-observation-more]").count()) {
-    await page.locator("[data-observation-more]").click(); await page.waitForTimeout(300);
-    record("rotation-landscape-expanded", { expanded: await page.getByTestId("workbench-mobile-observation").getAttribute("data-observation-expanded"), affordance: await box(page.locator("[data-observation-more]")) });
-    await page.locator("[data-observation-more]").click(); await page.waitForTimeout(300);
-  }
+  // Open settings while sideways.
   await page.locator("[data-mobile-pane-group-role='control'] [data-testid^='control-pane-binding-']").first().click();
   await page.waitForTimeout(600);
   await page.screenshot({ path: join(outputDir, "rotation-landscape-binding.png") });
@@ -539,23 +546,31 @@ async function editor() {
   await page.waitForTimeout(800);
   await page.screenshot({ path: join(outputDir, "editor-reading-form.png") });
   const preview = page.getByTestId("article-briefing-phone-preview-v3");
-  record("editor-reading-form", {
-    previewOutputs: await preview.locator(".article-briefing-phone-frame").getAttribute("data-primary-outputs"),
-    previewControls: await preview.locator(".article-briefing-phone-frame").getAttribute("data-primary-controls"),
-    previewText: await preview.locator("p").last().textContent(),
+  const counts = async () => ({
     primaryOutputs: await page.locator("[data-briefing-output-primary='true']").count(),
     supportingOutputs: await page.locator("[data-briefing-output-primary='false']").count(),
     primaryControls: await page.locator("[data-briefing-control-primary='true']").count(),
-  });
-  // Toggle one supporting output to primary and confirm the preview follows.
-  const toggle = page.locator("[data-briefing-output-primary='false'] .article-briefing-primary-toggle").first();
-  await toggle.scrollIntoViewIfNeeded();
-  await toggle.click();
-  await page.waitForTimeout(500);
-  record("editor-toggle-primary", {
-    primaryOutputs: await page.locator("[data-briefing-output-primary='true']").count(),
+    blocked: await page.locator("[data-briefing-primary-blocked='true']").count(),
+    outputsCount: await page.getByTestId("article-briefing-primary-outputs-count-v3").textContent().catch(() => null),
+    controlsCount: await page.getByTestId("article-briefing-primary-controls-count-v3").textContent().catch(() => null),
     previewOutputs: await preview.locator(".article-briefing-phone-frame").getAttribute("data-primary-outputs"),
+    previewControls: await preview.locator(".article-briefing-phone-frame").getAttribute("data-primary-controls"),
   });
+  record("editor-reading-form", { ...(await counts()), previewText: await preview.locator("p").last().textContent() });
+  // A full primary set blocks a further mark; unmarking one frees a place and the preview follows.
+  const blockedToggle = page.locator("[data-briefing-output-primary='false'] .article-briefing-primary-toggle").first();
+  await blockedToggle.scrollIntoViewIfNeeded();
+  await blockedToggle.click();
+  await page.waitForTimeout(400);
+  record("editor-toggle-blocked", await counts());
+  const primaryToggle = page.locator("[data-briefing-output-primary='true'] .article-briefing-primary-toggle").first();
+  await primaryToggle.scrollIntoViewIfNeeded();
+  await primaryToggle.click();
+  await page.waitForTimeout(400);
+  record("editor-toggle-unmark", await counts());
+  await blockedToggle.click();
+  await page.waitForTimeout(400);
+  record("editor-toggle-primary", await counts());
   await preview.scrollIntoViewIfNeeded();
   await page.screenshot({ path: join(outputDir, "editor-reading-form-toggled.png") });
   await context.close();

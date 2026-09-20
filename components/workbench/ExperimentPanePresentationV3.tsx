@@ -1,5 +1,5 @@
 import React from "react";
-import { Check, ChevronRight, Plus, Undo2 } from "lucide-react";
+import { Check, Plus, Undo2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { studioNumericControlValueIssueV2 } from "@/studio/contracts/v2/control";
@@ -229,50 +229,31 @@ const ExperimentOutputTileV3 = React.memo(function ExperimentOutputTileV3({
 
 /**
  * The observation kept beside the graph: grouped measurement tiles in a
- * bounded strip. When the strip cannot show every observed value, the count
- * says so and opens the whole selection in place; nothing is dropped. The
- * caller bounds the strip (Article Peek/sheet, phone Workbench); unbounded
- * containers never overflow, so no affordance appears.
+ * bounded strip. The caller bounds the strip (Article Peek/sheet, phone
+ * Workbench); a selection longer than the bound scrolls inside it. Nothing
+ * is dropped and nothing expands over the controls beneath.
  */
 export function ExperimentObservationV3({
   groups,
   label,
-  moreLabel,
   className = "",
   followingLabel,
   ...sectionProps
 }: Readonly<{
   groups: readonly ExperimentObservationGroupV3[];
   label: string;
-  /** Count affordance text, e.g. "7 observed". */
-  moreLabel: (count: number) => string;
   className?: string;
   /** Word shown beside a Scenario that follows the active slot. */
   followingLabel?: string;
 }> & Omit<React.HTMLAttributes<HTMLElement>, "children" | "className">) {
-  const rootRef = React.useRef<HTMLElement>(null);
-  const [overflowing, setOverflowing] = React.useState(false);
-  const [expanded, setExpanded] = React.useState(false);
   const count = groups.reduce((total, group) => total + group.items.length, 0);
-  React.useLayoutEffect(() => {
-    const element = rootRef.current;
-    if (element === null || typeof ResizeObserver === "undefined") return undefined;
-    const measure = () => setOverflowing(element.scrollHeight > element.clientHeight + 1);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [count, expanded]);
   if (count === 0) return null;
   return (
     <section
-      ref={rootRef}
       {...sectionProps}
       className={`experiment-observation ${className}`.trim()}
       aria-label={label}
       data-observation-count={count}
-      data-observation-expanded={expanded ? "true" : undefined}
-      data-observation-overflow={overflowing ? "true" : undefined}
     >
       <div className="experiment-observation-groups">
         {groups.filter((group) => group.items.length > 0).map((group) => {
@@ -308,22 +289,6 @@ export function ExperimentObservationV3({
           );
         })}
       </div>
-      {(overflowing || expanded) && (
-        // A bar at the strip's bottom edge, never over a tile: the groups
-        // reserve its height, so the last row scrolls fully into view.
-        <div className="experiment-observation-bar">
-          <button
-            type="button"
-            className="experiment-observation-more"
-            aria-expanded={expanded}
-            onClick={() => setExpanded((current) => !current)}
-            data-observation-more
-          >
-            {moreLabel(count)}
-            <ChevronRight className="h-3 w-3" aria-hidden="true" />
-          </button>
-        </div>
-      )}
     </section>
   );
 }

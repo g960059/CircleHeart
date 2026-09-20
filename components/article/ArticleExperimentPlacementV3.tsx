@@ -50,10 +50,13 @@ import {
 import { ExperimentObservationV3 } from "@/components/workbench/ExperimentPanePresentationV3";
 import { articleReaderObservationGroupsV3 } from "@/components/article/reader/ArticleReaderExperimentV3";
 import {
+  ARTICLE_PRIMARY_CONTROL_LIMIT_V3,
+  ARTICLE_PRIMARY_OUTPUT_LIMIT_V3,
   articleBriefingControlKeyV3,
   articleBriefingOutputKeyV3,
   articleBriefingPrimaryControlKeysV3,
   articleBriefingPrimaryOutputKeysV3,
+  articleBriefingPrimaryRoomV3,
   withExplicitItemEmphasisV3,
 } from "@/studio/application/article/ArticleBriefingObservationV3";
 import {
@@ -510,11 +513,14 @@ export function ArticleBriefingEditorV3({
   const primaryControlKeys = new Set(articleBriefingPrimaryControlKeysV3(briefing));
   const references = articleBriefingEditorReferenceHandlersV3(briefing, updateBriefing);
   const { primaryOutputKeys, sealOutputs } = references;
+  const primaryOutputsFull = !articleBriefingPrimaryRoomV3("outputs", primaryOutputKeys.size);
+  const primaryControlsFull = !articleBriefingPrimaryRoomV3("controls", primaryControlKeys.size);
   const sealControls = (
     controls: readonly ExperimentPlacementBriefingControlV2[],
     keys: ReadonlySet<string> = primaryControlKeys,
   ) => withExplicitItemEmphasisV3(controls, keys, (control) => articleBriefingControlKeyV3(control));
   const setControlPrimary = (key: string, primary: boolean) => {
+    if (primary && primaryControlsFull && !primaryControlKeys.has(key)) return;
     const keys = new Set(primaryControlKeys);
     if (primary) keys.add(key); else keys.delete(key);
     updateBriefing({ ...briefing, controls: sealControls(briefing.controls, keys) });
@@ -774,7 +780,11 @@ export function ArticleBriefingEditorV3({
         ))}
       </BriefingSectionV3>
 
-      <BriefingSectionV3 label={t("articleEditor.role.output")}>
+      <BriefingSectionV3
+        label={t("articleEditor.role.output")}
+        meta={t("articleEditor.briefing.primaryCount", { count: primaryOutputKeys.size, limit: ARTICLE_PRIMARY_OUTPUT_LIMIT_V3 })}
+        metaTestId="article-briefing-primary-outputs-count-v3"
+      >
         {outputItems.flatMap((source) => {
           const sourceKey = briefingOutputKeyV3(
             source.pane.paneId,
@@ -796,6 +806,7 @@ export function ArticleBriefingEditorV3({
               selected={undefined}
               selectedItems={briefing.outputs}
               primary={false}
+              primaryFull={primaryOutputsFull}
               onPrimaryChange={() => undefined}
               onToggle={(enabled) => { if (enabled) addOutput(source); }}
               onChange={() => undefined}
@@ -812,6 +823,7 @@ export function ArticleBriefingEditorV3({
               selected={selected}
               selectedItems={briefing.outputs}
               primary={primaryOutputKeys.has(referenceKey)}
+              primaryFull={primaryOutputsFull}
               onPrimaryChange={(primary) => references.setPrimary(selected, primary)}
               onToggle={(enabled) => { if (!enabled) references.remove(selected); }}
               onChange={(next) => references.relabel(selected, next.label)}
@@ -821,7 +833,11 @@ export function ArticleBriefingEditorV3({
         })}
       </BriefingSectionV3>
 
-      <BriefingSectionV3 label={t("articleEditor.role.control")}>
+      <BriefingSectionV3
+        label={t("articleEditor.role.control")}
+        meta={t("articleEditor.briefing.primaryCount", { count: primaryControlKeys.size, limit: ARTICLE_PRIMARY_CONTROL_LIMIT_V3 })}
+        metaTestId="article-briefing-primary-controls-count-v3"
+      >
         {controlItems.map((source) => {
           const sourceKey = briefingControlKeyV3(
             source.pane.paneId,
@@ -837,6 +853,7 @@ export function ArticleBriefingEditorV3({
             control={controlById.get(sourceKey)}
             selectedControls={briefing.controls}
             primary={primaryControlKeys.has(articleBriefingControlKeyV3({ sourcePaneId: source.pane.paneId, controlId: source.item.controlId }))}
+            primaryFull={primaryControlsFull}
             onPrimaryChange={(primary) => setControlPrimary(articleBriefingControlKeyV3({ sourcePaneId: source.pane.paneId, controlId: source.item.controlId }), primary)}
             scenarios={snapshot.content.scenarios}
             visibleScenarioIds={briefing.scenarioScope.visibleScenarioIds}
@@ -889,6 +906,9 @@ export function articleBriefingEditorReferenceHandlersV3(
     primaryOutputKeys,
     sealOutputs,
     setPrimary(reference: ExperimentPlacementBriefingOutputV2, primary: boolean) {
+      // A full primary set ignores a further mark; the reference stays sealed.
+      if (primary && !primaryOutputKeys.has(keyOf(reference))
+        && !articleBriefingPrimaryRoomV3("outputs", primaryOutputKeys.size)) return;
       const keys = new Set(primaryOutputKeys);
       if (primary) keys.add(keyOf(reference)); else keys.delete(keyOf(reference));
       update({ ...briefing, outputs: sealOutputs(briefing.outputs, keys) });
@@ -1043,9 +1063,11 @@ function BriefingReadingFormV3({
 }
 
 /**
- * The primary part at phone width, measured as rendered: the first stage
- * view, the observation, and the primary controls. Authors see whether the
- * observation wraps into several rows before sealing; nothing is trimmed.
+ * The first screen at phone width, measured as rendered: the first stage
+ * view, the observation, and the primary controls, or the "open to operate"
+ * row when controllers are sealed without a primary mark. Authors see
+ * whether the observation wraps into several rows before sealing; nothing is
+ * trimmed.
  */
 function BriefingPhonePreviewV3({
   briefing,
@@ -1087,11 +1109,18 @@ function BriefingPhonePreviewV3({
       }),
     };
   };
-  if (firstView === undefined && outputs.length === 0 && controls.length === 0) return null;
+  const openToOperate = controls.length === 0 && briefing.controls.length > 0;
+  if (firstView === undefined && outputs.length === 0 && controls.length === 0 && !openToOperate) return null;
   return (
     <div className="article-briefing-phone-preview" data-testid="article-briefing-phone-preview-v3">
       <p>{t("articleEditor.briefing.phonePreview")}</p>
-      <div ref={frameRef} className="article-briefing-phone-frame" data-primary-outputs={outputs.length} data-primary-controls={controls.length}>
+      <div
+        ref={frameRef}
+        className="article-briefing-phone-frame"
+        data-primary-outputs={outputs.length}
+        data-primary-controls={controls.length}
+        data-open-operate={openToOperate ? "true" : undefined}
+      >
         {firstView !== undefined && (
           <div className="article-briefing-phone-stage">
             {firstView.paneIds.map(graphLabel).join(" + ")}
@@ -1101,7 +1130,6 @@ function BriefingPhonePreviewV3({
           <ExperimentObservationV3
             className="article-reader-observation"
             label={t("articleReader.observation")}
-            moreLabel={(count) => t("articleReader.observedCount", { count })}
             groups={articleReaderObservationGroupsV3(outputs.map((output) => ({
               itemId: articleBriefingOutputKeyV3(output),
               outputId: output.outputId,
@@ -1130,6 +1158,13 @@ function BriefingPhonePreviewV3({
             ))}
           </ul>
         )}
+        {openToOperate && (
+          // The reader's row, drawn but not operable: the sealed controllers wait in the opened form.
+          <span className="article-reader-open-operate article-briefing-phone-open-operate" aria-hidden="true" data-briefing-phone-open-operate>
+            {t("articleReader.openToOperate")}
+            <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+          </span>
+        )}
       </div>
       <p className="text-wb-subtle">
         {height > 0 && t("articleEditor.briefing.phonePreviewHeight", { px: Math.round(height) })}
@@ -1143,15 +1178,23 @@ function BriefingPhonePreviewV3({
 
 function BriefingSectionV3({
   label,
+  meta,
+  metaTestId,
   children,
 }: Readonly<{
   label: string;
+  /** Short state beside the legend, e.g. how much of the primary set is used. */
+  meta?: string;
+  metaTestId?: string;
   children: React.ReactNode;
 }>) {
   return (
     <fieldset className="mt-4 border-t border-wb-line/60 pt-3">
       <legend className="px-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-wb-subtle">
         {label}
+        {meta !== undefined && (
+          <span className="ml-2 font-medium normal-case tracking-normal tabular-nums" data-testid={metaTestId}>{meta}</span>
+        )}
       </legend>
       <div className="grid gap-1.5">{children}</div>
     </fieldset>
@@ -1430,15 +1473,29 @@ function GraphBriefingRowV3({
   );
 }
 
-/** Item emphasis toggle shared by output and control rows. */
-function PrimaryItemToggleV3({ primary, onChange }: Readonly<{ primary: boolean; onChange: (primary: boolean) => void }>) {
+/**
+ * Item emphasis toggle shared by output and control rows. Once the role's
+ * primary set is full, unmarked items cannot join until one is unmarked;
+ * the sealed item itself is never removed by the limit.
+ */
+function PrimaryItemToggleV3({ primary, full, limit, onChange }: Readonly<{
+  primary: boolean;
+  /** The role's primary set has reached its limit. */
+  full: boolean;
+  limit: number;
+  onChange: (primary: boolean) => void;
+}>) {
   const { t } = useTranslation();
+  const blocked = !primary && full;
   return (
     <button
       type="button"
       className="article-briefing-primary-toggle"
       aria-pressed={primary}
-      onClick={() => onChange(!primary)}
+      aria-disabled={blocked || undefined}
+      title={blocked ? t("articleEditor.briefing.primaryLimitReached", { limit }) : undefined}
+      data-briefing-primary-blocked={blocked ? "true" : undefined}
+      onClick={() => { if (!blocked) onChange(!primary); }}
     >
       {t("articleEditor.briefing.primaryItem")}
     </button>
@@ -1451,6 +1508,7 @@ function OutputBriefingRowV3({
   selected,
   selectedItems,
   primary,
+  primaryFull,
   onPrimaryChange,
   onToggle,
   onChange,
@@ -1461,6 +1519,7 @@ function OutputBriefingRowV3({
   selected: ExperimentPlacementBriefingOutputV2 | undefined;
   selectedItems: readonly ExperimentPlacementBriefingOutputV2[];
   primary: boolean;
+  primaryFull: boolean;
   onPrimaryChange: (primary: boolean) => void;
   onToggle: (enabled: boolean) => void;
   onChange: (item: ExperimentPlacementBriefingOutputV2) => void;
@@ -1486,7 +1545,7 @@ function OutputBriefingRowV3({
             </span>
           </span>
         </label>
-        {selected !== undefined && <PrimaryItemToggleV3 primary={primary} onChange={onPrimaryChange} />}
+        {selected !== undefined && <PrimaryItemToggleV3 primary={primary} full={primaryFull} limit={ARTICLE_PRIMARY_OUTPUT_LIMIT_V3} onChange={onPrimaryChange} />}
         {selected !== undefined && (
           <OrderControlsV3
             order={selected.order}
@@ -1518,6 +1577,7 @@ function ControlBriefingRowV3({
   control,
   selectedControls,
   primary,
+  primaryFull,
   onPrimaryChange,
   scenarios,
   visibleScenarioIds,
@@ -1532,6 +1592,7 @@ function ControlBriefingRowV3({
   control: ExperimentPlacementBriefingControlV2 | undefined;
   selectedControls: readonly ExperimentPlacementBriefingControlV2[];
   primary: boolean;
+  primaryFull: boolean;
   onPrimaryChange: (primary: boolean) => void;
   scenarios: ExperimentSnapshotV2["content"]["scenarios"];
   visibleScenarioIds: readonly string[];
@@ -1560,7 +1621,7 @@ function ControlBriefingRowV3({
           />
           <span className="truncate text-[11px] font-medium">{item.label}</span>
         </label>
-        {control !== undefined && <PrimaryItemToggleV3 primary={primary} onChange={onPrimaryChange} />}
+        {control !== undefined && <PrimaryItemToggleV3 primary={primary} full={primaryFull} limit={ARTICLE_PRIMARY_CONTROL_LIMIT_V3} onChange={onPrimaryChange} />}
         {control !== undefined && (
           <OrderControlsV3
             order={control.order}
