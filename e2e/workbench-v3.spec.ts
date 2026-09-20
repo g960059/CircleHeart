@@ -262,7 +262,7 @@ test("@desktop @mobile previous outputs remain visibly stale across controls and
     .evaluate(element => getComputedStyle(element).color)).not.toBe(currentColor);
   await output.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("stale-outputs.png") });
-  await output.getByRole("button").click();
+  await output.getByTestId("workbench-item-description-trigger-v3").click();
   await expect(page.getByRole("tooltip")).toContainText("前回の測定値");
   await expect(page.getByRole("tooltip")).toHaveCSS("white-space", "pre-line");
   await page.keyboard.press("Escape");
@@ -400,7 +400,7 @@ test("@desktop @mobile @beat-metrics selected beat outputs stay responsive and r
     await expect(output).toHaveAttribute("data-output-stale", "false");
     await expect(output).toHaveAttribute("data-output-availability", "available");
   }
-  await ict.getByRole("button").click();
+  await ict.getByTestId("workbench-item-description-trigger-v3").click();
   await expect(page.getByRole("tooltip")).toContainText("左室等容性収縮時間");
   await page.keyboard.press("Escape");
   await page.screenshot({ path: testInfo.outputPath("beat-metrics-ready.png") });
@@ -582,13 +582,13 @@ test("@desktop @mobile @as-jet opt-in jet outputs preserve live and stale behavi
   for (const id of ids) await expect(page.locator(`[data-output-id="${id}"]`)).toHaveAttribute("data-output-availability", "available");
   for (const id of ids) await expect(page.locator(`[data-output-id="${id}"]`)).toHaveCount(1);
   const svi = page.locator(`[data-output-id="${ids[7]}"]`);
-  await svi.getByRole("button").click();
+  await svi.getByTestId("workbench-item-description-trigger-v3").click();
   await expect(page.getByRole("tooltip")).toContainText("参照体表面積1.9 m²");
   await page.keyboard.press("Escape");
   const vmax = page.locator(`[data-output-id="${ids[0]}"]`), playback = page.getByTestId("v3-playback-toggle");
   const value = () => vmax.locator(".workbench-output-value").evaluate(element => element.firstChild?.textContent ?? "");
   expect(Number(await value())).toBeGreaterThan(0);
-  await vmax.getByRole("button").click();
+  await vmax.getByTestId("workbench-item-description-trigger-v3").click();
   await expect(page.getByRole("tooltip")).toContainText("推定した噴流速度");
   await page.keyboard.press("Escape");
   await vmax.scrollIntoViewIfNeeded();
@@ -711,12 +711,25 @@ test("@desktop @mobile @legend-density long scenario names keep actions fixed an
   if (mobile) await page.getByTestId("workbench-mobile-graph-view-rail").getByRole("tab", { name: "Pressure waveforms", exact: true }).click();
   const waveform = page.locator('[data-chart-kind="sweeping-waveform-v3"]');
   const legend = waveform.locator('[data-legend-expanded]');
-  await expect(waveform.getByRole("button", { name: "凡例を展開", exact: true })).toBeVisible();
-  expect((await legend.boundingBox())!.height).toBeLessThanOrEqual(57);
-  await waveform.getByRole("button", { name: "凡例を展開", exact: true }).click();
-  await expect(legend).toHaveAttribute("data-legend-expanded", "true");
-  await waveform.getByRole("button", { name: "凡例を折りたたむ", exact: true }).click();
+  if (mobile) {
+    // The phone keeps the plot's height by scrolling one legend row sideways.
+    const row = legend.locator('[data-chart-legend]');
+    await expect(waveform.getByRole("button", { name: "凡例を展開", exact: true })).toHaveCount(0);
+    expect((await legend.boundingBox())!.height).toBeLessThanOrEqual(29);
+    expect(await row.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+  } else {
+    await expect(waveform.getByRole("button", { name: "凡例を展開", exact: true })).toBeVisible();
+    expect((await legend.boundingBox())!.height).toBeLessThanOrEqual(57);
+    await waveform.getByRole("button", { name: "凡例を展開", exact: true }).click();
+    await expect(legend).toHaveAttribute("data-legend-expanded", "true");
+    await waveform.getByRole("button", { name: "凡例を折りたたむ", exact: true }).click();
+  }
   await waveform.getByRole("button", { name: "baseline 4, AoP", exact: true }).focus();
+  if (mobile) {
+    await expect(waveform.getByRole("button", { name: "baseline 4, AoP", exact: true })).toBeInViewport();
+    expect(await legend.locator('[data-chart-legend]').evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+    await expect(waveform.getByRole("button", { name: "Pane設定: Pressure waveforms", exact: true })).toBeInViewport();
+  }
   await page.keyboard.press("Enter");
   await expect(waveform.getByRole("button", { name: "baseline 4, AoP", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(waveform.getByRole("button", { name: `${longName}, AoP`, exact: true })).toHaveAttribute("aria-pressed", "false");
@@ -901,7 +914,7 @@ test("@desktop @mobile @beat-metrics filling outputs retain stale measurements w
   await expect(aDuration).toHaveAttribute("data-output-availability", "not-evaluated-at-accepted-state");
   await expect(aDuration).toHaveAttribute("data-output-stale", "false"); // No invented initial measurement.
   await expect(aDuration.locator(".text-wb-warning")).toHaveCount(0);
-  await aDuration.getByRole("button").click();
+  await aDuration.getByTestId("workbench-item-description-trigger-v3").click();
   await expect(page.getByRole("tooltip")).toContainText("独立したA波の順行性血流");
   await expect(page.getByRole("tooltip")).toContainText("新しい測定値を得られていません");
   await expect(page.getByRole("tooltip")).toHaveCSS("white-space", "pre-line");
@@ -921,7 +934,7 @@ test("@desktop @mobile @beat-metrics filling outputs retain stale measurements w
   await playback.click();
   await expect(ratio).toHaveAttribute("data-output-stale", "false");
   await expect(ratio).toHaveAttribute("data-output-availability", "available");
-  await ratio.getByRole("button").click();
+  await ratio.getByTestId("workbench-item-description-trigger-v3").click();
   await expect(page.getByRole("tooltip")).toContainText("E波と心房収縮期A波のピーク流量比");
   await page.keyboard.press("Escape");
   await page.screenshot({ path: testInfo.outputPath("filling-ready.png") });
