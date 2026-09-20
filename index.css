@@ -3383,6 +3383,13 @@ body[data-app-theme="light"] .public-static-theme-moon {
   .article-reader-analysis-status button { padding-inline: 0.55rem; }
   .article-reader-analysis-action-label { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
+/* A short desktop split must keep an operable task panel instead of clipping
+   it after the graph. Scroll the instrument when those minimums cannot fit. */
+@media (max-height: 520px) {
+  .article-reader-embed[data-reader-layout="peek"] { overflow-y: auto; }
+  .article-reader-embed[data-reader-layout="peek"] .article-reader-observation { max-block-size: 5.75rem; }
+  .article-reader-embed[data-reader-layout="peek"] .article-reader-deck { min-block-size: 10rem; }
+}
 /* Landscape phones: the graph on the left, the observation and deck on the right. */
 @media (max-width: 1023px) and (min-width: 640px) and (max-height: 520px) {
   .article-reader-embed[data-reader-layout="sheet"] {
