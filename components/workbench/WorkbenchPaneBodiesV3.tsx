@@ -8,6 +8,7 @@ import {
   ExperimentNumericControlV3,
   ExperimentOutputGridV3,
   ExperimentPaneAddItemButtonV3,
+  type ExperimentOutputSelectionV3,
 } from "@/components/workbench/ExperimentPanePresentationV3";
 import { WorkbenchPaneBindingButtonV3, WorkbenchPaneContextRowV3 } from "@/components/workbench/WorkbenchPaneBindingV3";
 import {
@@ -70,6 +71,7 @@ export function OutputPaneBodyV3({
   presentationAnalyses,
   periodicPvaAnalysisError,
   scrollMode = "contained",
+  selection,
   showBinding,
   settingsAction,
   scenarioLabel,
@@ -85,6 +87,8 @@ export function OutputPaneBodyV3({
   presentationAnalyses?: readonly StudioSimulationAnalysisV2[];
   periodicPvaAnalysisError?: string;
   scrollMode?: "contained" | "parent" | "section";
+  /** Phone shell only: tiles toggle their place in the observation strip. */
+  selection?: ExperimentOutputSelectionV3;
   showBinding: boolean;
   settingsAction?: React.ReactNode;
   scenarioLabel: string;
@@ -110,9 +114,7 @@ export function OutputPaneBodyV3({
     periodicPvaAnalysisError,
   });
   React.useLayoutEffect(() => { lastMeasurements.remember(selected); }, [lastMeasurements, selected]);
-  const displayed = lastMeasurements.project(selected, locale === "ja"
-    ? "前回の測定値です。新しい有効な測定値が得られるまで表示しています。"
-    : "Previous measurement, retained until a new valid measurement is available.");
+  const displayed = lastMeasurements.project(selected, workbenchPreviousMeasurementNoticeV3(locale));
   return (
     <div
       className={`workbench-output-pane flex min-h-0 flex-col bg-wb-aux ${
@@ -142,9 +144,17 @@ export function OutputPaneBodyV3({
         scrollMode={scrollMode === "contained" ? "contained" : "parent"}
         emptyMessage={t("workbench.live.noSelectedOutputs")}
         items={displayed}
+        selection={selection}
       />
     </div>
   );
+}
+
+/** Notice carried by a retained previous value; shared with the phone observation strip. */
+export function workbenchPreviousMeasurementNoticeV3(locale: "en" | "ja"): string {
+  return locale === "ja"
+    ? "前回の測定値です。新しい有効な測定値が得られるまで表示しています。"
+    : "Previous measurement, retained until a new valid measurement is available.";
 }
 
 export const ControlPaneBodyV3 = React.memo(function ControlPaneBodyV3({

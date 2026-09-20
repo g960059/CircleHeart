@@ -557,6 +557,34 @@ describe("ArticleReaderLiveRuntimeV3", () => {
     expect(harness.playAll).toHaveBeenCalledTimes(2);
   });
 
+  it("retains measurements while offscreen and stops live lanes even during analysis", async () => {
+    const snapshot = snapshotV3();
+    const analysisGate = deferredV3<void>();
+    const harness = runtimeHarnessV3(snapshot, { analysisGate });
+    const controller = new ArticleReaderLiveRuntimeV3(snapshot, { createRuntime: harness.createRuntime });
+    await controller.start();
+    const pending = controller.requestAnalysis({ analysisId: "analysis/return", scenarioIds: ["scenario/one"] });
+    await Promise.resolve();
+    await controller.setPresentationVisible(false);
+    expect(harness.pauseAll).toHaveBeenCalled();
+    expect(controller.getSnapshot().status).toBe("requesting-analysis");
+    analysisGate.resolve();
+    await pending;
+    const key = articleReaderAnalysisKeyV3("scenario/one", "analysis/return");
+    const measured = controller.getSnapshot().analysisByKey[key];
+    expect(measured).toBeDefined();
+    expect(controller.getSnapshot().status).toBe("paused");
+    await controller.setPresentationVisible(true);
+    expect(controller.getSnapshot().status).toBe("playing");
+    expect(controller.getSnapshot().analysisByKey[key]).toBe(measured);
+    expect(harness.requestAnalysis).toHaveBeenCalledTimes(1);
+    await controller.setPresentationVisible(false);
+    await controller.setPresentationVisible(true);
+    expect(controller.getSnapshot().analysisByKey[key]).toBe(measured);
+    expect(harness.requestAnalysis).toHaveBeenCalledTimes(1);
+    await controller.dispose();
+  });
+
   it("archives exact pre-control structural states, clears current, and refreshes the new epoch", async () => {
     const snapshot = snapshotV3();
     const harness = runtimeHarnessV3(snapshot);

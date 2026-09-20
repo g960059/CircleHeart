@@ -360,6 +360,26 @@ export type ExperimentPlacementBriefingGraphV2 = Readonly<{
   overrides?: ExperimentPlacementBriefingGraphOverridesV2;
 }>;
 
+/**
+ * Item-level reading emphasis shared by outputs and controls.
+ *
+ * `primary` items form the first screen: they sit beside the graph in every
+ * extent, and in the Article column they are all the reader sees. `supporting`
+ * items remain sealed content that the reader opens from the same Placement
+ * and may bring into the observation. Emphasis never changes an item's
+ * Scenario binding, its value, or whether it can be operated. Placements
+ * sealed before item emphasis carry no value; the Reader then derives an
+ * initial observation from the sealed order.
+ *
+ * The primary sets are bounded to keep the first screen short: six output
+ * references (pane, item and Scenario each) and two controllers. This is the
+ * agreed reading budget, not a fit guarantee; a short phone still scrolls the
+ * observation inside its bound. The sealed content itself is unbounded.
+ */
+export type ExperimentPlacementBriefingItemEmphasisV2 = "primary" | "supporting";
+export const STUDIO_BRIEFING_PRIMARY_OUTPUT_LIMIT_V2 = 6;
+export const STUDIO_BRIEFING_PRIMARY_CONTROL_LIMIT_V2 = 2;
+
 export type ExperimentPlacementBriefingOutputV2 = Readonly<{
   /** Source identity is provenance inside the pinned immutable Snapshot. */
   sourcePaneId: SurfacePaneIdV2;
@@ -369,6 +389,7 @@ export type ExperimentPlacementBriefingOutputV2 = Readonly<{
   scenarioId: ScenarioIdV2;
   label: string;
   order: number;
+  emphasis?: ExperimentPlacementBriefingItemEmphasisV2;
 }>;
 
 export type ExperimentPlacementBriefingControlButtonOptionV2 =
@@ -397,6 +418,37 @@ export type ExperimentPlacementBriefingControlV2 = Readonly<{
   order: number;
   presentation: ExperimentPlacementBriefingControlPresentationV2;
   binding: ExperimentPlacementBriefingControlBindingV2;
+  emphasis?: ExperimentPlacementBriefingItemEmphasisV2;
+}>;
+
+/**
+ * One reading view of the graph stage: one selected graph pane, or two shown
+ * side by side when the stage is wide enough. Narrow stages split a pair into
+ * consecutive single views; the pairing is a density hint, never a renderer
+ * or numerical change.
+ */
+export type ExperimentPlacementBriefingViewV2 = Readonly<{
+  paneIds: readonly SurfacePaneIdV2[];
+}>;
+
+/**
+ * Author-sealed reading form of one Placement.
+ *
+ * `extent` is the resting form in the Article column: `inline` renders live
+ * in flow, `peek` rests as an anchor and opens beside the text, `full` rests
+ * as an anchor and opens over the page in the Workbench area arrangement.
+ * `views` groups the selected graphs into stage views (1–2 panes each);
+ * graphs absent from every view follow as single views.
+ * `analysisRecompute` decides whether Surface-pinned analyses (settled PV
+ * relations, Starling families, PVA outputs) are re-measured automatically
+ * after every reader control change, or only when the reader asks. The
+ * analysis identity, method, and result are unchanged either way; only the
+ * moment of the expensive measurement moves.
+ */
+export type ExperimentPlacementBriefingPresentationV2 = Readonly<{
+  extent: "inline" | "peek" | "full";
+  views?: readonly ExperimentPlacementBriefingViewV2[];
+  analysisRecompute?: "on-request" | "automatic";
 }>;
 
 /**
@@ -415,6 +467,8 @@ export type ExperimentPlacementBriefingV2 = Readonly<{
   graphs: readonly ExperimentPlacementBriefingGraphV2[];
   outputs: readonly ExperimentPlacementBriefingOutputV2[];
   controls: readonly ExperimentPlacementBriefingControlV2[];
+  /** Absent on Placements sealed before explicit reading forms; a heuristic applies. */
+  presentation?: ExperimentPlacementBriefingPresentationV2;
 }>;
 
 export type ExperimentPlacementV2 = Readonly<{

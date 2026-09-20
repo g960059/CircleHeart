@@ -3,6 +3,7 @@ import {
   materializeSurfaceControlPaneBindingV3,
 } from "@/studio/application/article/ArticleExperimentPlacementV3";
 import { reconcileWorkbenchGraphColorsV3 } from "@/components/workbench/presentation/WorkbenchGraphColorV3";
+import { articleBriefingOutputKeyV3 } from "@/studio/application/article/ArticleBriefingObservationV3";
 import { validateExperimentPlacementBriefingV2 } from "@/studio/application/authoring/StudioExperimentDataV2";
 import {
   STUDIO_EXPERIMENT_SNAPSHOT_V2_SCHEMA_ID,
@@ -180,19 +181,22 @@ export function reconcileWorkbenchBriefingV3(
       ),
     ),
   );
+  // An output reference is pane, item and sealed Scenario: the same pane item
+  // read for two Scenarios stays two references.
   const seenOutputKeys = new Set<string>();
   const outputs = [...authored.outputs]
     .sort(compareBriefingOrderV3)
-    .filter(({ sourcePaneId, outputId, scenarioId }) => {
-      const key = workbenchBriefingOutputKeyV3(sourcePaneId, outputId);
+    .filter((output) => {
+      const { sourcePaneId, outputId, scenarioId } = output;
+      const reference = articleBriefingOutputKeyV3(output);
       if (
-        !availableOutputKeys.has(key) ||
-        seenOutputKeys.has(key) ||
+        !availableOutputKeys.has(workbenchBriefingOutputKeyV3(sourcePaneId, outputId)) ||
+        seenOutputKeys.has(reference) ||
         !visibleScenarioIds.includes(scenarioId)
       ) {
         return false;
       }
-      seenOutputKeys.add(key);
+      seenOutputKeys.add(reference);
       return true;
     })
     .map((output, order) => Object.freeze({ ...output, order }));
@@ -227,6 +231,22 @@ export function reconcileWorkbenchBriefingV3(
       }),
     );
 
+  // The sealed reading form survives re-capture; its views keep only graphs
+  // that are still selected, so it can never name a pane the Briefing lost.
+  const retainedGraphIds = new Set(graphs.map(({ paneId }) => paneId));
+  const presentation = authored.presentation === undefined
+    ? undefined
+    : Object.freeze({
+        ...authored.presentation,
+        ...(authored.presentation.views === undefined ? {} : {
+          views: Object.freeze(authored.presentation.views
+            .map((view) => Object.freeze({
+              paneIds: Object.freeze(view.paneIds.filter((paneId) => retainedGraphIds.has(paneId))),
+            }))
+            .filter((view) => view.paneIds.length > 0)),
+        }),
+      });
+
   const candidate = Object.freeze({
     // The composer has no detached title editor. Its default title always
     // comes from the frozen source projection so a stale in-memory Briefing
@@ -239,6 +259,7 @@ export function reconcileWorkbenchBriefingV3(
     graphs: Object.freeze(graphs),
     outputs: Object.freeze(outputs),
     controls: Object.freeze(controls),
+    ...(presentation === undefined ? {} : { presentation }),
   });
   return validateExperimentPlacementBriefingV2(
     candidate,

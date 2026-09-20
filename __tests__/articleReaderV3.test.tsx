@@ -1,15 +1,55 @@
-import { articleReaderPlacementAfterViewportExitV3 } from "@/components/article/reader/ArticleReaderPlacementV3";
+import { articleReaderObservationGroupsV3 } from "@/components/article/reader/ArticleReaderObservationV3";
+import { articleReaderPlacementAfterViewportExitV3, articleReaderPlacementInReadingAreaV3 } from "@/components/article/reader/ArticleReaderPlacementV3";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { periodicPvaFromAnalysisV3 } from "@/components/workbench/presentation/WorkbenchPeriodicPvaProjectionV3";
+import { structuralReturnOrientationFromPayloadV3 } from "@/components/workbench/presentation/GuytonStarlingOrientationCanvasV3";
+import { buildMainWirePeriodicPvaMethodV16, MAIN_WIRE_PERIODIC_PVA_METHOD_V16_ID } from "@/analysis/methods/mainWire/MainWirePeriodicPvaV1";
 
-import "@/i18n";
+import i18n from "@/i18n";
 import {
+  ARTICLE_OBSERVATION_DEFAULT_BUDGET_V3,
+  ARTICLE_PRIMARY_CONTROL_LIMIT_V3,
+  ARTICLE_PRIMARY_OUTPUT_LIMIT_V3,
+  articleBriefingControlKeyV3,
+  articleBriefingInitialOpenControlPaneIdsV3,
+  articleBriefingOutputKeyV3,
+  articleBriefingPrimaryControlKeysV3,
+  articleBriefingPrimaryOutputKeysV3,
+  articleReaderObservedOutputKeysV3,
+  defaultObservedItemKeysV3,
+  withExplicitItemEmphasisV3,
+} from "@/studio/application/article/ArticleBriefingObservationV3";
+import {
+  ArticleReaderObservationMemoryContextV3,
+  createArticleReaderObservationMemoryV3,
+  openArticleReaderToOperateV3,
+  type ArticleReaderEmbedLayoutV3,
+  type ArticleReaderObservationMemoryV3,
+} from "@/components/article/reader/ArticleReaderEmbedV3";
+import { defaultArticleBriefingV3 } from "@/studio/application/article/ArticleExperimentPlacementV3";
+import {
+  validateExperimentPlacementBriefingV2,
+  validateExperimentSnapshotV2,
+} from "@/studio/application/authoring/StudioExperimentDataV2";
+import { reconcileWorkbenchBriefingV3 } from "@/components/workbench/WorkbenchBriefingPolicy";
+import { ArticleBriefingEditorV3, articleBriefingEditorReferenceHandlersV3 } from "@/components/article/ArticleExperimentPlacementV3";
+import { WorkbenchMobileStageDeckV3 } from "@/components/workbench/WorkbenchMobileStageDeckV3";
+import { WorkbenchLastMeasuredOutputsV1 } from "@/components/workbench/presentation/WorkbenchLastMeasuredOutputsV1";
+import { ExperimentObservationV3 } from "@/components/workbench/ExperimentPanePresentationV3";
+import { workbenchObservedOutputKeyV3 } from "@/components/workbench/presentation/WorkbenchObservationV3";
+import {
+  ArticleReaderAnalysisStatusV3,
+  ArticleReaderEmbedSurfaceV3,
   ArticleReaderExperimentPeekPanelV3,
   ArticleReaderExperimentV3,
   ArticleReaderControlV3,
+  ArticleReaderObservationV3,
   ArticleReaderOutputsV3,
+  articleReaderControlBindingSignatureV3,
   ArticleReaderStructuralReturnGraphV3,
+  articleReaderAnalysisScenarioIdsV3,
   articleReaderPeriodicPvaEnabledV3,
   resolveArticleReaderStaticGraphSeriesLabelV3,
   articleReaderBoundedHistoryV3,
@@ -356,6 +396,7 @@ function readerRuntimeStubV3(
       pendingControlInstanceId: null,
       pendingAnalysisKeys: Object.freeze([]),
       fixtureByScenario: Object.freeze({}),
+      changedScenarioIds: Object.freeze([]),
       analysisByKey: Object.freeze({}),
       analysisHistoryByKey: Object.freeze({}),
       analysisErrorByKey: Object.freeze({}),
@@ -729,6 +770,21 @@ describe("Article Reader V3 experiment anchor", () => {
     expect(articleReaderPlacementAfterViewportExitV3("placement/a", "placement/a", ["placement/b", "placement/c"])).toBe("placement/c");
   });
 
+  it("follows the reading area even while the preceding embed remains partly visible", () => {
+    const viewport = { top: 60, bottom: 900 };
+    expect(articleReaderPlacementInReadingAreaV3([
+      { id: "a", top: -346, bottom: 103 }, { id: "b", top: 312, bottom: 882 },
+    ], viewport, "a")).toBe("b");
+    expect(articleReaderPlacementInReadingAreaV3([
+      { id: "a", top: 140, bottom: 670 }, { id: "b", top: 850, bottom: 1420 },
+    ], viewport, "b")).toBe("a");
+    // Minor scroll/layout jitter does not restart alternating owners.
+    expect(articleReaderPlacementInReadingAreaV3([
+      { id: "a", top: 40, bottom: 475 }, { id: "b", top: 475, bottom: 910 },
+    ], viewport, "a")).toBe("a");
+    expect(articleReaderPlacementInReadingAreaV3([{ id: "a", top: 950, bottom: 1300 }], viewport, "a")).toBeNull();
+  });
+
   it("treats history depth zero as no previous structural states", () => {
     const history = ["oldest", "older", "newest"];
     expect(articleReaderBoundedHistoryV3(history, 0)).toEqual([]);
@@ -867,9 +923,22 @@ describe("Article Reader V3 experiment anchor", () => {
     };
     const html = renderExperimentV3({ snapshot, contract, live: true });
 
-    expect(html).toContain("シミュレーション情報");
+    // Inline keeps only the reading instrument; model disclosure belongs to
+    // the opened panel header, so neither legacy label may leak into flow.
+    expect(html).not.toContain("シミュレーション情報");
     expect(html).not.toContain("MW 72");
     expect(html).not.toContain("MW V3");
+    const panel = renderToStaticMarkup(
+      <ArticleReaderExperimentPeekPanelV3
+        maximized={false}
+        title="Reader experiment"
+        onClose={NOOP}
+        toolbar={<span>シミュレーション情報</span>}
+      >
+        <div />
+      </ArticleReaderExperimentPeekPanelV3>,
+    );
+    expect(panel).toContain("シミュレーション情報");
   });
 
   it("overlays every visible Scenario in one structural comparison canvas", () => {
@@ -1038,13 +1107,16 @@ describe("Article Reader V3 experiment anchor", () => {
     }] };
     const html = renderToStaticMarkup(<ArticleReaderOutputsV3 briefing={briefing} contract={contract} sampleStore={store}
       scenarioLabels={{ baseline: "基準条件", higher: "張力増加" }} />);
-    expect(html).toMatch(/<h3[^>]*>基準条件<\/h3>/);
-    expect(html).toMatch(/<h3[^>]*>張力増加<\/h3>/);
+    // Each section is one source pane read for its sealed Scenario; the
+    // Scenario name is the section title when the pane label is unavailable.
+    expect(html).toMatch(/<h3[^>]*>.*基準条件<\/span><\/h3>/);
+    expect(html).toMatch(/<h3[^>]*>.*張力増加<\/span><\/h3>/);
+    expect(html).toContain('data-reader-section-count="2"');
     expect(html).toContain("55<span");
     expect(html).toContain("65<span");
   });
 
-  it("keeps Reader outputs vertical on the mobile base breakpoint", () => {
+  it("uses the shared responsive measurement grid for Reader outputs", () => {
     const store = new WorkbenchScenarioPresentationSampleStoreV3();
     const briefing: ExperimentPlacementBriefingV2 = {
       ...briefingV3(),
@@ -1124,6 +1196,51 @@ describe("Article Reader V3 experiment anchor", () => {
     expect(html).toContain('aria-label="AoP（近位）の説明"');
     expect(html).toContain('data-testid="output-value-context-v3"');
     expect(html).toContain('data-testid="workbench-item-description-trigger-v3"');
+  });
+
+  it("reuses the same formal projection across Reader outputs, live frames, and Workbench graphs", () => {
+    const source = structuralAnalysisV3("scenario/comparison");
+    const right = structuralReturnOrientationFromPayloadV3(source.payload, "right")!;
+    const analysis = { ...source, payload: { status: "available", right, left: { ...right, side: "left" } } };
+    const build = vi.fn(buildMainWirePeriodicPvaMethodV16);
+    const derivation = { methodId: MAIN_WIRE_PERIODIC_PVA_METHOD_V16_ID, sourceAnalysisId: analysis.analysisId, build };
+    const runtime = {
+      ...readerRuntimeStubV3({ analysisByKey: { [articleReaderAnalysisKeyV3(analysis.scenarioId, analysis.analysisId)]: analysis } }),
+      periodicPvaDerivation: derivation,
+    };
+    const briefing = { ...briefingV3(), outputs: Object.values(MAIN_WIRE_PERIODIC_PVA_OUTPUT_IDS_V1).map((outputId, order) => ({
+      sourcePaneId: "pane/energetics", outputId, scenarioId: analysis.scenarioId, label: outputId, order,
+    })) };
+    const render = () => renderToStaticMarkup(<ArticleReaderOutputsV3 briefing={briefing} contract={contractV3()} runtime={runtime} />);
+    render();
+    // Several energetics outputs consume one immutable measurement, not one
+    // expensive fit per output or per new exact presentation frame.
+    expect(build).toHaveBeenCalledTimes(1);
+    const projected = periodicPvaFromAnalysisV3(analysis, "left", derivation);
+    for (let frame = 1; frame <= 3; frame += 1) {
+      runtime.sampleStore.append(analysis.scenarioId, [{ acceptedTimeSec: frame, acceptedRevision: frame, inputEpoch: 0, values: {} }]);
+      render();
+      expect(periodicPvaFromAnalysisV3(analysis, "left", derivation)).toBe(projected);
+    }
+    expect(build).toHaveBeenCalledTimes(1);
+
+    // A new measurement/progress object, the other ventricle, or a different
+    // pinned method must not reuse the prior projection.
+    periodicPvaFromAnalysisV3({ ...analysis, inputEpoch: 1 }, "left", derivation);
+    periodicPvaFromAnalysisV3(analysis, "right", derivation);
+    periodicPvaFromAnalysisV3(analysis, "left", { ...derivation, methodId: "test/other-method" });
+    expect(build).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not retry an invalid formal projection on every live frame", () => {
+    const analysis = structuralAnalysisV3("scenario/comparison");
+    const build = vi.fn<typeof buildMainWirePeriodicPvaMethodV16>(() => { throw new Error("invalid fit"); });
+    const derivation = { methodId: "test/failed-projection", build };
+    expect(periodicPvaFromAnalysisV3(analysis, "right", derivation)).toBeUndefined();
+    expect(periodicPvaFromAnalysisV3(analysis, "right", derivation)).toBeUndefined();
+    expect(build).toHaveBeenCalledTimes(1);
+    periodicPvaFromAnalysisV3({ ...analysis, inputEpoch: 1 }, "right", derivation);
+    expect(build).toHaveBeenCalledTimes(2);
   });
 
   it("requests the shared settled relation analysis for output-only PVA briefings", () => {
@@ -1276,7 +1393,10 @@ describe("Article Reader V3 experiment anchor", () => {
 
     expect(html).toContain("<figure");
     expect(html).not.toContain('data-reader-presentation="peek"');
-    expect(html.match(/data-reader-graph-render-active=/g)).toHaveLength(2);
+    // The stage paints one sealed view at a time; the second graph is one tab away.
+    expect(html.match(/data-reader-graph-render-active=/g)).toHaveLength(1);
+    expect(html).toContain('data-testid="article-reader-stage-rail-v3"');
+    expect(html.match(/role="tab"/g)).toHaveLength(2);
     expect(html).not.toContain("data-reader-open-details");
   });
 
@@ -1336,5 +1456,804 @@ describe("Article Reader V3 experiment anchor", () => {
     expect(html).toContain('data-reader-placement-id="placement/reader"');
     expect(html).not.toContain("data-reader-placement-live");
     expect(html).not.toContain("<figure");
+  });
+});
+
+describe("Article Reader V3 sealed-state analysis policy", () => {
+  it.each(["inline", "peek", "sheet", "workbench"] as const)(
+    "keeps output-only analysis recovery reachable in %s",
+    (layout) => {
+      const briefing = { ...briefingV3(), graphs: [], outputs: [{
+        sourcePaneId: "pane/outputs", outputId: MAIN_WIRE_PERIODIC_PVA_OUTPUT_IDS_V1.pressureVolumeAreaMilliJoule,
+        scenarioId: "scenario/comparison", label: "PVA", order: 0,
+      }] };
+      const render = (runtime: UseArticleReaderLiveRuntimeResultV3) => renderToStaticMarkup(
+        <ArticleReaderEmbedSurfaceV3
+          analysisRecompute="on-request" briefing={briefing} contract={contractV3()}
+          layout={layout} runtime={{ ...runtime, periodicPvaDerivation: {
+            methodId: MAIN_WIRE_PERIODIC_PVA_METHOD_V16_ID,
+            sourceAnalysisId: MAIN_WIRE_INTEGRATED_MODEL_FORMAL_PRESSURE_VOLUME_RELATIONS_V3_ID,
+            build: buildMainWirePeriodicPvaMethodV16,
+          } }} snapshot={snapshotV3()}
+        />,
+      );
+      expect(render(readerRuntimeStubV3({ changedScenarioIds: ["scenario/comparison"] })))
+        .toContain("data-reader-recompute-analysis");
+      const key = articleReaderAnalysisKeyV3("scenario/comparison", MAIN_WIRE_INTEGRATED_MODEL_FORMAL_PRESSURE_VOLUME_RELATIONS_V3_ID);
+      const failed = render(readerRuntimeStubV3({ analysisErrorByKey: { [key]: "measurement failed" } }));
+      expect(failed).toContain('data-reader-analysis-state="error"');
+      expect(failed).toContain(`aria-label="${i18n.t("articleReader.recomputeAnalysis")}"`);
+    },
+  );
+
+  it("lists the Scenarios whose Surface-pinned analysis the Briefing displays", () => {
+    expect(articleReaderAnalysisScenarioIdsV3(briefingV3(), snapshotV3(), contractV3(), true))
+      .toEqual(["scenario/comparison"]);
+    expect(articleReaderAnalysisScenarioIdsV3({ ...briefingV3(), graphs: [] }, snapshotV3(), contractV3(), true))
+      .toEqual([]);
+    expect(articleReaderAnalysisScenarioIdsV3({ ...briefingV3(), graphs: [], outputs: [{
+      sourcePaneId: "pane/outputs", outputId: MAIN_WIRE_PERIODIC_PVA_OUTPUT_IDS_V1.pressureVolumeAreaMilliJoule,
+      scenarioId: "scenario/comparison", label: "PVA", order: 0,
+    }] }, snapshotV3(), contractV3(), true)).toEqual(["scenario/comparison"]);
+  });
+
+  it("stays silent while the sealed state is measured automatically, then asks the reader after a control change", () => {
+    const analysisId = MAIN_WIRE_INTEGRATED_MODEL_FORMAL_PRESSURE_VOLUME_RELATIONS_V3_ID;
+    const key = articleReaderAnalysisKeyV3("scenario/comparison", analysisId);
+    const render = (runtime: UseArticleReaderLiveRuntimeResultV3, auto: readonly string[]) => renderToStaticMarkup(
+      <ArticleReaderAnalysisStatusV3
+        analysisAutoScenarioIds={new Set(auto)}
+        briefing={briefingV3()}
+        contract={contractV3()}
+        runtime={runtime}
+        snapshot={snapshotV3()}
+      />,
+    );
+    // Sealed state, not yet measured: the graph requests it itself; nothing to decide.
+    expect(render(readerRuntimeStubV3(), ["scenario/comparison"])).toBe("");
+    // Measuring: progress, no button.
+    const pending = render(readerRuntimeStubV3({ pendingAnalysisKeys: [key] }), ["scenario/comparison"]);
+    expect(pending).toContain('data-reader-analysis-state="pending"');
+    expect(pending).not.toContain("data-reader-recompute-analysis");
+    // Changed by a control under the on-request policy: stale, with an explicit re-measure action.
+    const stale = render(readerRuntimeStubV3({ changedScenarioIds: ["scenario/comparison"] }), []);
+    expect(stale).toContain('data-reader-analysis-state="stale"');
+    expect(stale).toContain('data-reader-analysis-stale-scenarios="scenario/comparison"');
+    expect(stale).toContain("data-reader-recompute-analysis");
+    // Same change under the automatic policy: the graph re-requests; nothing to decide.
+    expect(render(readerRuntimeStubV3({ changedScenarioIds: ["scenario/comparison"] }), ["scenario/comparison"])).toBe("");
+    // A present result is fresh regardless of policy.
+    expect(render(readerRuntimeStubV3({ changedScenarioIds: ["scenario/comparison"],
+      analysisByKey: { [key]: structuralAnalysisV3("scenario/comparison") } }), [])).toBe("");
+  });
+
+  it("titles output sections by their source pane and lays compared panes side by side", () => {
+    const store = new WorkbenchScenarioPresentationSampleStoreV3();
+    const outputId = "hemodynamics.stroke-volume.LV-event-defined";
+    store.append("scenario/baseline", [{ acceptedTimeSec: 1, acceptedRevision: 1, inputEpoch: 0, values: { [outputId]: 70 } }]);
+    store.append("scenario/comparison", [{ acceptedTimeSec: 1, acceptedRevision: 1, inputEpoch: 0, values: { [outputId]: 90 } }]);
+    const snapshot: ExperimentSnapshotV2 = { ...snapshotV3(), content: { ...snapshotV3().content, surface: {
+      ...snapshotV3().content.surface,
+      outputPanes: [
+        { paneId: "pane/valves", role: "output", label: "弁関連", order: 0, priority: 2, binding: { mode: "fixed", scenarioId: "scenario/baseline" }, items: [{ outputId, label: "SV", order: 0 }] },
+        { paneId: "pane/valves-b", role: "output", label: "弁関連（比較）", order: 1, priority: 1, binding: { mode: "fixed", scenarioId: "scenario/comparison" }, items: [{ outputId, label: "SV", order: 0 }] },
+      ],
+    } } };
+    const briefing: ExperimentPlacementBriefingV2 = { ...briefingV3(),
+      scenarioScope: { visibleScenarioIds: ["scenario/baseline", "scenario/comparison"], initialFocusScenarioId: "scenario/baseline" },
+      outputs: [
+        { sourcePaneId: "pane/valves", outputId, scenarioId: "scenario/baseline", label: "SV", order: 0 },
+        { sourcePaneId: "pane/valves-b", outputId, scenarioId: "scenario/comparison", label: "SV", order: 1 },
+      ],
+    };
+    const contract: ModelContractV2 = { ...contractV3(), outputCatalog: [{
+      outputId, kind: "metric", unit: "mL", shape: "scalar", scope: "instant", dependencies: [], significantDigits: 3,
+    }] };
+    const html = renderToStaticMarkup(<ArticleReaderOutputsV3 briefing={briefing} contract={contract} sampleStore={store}
+      snapshot={snapshot} scenarioLabels={{ "scenario/baseline": "Baseline", "scenario/comparison": "Comparison" }} />);
+    expect(html).toContain('data-reader-section-count="2"');
+    expect(html).toMatch(/<h3[^>]*>.*弁関連<\/span><span class="article-reader-section-scenario">Baseline<\/span><\/h3>/);
+    expect(html).toContain("弁関連（比較）");
+    expect(html).toContain("70<span");
+    expect(html).toContain("90<span");
+  });
+});
+
+const A_OUTPUTS = Array.from({ length: 12 }, (_, index) => `output/a${index + 1}`);
+const B_OUTPUTS = Array.from({ length: 8 }, (_, index) => `output/b${index + 1}`);
+
+/** Two output panes with different measurement sets (A: 12 at Scenario a, B: 8 at Scenario b). */
+function observationSnapshotV3(): ExperimentSnapshotV2 {
+  const scenario = (scenarioId: string, label: string) => ({
+    scenarioId, label, capture: { fixture: {}, checkpoint: { acceptedRevision: 1, acceptedTimeSec: 0, payload: {} } },
+  });
+  const outputPane = (paneId: string, label: string, order: number, scenarioId: string, outputIds: readonly string[]) => ({
+    paneId, role: "output" as const, label, order, priority: 10 - order,
+    binding: { mode: "fixed" as const, scenarioId },
+    items: outputIds.map((outputId, itemOrder) => ({ outputId, label: outputId.split("/")[1]!.toUpperCase(), order: itemOrder })),
+  });
+  return validateExperimentSnapshotV2({
+    schemaId: STUDIO_EXPERIMENT_SNAPSHOT_V2_SCHEMA_ID,
+    snapshotId: "snapshot/observation",
+    surfaceReleaseId: STANDARD_TEST_SURFACE_RELEASE_ID_V1,
+    createdAt: "2026-09-19T00:00:00.000Z",
+    content: {
+      modelId: STANDARD_TEST_RELEASE_TICKET_V1.modelId,
+      surfaceSeriesId: STANDARD_TEST_SURFACE_SERIES_ID_V1,
+      scenarios: [scenario("scenario/a", "基準"), scenario("scenario/b", "TBV +1000")],
+      surface: {
+        graphPanes: [{
+          paneId: "pane/pv", role: "graph", label: "PV", order: 0, priority: 1, graphId: "graph/pv",
+          scenarioScope: { mode: "visible-scenarios" }, excludedTraces: [], historyDepth: 1, series: [],
+        }],
+        outputPanes: [
+          outputPane("pane/a", "基準", 0, "scenario/a", A_OUTPUTS),
+          outputPane("pane/b", "弁", 1, "scenario/b", B_OUTPUTS),
+        ],
+        controlPanes: [
+          {
+            paneId: "pane/controls-a", role: "control", label: "基準を操作", order: 0, priority: 2,
+            binding: { mode: "fixed", scenarioIds: ["scenario/a"] },
+            items: [
+              { controlId: "control/tbv", label: "TBV", order: 0, presentation: { kind: "slider" } },
+              { controlId: "control/svr", label: "SVR", order: 1, presentation: { kind: "slider" } },
+            ],
+          },
+          {
+            paneId: "pane/controls-b", role: "control", label: "TBV +1000 を操作", order: 1, priority: 1,
+            binding: { mode: "fixed", scenarioIds: ["scenario/b"] },
+            items: [{ controlId: "control/tbv", label: "TBV", order: 0, presentation: { kind: "slider" } }],
+          },
+        ],
+        note: { text: "" },
+      },
+    },
+  });
+}
+
+function observationContractV3(): ModelContractV2 {
+  return {
+    modelId: STANDARD_TEST_RELEASE_TICKET_V1.modelId,
+    modelFamilyId: STANDARD_TEST_RELEASE_TICKET_V1.manifest.modelFamilyId,
+    displayName: "Observation model",
+    fixtureSchemaId: STANDARD_TEST_RELEASE_TICKET_V1.manifest.fixtureSchema.fixtureSchemaId,
+    checkpointCodecId: STANDARD_TEST_RELEASE_TICKET_V1.manifest.checkpointCodec.checkpointCodecId,
+    snapshotGateId: "gate/observation",
+    controlCatalog: [],
+    outputCatalog: [...A_OUTPUTS, ...B_OUTPUTS].map((outputId) => ({
+      outputId, kind: "metric", unit: "mL", shape: "scalar", scope: "instant", dependencies: [], significantDigits: 3,
+    })),
+    graphCatalog: [],
+  };
+}
+
+/** A Briefing sealed before item emphasis existed: every item without a mark. */
+function legacyBriefingV3(): ExperimentPlacementBriefingV2 {
+  const sealed = defaultArticleBriefingV3(observationSnapshotV3(), "scenario/a", "Observation");
+  return {
+    ...sealed,
+    outputs: sealed.outputs.map(({ emphasis: _emphasis, ...output }) => output),
+    controls: sealed.controls.map(({ emphasis: _emphasis, ...control }) => control),
+  };
+}
+
+const observedKey = (paneId: string, outputId: string, scenarioId: string) => articleBriefingOutputKeyV3({ sourcePaneId: paneId, outputId, scenarioId });
+const keyA = (index: number) => observedKey("pane/a", `output/a${index}`, "scenario/a");
+const keyB = (index: number) => observedKey("pane/b", `output/b${index}`, "scenario/b");
+
+describe("Article Briefing observation", () => {
+  it("shares one bounded default across groups instead of ranking every item", () => {
+    expect(ARTICLE_OBSERVATION_DEFAULT_BUDGET_V3).toBe(6);
+    expect(defaultObservedItemKeysV3([{ keys: ["a1", "a2", "a3", "a4"] }, { keys: ["b1", "b2", "b3", "b4"] }]))
+      .toEqual(["a1", "a2", "a3", "b1", "b2", "b3"]);
+    expect(defaultObservedItemKeysV3([{ keys: ["a1", "a2", "a3"] }, { keys: ["b1", "b2", "b3"] }, { keys: ["c1", "c2", "c3"] }]))
+      .toEqual(["a1", "a2", "b1", "b2", "c1", "c2"]);
+    // Every group keeps at least one item even beyond the budget; empty groups are skipped.
+    expect(defaultObservedItemKeysV3(Array.from({ length: 7 }, (_, i) => ({ keys: [`g${i}`, `g${i}x`] })))).toHaveLength(7);
+    expect(defaultObservedItemKeysV3([{ keys: [] }, { keys: ["b1", "b2", "b3", "b4", "b5", "b6", "b7"] }])).toEqual(["b1", "b2", "b3", "b4", "b5", "b6"]);
+    expect(defaultObservedItemKeysV3([])).toEqual([]);
+  });
+
+  it("derives a legacy observation per source pane and Scenario, and reads the first controller pane", () => {
+    const legacy = legacyBriefingV3();
+    expect(articleBriefingPrimaryOutputKeysV3(legacy)).toEqual([keyA(1), keyA(2), keyA(3), keyB(1), keyB(2), keyB(3)]);
+    expect(articleBriefingPrimaryControlKeysV3(legacy)).toEqual([
+      articleBriefingControlKeyV3({ sourcePaneId: "pane/controls-a", controlId: "control/tbv" }),
+      articleBriefingControlKeyV3({ sourcePaneId: "pane/controls-a", controlId: "control/svr" }),
+    ]);
+  });
+
+  it("keeps an explicit observation such as A2, B2 and B3 across different measurement sets", () => {
+    const legacy = legacyBriefingV3();
+    const briefing: ExperimentPlacementBriefingV2 = {
+      ...legacy,
+      outputs: withExplicitItemEmphasisV3(legacy.outputs, new Set([keyB(3), keyA(2), keyB(2)]), (output) => articleBriefingOutputKeyV3(output)),
+      controls: withExplicitItemEmphasisV3(legacy.controls, new Set(), (control) => articleBriefingControlKeyV3(control)),
+    };
+    expect(articleBriefingPrimaryOutputKeysV3(briefing)).toEqual([keyA(2), keyB(2), keyB(3)]);
+    expect(briefing.outputs.filter((output) => output.emphasis === "supporting")).toHaveLength(17);
+    // An explicit all-supporting seal is an empty observation, not the legacy default.
+    expect(articleBriefingPrimaryControlKeysV3(briefing)).toEqual([]);
+    expect(articleBriefingPrimaryOutputKeysV3({ outputs: briefing.outputs.map((output) => ({ ...output, emphasis: "supporting" as const })) })).toEqual([]);
+  });
+
+  it("resolves a reader's selection against the sealed Briefing in sealed order", () => {
+    const legacy = legacyBriefingV3();
+    expect(articleReaderObservedOutputKeysV3(legacy, null)).toEqual(articleBriefingPrimaryOutputKeysV3(legacy));
+    expect(articleReaderObservedOutputKeysV3(legacy, [keyB(8), "pane/zzzoutput/xscenario/a", keyA(12), keyA(1)]))
+      .toEqual([keyA(1), keyA(12), keyB(8)]);
+    expect(articleReaderObservedOutputKeysV3(legacy, [])).toEqual([]);
+  });
+
+  it("seals explicit emphasis by default, validates it, and carries it through re-capture", () => {
+    const snapshot = observationSnapshotV3();
+    const sealed = defaultArticleBriefingV3(snapshot, "scenario/a", "Observation");
+    expect(sealed.outputs.every((output) => output.emphasis !== undefined)).toBe(true);
+    expect(sealed.outputs.filter((output) => output.emphasis === "primary").map(articleBriefingOutputKeyV3))
+      .toEqual([keyA(1), keyA(2), keyA(3), keyB(1), keyB(2), keyB(3)]);
+    expect(sealed.controls.map((control) => control.emphasis)).toEqual(["primary", "primary", "supporting"]);
+    expect(validateExperimentPlacementBriefingV2(sealed, snapshot.content)).toEqual(sealed);
+    expect(() => validateExperimentPlacementBriefingV2({
+      ...sealed, outputs: [{ ...sealed.outputs[0]!, emphasis: "hero" as never }, ...sealed.outputs.slice(1)],
+    }, snapshot.content)).toThrow(/emphasis.*must be primary or supporting/);
+    const legacy = legacyBriefingV3();
+    expect(validateExperimentPlacementBriefingV2(legacy, snapshot.content)).toEqual(legacy);
+    const recaptured = reconcileWorkbenchBriefingV3({ briefing: sealed, preferredFocusScenarioId: "scenario/a", snapshot });
+    expect(recaptured.outputs.map((output) => output.emphasis)).toEqual(sealed.outputs.map((output) => output.emphasis));
+    expect(recaptured.controls.map((control) => control.emphasis)).toEqual(sealed.controls.map((control) => control.emphasis));
+  });
+});
+
+describe("Article Reader observation rendering", () => {
+  const storeV3 = () => {
+    const store = new WorkbenchScenarioPresentationSampleStoreV3();
+    store.append("scenario/a", [{ acceptedTimeSec: 1, acceptedRevision: 1, inputEpoch: 0,
+      values: Object.fromEntries(A_OUTPUTS.map((id, index) => [id, 100 + index])) }]);
+    store.append("scenario/b", [{ acceptedTimeSec: 1, acceptedRevision: 1, inputEpoch: 0,
+      values: Object.fromEntries(B_OUTPUTS.map((id, index) => [id, 200 + index])) }]);
+    return store;
+  };
+
+  it("shows only the observed outputs grouped by pane and Scenario, naming each once, without dashes for the rest", () => {
+    const briefing = legacyBriefingV3();
+    const html = renderToStaticMarkup(
+      <ArticleReaderObservationV3
+        briefing={briefing}
+        contract={observationContractV3()}
+        sampleStore={storeV3()}
+        snapshot={observationSnapshotV3()}
+        observedKeys={[keyA(2), keyB(2), keyB(3)]}
+        scenarioLabels={{ "scenario/a": "基準", "scenario/b": "TBV +1000" }}
+        scenarioColor={(scenarioId) => scenarioId === "scenario/a" ? "#aa0000" : "#0000aa"}
+      />,
+    );
+    expect(html).toContain('data-reader-observed-count="3"');
+    expect(html.match(/class="workbench-output-item/g)).toHaveLength(3);
+    // Two groups: pane 基準 at Scenario 基準 (one name), pane 弁 at TBV +1000 (pane and Scenario).
+    expect(html.match(/data-observation-group=/g)).toHaveLength(2);
+    expect(html.match(/experiment-observation-heading"/g)).toHaveLength(2);
+    expect(html.match(/基準/g)).toHaveLength(1);
+    expect(html.match(/TBV \+1000/g)).toHaveLength(1);
+    expect(html).toContain('<span class="experiment-observation-title">弁</span>');
+    expect(html).toContain("101<span");
+    expect(html).toContain("201<span");
+    expect(html).toContain("202<span");
+    expect(html).not.toContain("100<span");
+    expect(html).not.toContain("—");
+    // Observation tiles are display only; selection lives in the reference.
+    expect(html).not.toContain("aria-pressed");
+  });
+
+  it("offers every sealed output as a toggle grouped by source pane, pressed for the observed ones", () => {
+    const briefing = legacyBriefingV3();
+    const observed = new Set([keyA(2), keyB(2), keyB(3)]);
+    const html = renderToStaticMarkup(
+      <ArticleReaderOutputsV3
+        briefing={briefing}
+        contract={observationContractV3()}
+        sampleStore={storeV3()}
+        snapshot={observationSnapshotV3()}
+        scenarioLabels={{ "scenario/a": "基準", "scenario/b": "TBV +1000" }}
+        selection={{ selectedItemIds: observed, onToggle: () => undefined, toggleLabel: (label, selected) => `${selected ? "-" : "+"}${label}` }}
+      />,
+    );
+    expect(html).toContain('data-reader-section-count="2"');
+    expect(html).toContain("弁");
+    expect(html.match(/class="workbench-output-item/g)).toHaveLength(20);
+    expect(html.match(/aria-pressed="true"/g)).toHaveLength(3);
+    expect(html.match(/aria-pressed="false"/g)).toHaveLength(17);
+    expect(html).toContain('aria-label="-A2"');
+    expect(html).toContain('aria-label="+A1"');
+    // Each tile keeps its sealed Scenario in its identity; the reference never renames a value.
+    expect(html).toContain(`data-output-id="${keyB(2)}"`);
+  });
+
+  it("renders editor emphasis toggles from the effective observation and a phone-width preview", () => {
+    const snapshot = observationSnapshotV3();
+    const legacy = legacyBriefingV3();
+    const html = renderToStaticMarkup(
+      <ArticleBriefingEditorV3 snapshot={snapshot} briefing={legacy} onChange={() => undefined} />,
+    );
+    expect(html.match(/data-briefing-output-primary="true"/g)).toHaveLength(6);
+    expect(html.match(/data-briefing-output-primary="false"/g)).toHaveLength(14);
+    expect(html.match(/data-briefing-control-primary="true"/g)).toHaveLength(2);
+    expect(html).toContain('data-testid="article-briefing-phone-preview-v3"');
+    expect(html).toContain('data-primary-outputs="6"');
+    expect(html).toContain('data-primary-controls="2"');
+  });
+
+  it("keeps the same observation strip in the Workbench phone shell from shared tiles", () => {
+    const pane = (paneId: string, title: string) => ({ paneId, title, role: "output" as const });
+    const items = (prefix: string, count: number) => Array.from({ length: count }, (_, i) => ({
+      itemId: `${prefix}${i + 1}`, outputId: `${prefix}${i + 1}`, label: `${prefix}${i + 1}`.toUpperCase(), value: i,
+      unit: "mL", availability: "available", quality: "assessed",
+    }));
+    const reading = (paneId: string, prefix: string, count: number, scenario: string) => ({
+      paneId, title: scenario === "弁" ? "弁" : "出力", bindingMode: prefix === "a" ? "active-slot" as const : "fixed" as const,
+      scenarioId: `scenario/${prefix}`, measured: items(prefix, count), memory: new WorkbenchLastMeasuredOutputsV1(),
+      previousValueNotice: "old", scenario: { label: prefix === "a" ? "基準" : "TBV +1000", colorHex: "#123456" },
+    });
+    let pressed = 0;
+    const render = (observedSelection: readonly string[] | null) => renderToStaticMarkup(
+      <WorkbenchMobileStageDeckV3
+        graphPanes={[]}
+        outputPanes={[pane("pane/a", "基準"), pane("pane/b", "弁")]}
+        controlPanes={[]}
+        graphAddOptions={[]}
+        scenarioContent={null}
+        renderGraphPane={() => null}
+        renderOutputPane={(_pane, selection) => { pressed += selection?.selectedItemIds.size ?? 0; return null; }}
+        readOutputPane={(candidate) => candidate.paneId === "pane/a" ? reading("pane/a", "a", 12, "基準") : reading("pane/b", "b", 8, "弁")}
+        observedSelection={observedSelection}
+        onObservedSelectionChange={() => undefined}
+        renderControlPane={() => null}
+        onOpenPaneSettings={() => undefined}
+        onAddGraphPane={() => undefined}
+        onAddOutputPane={() => undefined}
+        onAddControlPane={() => undefined}
+      />,
+    );
+    const html = render(null);
+    expect(html).toContain('data-testid="workbench-mobile-observation"');
+    expect(html).toContain('data-observed-count="6"');
+    // One heading per pane: the following pane says so beside its Scenario; the fixed pane just names it.
+    expect(html.match(/data-observation-group=/g)).toHaveLength(2);
+    expect(html).toContain('<span class="experiment-observation-following" data-observation-following="true">連動</span>基準');
+    expect(html).toContain('<span class="experiment-observation-title">弁</span>');
+    expect(html).not.toContain("data-output-scenario");
+    // The graph tabs read above the graph; the control tab is active by default and the strip stays outside the tabs.
+    expect(html.indexOf('data-testid="workbench-mobile-graph-view-rail"')).toBeLessThan(html.indexOf("-graph-panel"));
+    expect(html).toContain('data-mobile-pane-groups="control"');
+    expect(pressed).toBe(0);
+    // A Session selection names pane and item; removed items drop out and an explicit empty choice stays empty.
+    const selected = render([workbenchObservedOutputKeyV3("pane/b", "b8"), workbenchObservedOutputKeyV3("pane/gone", "x1"), workbenchObservedOutputKeyV3("pane/a", "a12")]);
+    expect(selected).toContain('data-observed-count="2"');
+    expect(selected).toContain(`data-output-id="${workbenchObservedOutputKeyV3("pane/b", "b8")}"`);
+    expect(render([])).not.toContain('data-testid="workbench-mobile-observation"');
+  });
+
+  it("names a lone single-Scenario group for assistive technology only, and shows semantic or distinguishing titles", () => {
+    const item = (sourcePaneId: string, scenarioId: string, outputId: string) => ({
+      itemId: `${sourcePaneId}/${outputId}/${scenarioId}`, outputId, sourcePaneId, scenarioId, label: outputId, value: 1, unit: "mL",
+    });
+    const naming = (multiScenario: boolean, labels: Record<string, string | undefined>) => ({
+      multiScenario, paneLabel: (paneId: string) => labels[paneId], scenarioLabel: (scenarioId: string) => scenarioId === "s/a" ? "基準" : "TBV +500", scenarioColor: () => "#000",
+    });
+    // One pane, one Scenario, title equal to the Scenario: hidden heading, still titled.
+    const lone = articleReaderObservationGroupsV3([item("pane/a", "s/a", "o1")], naming(false, { "pane/a": "基準" }));
+    expect(lone[0]).toMatchObject({ title: "基準", headingHidden: true });
+    expect(lone[0]?.scenario).toBeUndefined();
+    // The stored default pane title names only the role: hidden like the Scenario name.
+    expect(articleReaderObservationGroupsV3([item("pane/o", "s/a", "o1")], naming(false, { "pane/o": "Outputs" }))[0]).toMatchObject({ title: "Outputs", headingHidden: true });
+    expect(articleReaderObservationGroupsV3([item("pane/o", "s/a", "o1")], { ...naming(false, { "pane/o": "出力" }), genericTitles: ["出力"] })[0]?.headingHidden).toBe(true);
+    // One pane, one Scenario, semantic title: visible heading.
+    expect(articleReaderObservationGroupsV3([item("pane/v", "s/a", "o1")], naming(false, { "pane/v": "弁関連" }))[0]).toMatchObject({ title: "弁関連" });
+    expect(articleReaderObservationGroupsV3([item("pane/v", "s/a", "o1")], naming(false, { "pane/v": "弁関連" }))[0]?.headingHidden).toBeUndefined();
+    // Two panes, one Scenario: both titles visible.
+    const two = articleReaderObservationGroupsV3([item("pane/a", "s/a", "o1"), item("pane/v", "s/a", "o2")], naming(false, { "pane/a": "基準", "pane/v": "弁関連" }));
+    expect(two.map((group) => [group.title, group.headingHidden])).toEqual([["基準", undefined], ["弁関連", undefined]]);
+    // One observed group among several Scenarios: the Scenario names it; a title equal to it is dropped.
+    const amid = articleReaderObservationGroupsV3([item("pane/b", "s/b", "o1")], naming(true, { "pane/b": "TBV +500" }));
+    expect(amid[0]).toMatchObject({ scenario: { label: "TBV +500" } });
+    expect(amid[0]?.title).toBeUndefined();
+    expect(amid[0]?.headingHidden).toBeUndefined();
+    const rendered = renderToStaticMarkup(<ExperimentObservationV3 groups={lone} label="obs" />);
+    expect(rendered).toContain('data-observation-heading="hidden"');
+    expect(rendered).toContain('<h4 class="sr-only">');
+    expect(rendered).not.toContain("experiment-observation-heading\"");
+  });
+
+  it("keeps the following marker whether or not the pane title already names its Scenario", () => {
+    const item = { itemId: "co", outputId: "co", label: "CO", value: 5, unit: "L/min", availability: "available", quality: "assessed" };
+    const render = (title: string | undefined, following: boolean, scenario = "基準") => renderToStaticMarkup(
+      <ExperimentObservationV3
+        groups={[{ key: "g", ...(title === undefined ? {} : { title }), scenario: { label: scenario, colorHex: "#000" }, following, items: [item] }]}
+        label="observation" followingLabel="連動"
+      />,
+    );
+    // Title equals the Scenario: the name appears once, the mode still shows.
+    const same = render("基準", true);
+    expect(same.match(/基準/g)).toHaveLength(1);
+    expect(same).toContain('data-observation-following="true">連動</span>');
+    // Title contains the Scenario name: no repetition, mode shown.
+    const contains = render("弁（基準）", true);
+    expect(contains.match(/基準/g)).toHaveLength(1);
+    expect(contains).toContain("連動");
+    // Distinct labels: both names, mode shown; a fixed pane shows no mode.
+    const distinct = render("弁", true, "TBV +1000");
+    expect(distinct).toContain('<span class="experiment-observation-title">弁</span>');
+    expect(distinct).toContain("連動</span>TBV +1000");
+    expect(render("基準", false)).not.toContain("連動");
+    expect(render("弁", false, "TBV +1000")).toContain("TBV +1000");
+    expect(render("MAP", false, "A")).toContain('class="experiment-observation-scenario">A</span>');
+    expect(render("弁(A)", false, "A")).not.toContain('class="experiment-observation-scenario"');
+  });
+
+  it("edits one of two sealed references of the same pane item without touching its sibling", () => {
+    const snapshot = observationSnapshotV3();
+    const sealed = defaultArticleBriefingV3(snapshot, "scenario/a", "Observation");
+    const a = { ...sealed.outputs[0]!, order: 0, emphasis: "primary" as const };
+    const b = { ...sealed.outputs[0]!, scenarioId: "scenario/b", order: 1, emphasis: "supporting" as const };
+    const briefing: ExperimentPlacementBriefingV2 = { ...sealed, outputs: [a, b] };
+    const changes: ExperimentPlacementBriefingV2[] = [];
+    const html = renderToStaticMarkup(
+      <ArticleBriefingEditorV3 snapshot={snapshot} briefing={briefing} onChange={(next) => changes.push(next)} />,
+    );
+    // Both references render as their own rows, each named by its Scenario.
+    expect(html.match(/data-briefing-output-primary="true"/g)).toHaveLength(1);
+    expect(html.match(/data-briefing-output-primary="false"/g)).toHaveLength(1);
+    const handlers = articleBriefingEditorReferenceHandlersV3(briefing, (next) => changes.push(next));
+    handlers.relabel(b, "Custom");
+    handlers.setPrimary(b, true);
+    handlers.remove(b);
+    handlers.move(b, -1);
+    const [relabelled, promoted, removed, moved] = changes;
+    expect(relabelled!.outputs).toEqual([a, { ...b, label: "Custom" }]);
+    expect(promoted!.outputs.map((output) => output.emphasis)).toEqual(["primary", "primary"]);
+    expect(promoted!.outputs[0]).toEqual(a);
+    expect(removed!.outputs).toEqual([a]);
+    expect(moved!.outputs.map((output) => `${output.scenarioId}:${output.order}`)).toEqual(["scenario/b:0", "scenario/a:1"]);
+    for (const change of changes) expect(() => validateExperimentPlacementBriefingV2(change, snapshot.content)).not.toThrow();
+  });
+
+  it("can add the current pane Scenario alongside a retained sealed reference after re-capture", () => {
+    const original = observationSnapshotV3();
+    const briefing = defaultArticleBriefingV3(original, "scenario/a", "Observation");
+    const snapshot = { ...original, content: { ...original.content, surface: { ...original.content.surface,
+      outputPanes: original.content.surface.outputPanes.map((pane) => pane.paneId === "pane/a"
+        ? { ...pane, binding: { mode: "fixed" as const, scenarioId: "scenario/b" } } : pane),
+    } } };
+    const html = renderToStaticMarkup(<ArticleBriefingEditorV3 snapshot={snapshot} briefing={briefing} onChange={() => undefined} />);
+    const matches: readonly string[] = html.match(/<label\b[^>]*>[\s\S]*?<\/label>/g) ?? [];
+    const labels = matches.filter((label) => label.includes(">A1</span>"));
+    expect(labels).toHaveLength(2);
+    expect(labels.find((label) => label.includes("基準"))).toContain('checked=""');
+    expect(labels.find((label) => label.includes("TBV +1000"))).not.toContain('checked=""');
+  });
+
+  it("retains derived primary outputs when reordering a Briefing sealed without emphasis", () => {
+    const briefing = legacyBriefingV3();
+    const originalKeys = articleBriefingPrimaryOutputKeysV3(briefing);
+    const changes: ExperimentPlacementBriefingV2[] = [];
+    articleBriefingEditorReferenceHandlersV3(briefing, (next) => changes.push(next)).move(briefing.outputs[3]!, -1);
+    expect(changes).toHaveLength(1);
+    expect(articleBriefingPrimaryOutputKeysV3(changes[0]!).slice().sort()).toEqual([...originalKeys].sort());
+    expect(changes[0]!.outputs[2]!.outputId).toBe(briefing.outputs[3]!.outputId);
+    expect(changes[0]!.outputs.every((output) => output.emphasis !== undefined)).toBe(true);
+  });
+
+  it("names a shared control target once and per-row targets only when bindings differ", () => {
+    const fixed = (scenarioIds: string[]) => ({ mode: "fixed" as const, scenarioIds, application: "absolute" as const });
+    const visible = ["scenario/a", "scenario/b"];
+    expect(articleReaderControlBindingSignatureV3({ binding: fixed(["scenario/a"]) }, visible))
+      .toBe(articleReaderControlBindingSignatureV3({ binding: fixed(["scenario/a"]) }, visible));
+    expect(articleReaderControlBindingSignatureV3({ binding: fixed(["scenario/a"]) }, visible))
+      .not.toBe(articleReaderControlBindingSignatureV3({ binding: fixed(["scenario/b"]) }, visible));
+    expect(articleReaderControlBindingSignatureV3({ binding: fixed(["scenario/b", "scenario/a"]) }, visible))
+      .toBe(articleReaderControlBindingSignatureV3({ binding: fixed(["scenario/a", "scenario/b"]) }, visible));
+    expect(articleReaderControlBindingSignatureV3({ binding: { mode: "reader-focus", allowedScenarioIds: ["scenario/a"] } }, visible))
+      .not.toBe(articleReaderControlBindingSignatureV3({ binding: fixed(["scenario/a"]) }, visible));
+    // A Scenario outside the visible scope does not separate otherwise equal bindings.
+    expect(articleReaderControlBindingSignatureV3({ binding: fixed(["scenario/a", "scenario/zzz"]) }, visible))
+      .toBe(articleReaderControlBindingSignatureV3({ binding: fixed(["scenario/a"]) }, visible));
+  });
+
+  it("keeps the same pane item read for two Scenarios as two references through re-capture", () => {
+    const snapshot = observationSnapshotV3();
+    const sealed = defaultArticleBriefingV3(snapshot, "scenario/a", "Observation");
+    const eachVisible: ExperimentPlacementBriefingV2 = {
+      ...sealed,
+      outputs: [
+        { ...sealed.outputs[0]!, scenarioId: "scenario/a", order: 0 },
+        { ...sealed.outputs[0]!, scenarioId: "scenario/b", order: 1 },
+      ],
+    };
+    const recaptured = reconcileWorkbenchBriefingV3({ briefing: eachVisible, preferredFocusScenarioId: "scenario/a", snapshot });
+    expect(recaptured.outputs.map(articleBriefingOutputKeyV3)).toEqual([keyA(1), observedKey("pane/a", "output/a1", "scenario/b")]);
+    // A true duplicate reference collapses; a Scenario that left the scope drops out.
+    expect(reconcileWorkbenchBriefingV3({
+      briefing: { ...eachVisible, outputs: [...eachVisible.outputs, { ...eachVisible.outputs[0]!, order: 2 }] },
+      preferredFocusScenarioId: "scenario/a", snapshot,
+    }).outputs).toHaveLength(2);
+    expect(reconcileWorkbenchBriefingV3({
+      briefing: { ...eachVisible, scenarioScope: { visibleScenarioIds: ["scenario/a"], initialFocusScenarioId: "scenario/a" } },
+      preferredFocusScenarioId: "scenario/a", snapshot,
+    }).outputs.map(articleBriefingOutputKeyV3)).toEqual([keyA(1)]);
+  });
+});
+
+describe("Article Briefing primary limits", () => {
+  it("bounds the primary sets at six output references and two controllers, never the sealed content", () => {
+    expect(ARTICLE_PRIMARY_OUTPUT_LIMIT_V3).toBe(6);
+    expect(ARTICLE_PRIMARY_CONTROL_LIMIT_V3).toBe(2);
+    const snapshot = observationSnapshotV3();
+    const sealed = defaultArticleBriefingV3(snapshot, "scenario/a", "Observation");
+    // Twenty sealed outputs and three sealed controls are fine; only the primary marks are bounded.
+    expect(validateExperimentPlacementBriefingV2(sealed, snapshot.content).outputs).toHaveLength(20);
+    const seven = { ...sealed, outputs: withExplicitItemEmphasisV3(sealed.outputs,
+      new Set(sealed.outputs.slice(0, 7).map(articleBriefingOutputKeyV3)), (output) => articleBriefingOutputKeyV3(output)) };
+    expect(() => validateExperimentPlacementBriefingV2(seven, snapshot.content)).toThrow(/outputs.*at most 6 primary items \(found 7\)/);
+    const three = { ...sealed, controls: withExplicitItemEmphasisV3(sealed.controls,
+      new Set(sealed.controls.map(articleBriefingControlKeyV3)), (control) => articleBriefingControlKeyV3(control)) };
+    expect(() => validateExperimentPlacementBriefingV2(three, snapshot.content)).toThrow(/controls.*at most 2 primary items \(found 3\)/);
+    // A reference counts with its Scenario: the same pane item at two Scenarios is two primary references.
+    const paired = { ...sealed, outputs: withExplicitItemEmphasisV3([
+      ...sealed.outputs.slice(0, 6).map((output, order) => ({ ...output, order })),
+      ...sealed.outputs.slice(0, 1).map((output) => ({ ...output, scenarioId: "scenario/b", order: 6 })),
+    ], new Set([...sealed.outputs.slice(0, 5).map(articleBriefingOutputKeyV3), observedKey("pane/a", "output/a1", "scenario/b")]),
+    (output) => articleBriefingOutputKeyV3(output)) };
+    expect(validateExperimentPlacementBriefingV2(paired, snapshot.content).outputs.filter((output) => output.emphasis === "primary")).toHaveLength(6);
+  });
+
+  it("derives a bounded legacy first screen when many groups or controls compete", () => {
+    const outputs = Array.from({ length: 7 }, (_, index) => ({
+      sourcePaneId: `pane/${index}`, outputId: "output/x", scenarioId: "scenario/a", label: "X", order: index,
+    }));
+    expect(defaultObservedItemKeysV3(outputs.map((output) => ({ keys: [articleBriefingOutputKeyV3(output)] })))).toHaveLength(7);
+    expect(articleBriefingPrimaryOutputKeysV3({ outputs })).toHaveLength(6);
+    const controls = Array.from({ length: 3 }, (_, index) => ({
+      sourcePaneId: "pane/c", controlId: `control/${index}`, label: "C", order: index,
+      presentation: { kind: "slider" as const },
+      binding: { mode: "fixed" as const, scenarioIds: ["scenario/a"], application: "absolute" as const },
+    }));
+    expect(articleBriefingPrimaryControlKeysV3({ controls })).toEqual([
+      articleBriefingControlKeyV3(controls[0]!), articleBriefingControlKeyV3(controls[1]!),
+    ]);
+  });
+
+  it("keeps the editor from marking beyond the limit while the sealed item stays", () => {
+    const snapshot = observationSnapshotV3();
+    const sealed = defaultArticleBriefingV3(snapshot, "scenario/a", "Observation");
+    const changes: ExperimentPlacementBriefingV2[] = [];
+    const handlers = articleBriefingEditorReferenceHandlersV3(sealed, (next) => changes.push(next));
+    handlers.setPrimary(sealed.outputs[6]!, true);
+    expect(changes).toHaveLength(0);
+    handlers.setPrimary(sealed.outputs[0]!, false);
+    expect(changes).toHaveLength(1);
+    articleBriefingEditorReferenceHandlersV3(changes[0]!, (next) => changes.push(next)).setPrimary(sealed.outputs[6]!, true);
+    expect(changes).toHaveLength(2);
+    expect(changes[1]!.outputs.filter((output) => output.emphasis === "primary").map(articleBriefingOutputKeyV3))
+      .toEqual([keyA(2), keyA(3), keyA(7), keyB(1), keyB(2), keyB(3)]);
+    expect(changes[1]!.outputs).toHaveLength(20);
+    // Every change re-seals within the limit; binding and Scenario never move.
+    for (const change of changes) {
+      expect(() => validateExperimentPlacementBriefingV2(change, snapshot.content)).not.toThrow();
+      expect(change.outputs.map((output) => output.scenarioId)).toEqual(sealed.outputs.map((output) => output.scenarioId));
+    }
+    const html = renderToStaticMarkup(
+      <ArticleBriefingEditorV3 snapshot={snapshot} briefing={sealed} onChange={() => undefined} />,
+    );
+    // Fourteen supporting outputs and one supporting control are blocked while the sets are full.
+    expect(html.match(/data-briefing-primary-blocked="true"/g)).toHaveLength(15);
+    expect(html).toContain('data-testid="article-briefing-primary-outputs-count-v3">主要 6/6<');
+    expect(html).toContain('data-testid="article-briefing-primary-controls-count-v3">主要 2/2<');
+  });
+
+  it("opens the controller panes holding a primary controller first", () => {
+    const sealed = defaultArticleBriefingV3(observationSnapshotV3(), "scenario/a", "Observation");
+    expect(articleBriefingInitialOpenControlPaneIdsV3(sealed)).toEqual(["pane/controls-a"]);
+    const onlyB = withExplicitItemEmphasisV3(sealed.controls,
+      new Set([articleBriefingControlKeyV3({ sourcePaneId: "pane/controls-b", controlId: "control/tbv" })]), (control) => articleBriefingControlKeyV3(control));
+    expect(articleBriefingInitialOpenControlPaneIdsV3({ controls: onlyB })).toEqual(["pane/controls-b"]);
+    // No primary controller: the first sealed pane opens so the deck is never empty.
+    const none = withExplicitItemEmphasisV3(sealed.controls, new Set(), (control) => articleBriefingControlKeyV3(control));
+    expect(articleBriefingInitialOpenControlPaneIdsV3({ controls: none })).toEqual(["pane/controls-a"]);
+    expect(articleBriefingInitialOpenControlPaneIdsV3({ controls: [] })).toEqual([]);
+  });
+});
+
+describe("Article Reader first screen and opened forms", () => {
+  const sliderDefinition = (controlId: string): ControlDefinitionV2 => ({
+    controlId, valueType: "number", unit: "mL", minimum: 0, maximum: 10, step: 1, defaultValue: 5,
+    changeSemantics: "accepted-state-warm-start",
+  });
+  const contract = (): ModelContractV2 => ({
+    ...observationContractV3(),
+    controlCatalog: [sliderDefinition("control/tbv"), sliderDefinition("control/svr")],
+  });
+  const runtime = () => readerRuntimeStubV3({
+    snapshotId: "snapshot/observation",
+    scenarioIds: Object.freeze(["scenario/a", "scenario/b"]),
+    activeScenarioId: "scenario/a",
+  });
+  const render = (
+    layout: ArticleReaderEmbedLayoutV3,
+    briefing: ExperimentPlacementBriefingV2,
+    memory: ArticleReaderObservationMemoryV3 = createArticleReaderObservationMemoryV3(),
+    onOpen: (() => void) | null = () => undefined,
+  ) => renderToStaticMarkup(
+    <ArticleReaderObservationMemoryContextV3.Provider value={memory}>
+      <ArticleReaderEmbedSurfaceV3
+        analysisRecompute="on-request"
+        briefing={briefing}
+        contract={contract()}
+        layout={layout}
+        onOpen={onOpen ?? undefined}
+        runtime={runtime()}
+        snapshot={observationSnapshotV3()}
+      />
+    </ArticleReaderObservationMemoryContextV3.Provider>,
+  );
+  const sliders = (html: string) => (html.match(/type="range"/g) ?? []).length;
+  const sealedBriefing = () => defaultArticleBriefingV3(observationSnapshotV3(), "scenario/a", "Observation");
+
+  it("keeps every controller's reader-focus target reachable, including a singleton outside the current focus", () => {
+    const sealed = sealedBriefing();
+    const singleton = { ...sealed, controls: [{ ...sealed.controls[0]!,
+      binding: { mode: "reader-focus" as const, allowedScenarioIds: ["scenario/b"] },
+    }] };
+    expect(validateExperimentPlacementBriefingV2(singleton, observationSnapshotV3().content)).toEqual(singleton);
+    for (const layout of ["inline", "peek", "sheet"] as const) {
+      expect(render(layout, singleton).match(/article-reader-scenario-chip/g)).toHaveLength(1);
+    }
+    const differing = { ...singleton, controls: [...singleton.controls, { ...sealed.controls[1]!,
+      binding: { mode: "reader-focus" as const, allowedScenarioIds: ["scenario/a"] },
+    }] };
+    expect(render("peek", differing).match(/article-reader-scenario-chip/g)).toHaveLength(2);
+    // Fixed bindings still need no selector and retain their original targets.
+    expect(render("peek", sealed)).not.toContain("article-reader-scenario-chip");
+    expect(sealed.controls[0]!.binding).toEqual({ mode: "fixed", scenarioIds: ["scenario/a"], application: "absolute" });
+  });
+
+  it("reads the author's primary outputs and controls inline at every width, with nothing to unfold", () => {
+    const html = render("inline", sealedBriefing());
+    expect(html).toContain('data-reader-layout="inline"');
+    expect(html).toContain('data-reader-observed-count="6"');
+    expect(sliders(html)).toBe(2);
+    expect(html).not.toContain("data-reader-deck");
+    expect(html).not.toContain("data-reader-open-operate");
+    expect(html).not.toContain("data-reader-observation-reset");
+    expect(html).not.toContain("aria-pressed");
+    // The third sealed controller (pane b) is not in flow; it waits in the opened form.
+    expect(html).not.toContain("TBV +1000 を操作");
+  });
+
+  it("offers to open only when controllers are sealed but none is primary", () => {
+    const sealed = sealedBriefing();
+    const noPrimaryControls = { ...sealed, controls: withExplicitItemEmphasisV3(sealed.controls, new Set(), (control) => articleBriefingControlKeyV3(control)) };
+    const html = render("inline", noPrimaryControls);
+    expect(sliders(html)).toBe(0);
+    expect(html).toContain("data-reader-open-operate");
+    expect(html).toContain("開いて操作");
+    // Nothing sealed to operate, or no way to open: no row.
+    expect(render("inline", { ...sealed, controls: [] })).not.toContain("data-reader-open-operate");
+    expect(render("inline", noPrimaryControls, createArticleReaderObservationMemoryV3(), null)).not.toContain("data-reader-open-operate");
+  });
+
+  it("keeps the reader's observation in opened forms only and the author's inline", () => {
+    const sealed = sealedBriefing();
+    const memory = { ...createArticleReaderObservationMemoryV3(), observedOutputKeys: [keyA(12), keyB(8)] };
+    const sheet = render("sheet", sealed, memory);
+    expect(sheet).toContain('data-reader-observed-count="2"');
+    expect(sheet).toContain(`data-output-id="${keyA(12)}"`);
+    // The same memory read inline: the author's six, untouched.
+    const inline = render("inline", sealed, memory);
+    expect(inline).toContain('data-reader-observed-count="6"');
+    expect(inline).not.toContain(`data-output-id="${keyA(12)}"`);
+    expect(memory.observedOutputKeys).toEqual([keyA(12), keyB(8)]);
+    // An explicit empty selection stays empty in the opened forms.
+    const empty = render("peek", sealed, { ...createArticleReaderObservationMemoryV3(), observedOutputKeys: [] });
+    expect(empty).toContain('data-reader-observed-count="0"');
+    expect(empty).not.toContain("data-reader-observation");
+  });
+
+  it("arranges an opened form as stage, observation, then a controls/outputs deck with primary panes open", () => {
+    const sealed = sealedBriefing();
+    const html = render("sheet", sealed);
+    expect(html.indexOf("article-reader-stage")).toBeLessThan(html.indexOf("data-reader-observation"));
+    expect(html.indexOf("data-reader-observation")).toBeLessThan(html.indexOf("data-reader-deck"));
+    expect(html).toContain('data-reader-deck-task="controls"');
+    expect(html).toContain('data-reader-deck-tab="controls"');
+    expect(html).toContain('data-reader-deck-tab="outputs"');
+    // Pane a holds the primary controllers and opens; pane b waits folded with its sliders unmounted.
+    expect(html).toContain('data-reader-section="pane/controls-a" data-reader-section-collapsed="false"');
+    expect(html).toContain('data-reader-section="pane/controls-b" data-reader-section-collapsed="true"');
+    expect(sliders(html)).toBe(2);
+    expect(html).toContain("TBV +1000 を操作");
+    expect(html).toContain('aria-expanded="false"');
+    // No output toggles until the outputs task is chosen.
+    expect(html).not.toContain("aria-pressed");
+    const outputs = render("sheet", sealed, { ...createArticleReaderObservationMemoryV3(), deckTask: "outputs" });
+    expect(outputs).toContain('data-reader-deck-task="outputs"');
+    expect(outputs.match(/aria-pressed="true"/g)).toHaveLength(6);
+    expect(outputs.match(/aria-pressed="false"/g)).toHaveLength(14);
+    expect(outputs).not.toContain("data-reader-observation-reset");
+    const changed = render("sheet", sealed, { ...createArticleReaderObservationMemoryV3(), deckTask: "outputs", observedOutputKeys: [keyA(1)] });
+    expect(changed).toContain("data-reader-observation-reset");
+    expect(changed).toContain("観察中 1件");
+  });
+
+  it("opens on the controls task from the explicit open-to-operate row, keeping the reader's observation", () => {
+    const sealed = sealedBriefing();
+    const noPrimaryControls = { ...sealed, controls: withExplicitItemEmphasisV3(sealed.controls, new Set(), (control) => articleBriefingControlKeyV3(control)) };
+    // The reader left the deck on the outputs task with a changed observation, then closed.
+    const memory: ArticleReaderObservationMemoryV3 = { ...createArticleReaderObservationMemoryV3(), deckTask: "outputs", observedOutputKeys: [keyA(12)] };
+    expect(render("inline", noPrimaryControls, memory)).toContain("data-reader-open-operate");
+    let opened = 0;
+    openArticleReaderToOperateV3(memory, () => { opened += 1; });
+    expect(opened).toBe(1);
+    expect(memory.deckTask).toBe("controls");
+    expect(memory.observedOutputKeys).toEqual([keyA(12)]);
+    const reopened = render("sheet", noPrimaryControls, memory);
+    expect(reopened).toContain('data-reader-deck-task="controls"');
+    expect(reopened).toContain('data-reader-observed-count="1"');
+    // Without a primary controller the first sealed pane opens, so the reader lands on sliders.
+    expect(reopened).toContain('data-reader-section="pane/controls-a" data-reader-section-collapsed="false"');
+    expect(sliders(reopened)).toBe(2);
+  });
+
+  it("gives the deck one tab stop and its own panel per task", () => {
+    const sealed = sealedBriefing();
+    const html = render("sheet", sealed, { ...createArticleReaderObservationMemoryV3(), deckTask: "outputs" });
+    expect(html).toMatch(/data-reader-deck-tab="controls"[^>]*>|tabindex="-1"[^>]*data-reader-deck-tab="controls"/);
+    const controlsTab = html.match(/<button[^>]*data-reader-deck-tab="controls"[^>]*>/)?.[0] ?? "";
+    const outputsTab = html.match(/<button[^>]*data-reader-deck-tab="outputs"[^>]*>/)?.[0] ?? "";
+    expect(controlsTab).toContain('tabindex="-1"');
+    expect(controlsTab).toContain('aria-selected="false"');
+    expect(outputsTab).toContain('tabindex="0"');
+    expect(outputsTab).toContain('aria-selected="true"');
+    expect(html).toContain('data-reader-deck-panel="outputs"');
+    expect(html).not.toContain('data-reader-deck-panel="controls"');
+    expect(render("sheet", sealed)).toContain('data-reader-deck-panel="controls"');
+  });
+
+  it("previews the open-to-operate row for authors when controllers are sealed without a primary mark", () => {
+    const snapshot = observationSnapshotV3();
+    const sealed = defaultArticleBriefingV3(snapshot, "scenario/a", "Observation");
+    const noPrimaryControls = { ...sealed, controls: withExplicitItemEmphasisV3(sealed.controls, new Set(), (control) => articleBriefingControlKeyV3(control)) };
+    const html = renderToStaticMarkup(<ArticleBriefingEditorV3 snapshot={snapshot} briefing={noPrimaryControls} onChange={() => undefined} />);
+    expect(html).toContain('data-primary-controls="0"');
+    expect(html).toContain('data-open-operate="true"');
+    expect(html).toContain("data-briefing-phone-open-operate");
+    expect(html).toContain('data-testid="article-briefing-primary-controls-count-v3">主要 0/2<');
+    const withPrimary = renderToStaticMarkup(<ArticleBriefingEditorV3 snapshot={snapshot} briefing={sealed} onChange={() => undefined} />);
+    expect(withPrimary).not.toContain("data-briefing-phone-open-operate");
+    const noControls = renderToStaticMarkup(<ArticleBriefingEditorV3 snapshot={snapshot} briefing={{ ...sealed, controls: [] }} onChange={() => undefined} />);
+    expect(noControls).not.toContain("data-briefing-phone-open-operate");
+  });
+
+  it("keeps the deck task and folded panes the reader chose, and skips the switch when only one task exists", () => {
+    const sealed = sealedBriefing();
+    const memory = { ...createArticleReaderObservationMemoryV3(), collapsedControlPaneIds: ["pane/controls-a"] };
+    const html = render("peek", sealed, memory);
+    expect(html).toContain('data-reader-section="pane/controls-a" data-reader-section-collapsed="true"');
+    expect(html).toContain('data-reader-section="pane/controls-b" data-reader-section-collapsed="false"');
+    expect(sliders(html)).toBe(1);
+    const readOnly = render("peek", { ...sealed, controls: [] });
+    expect(readOnly).toContain('data-reader-deck-task="outputs"');
+    expect(readOnly).not.toContain('role="tablist" aria-label="操作と指標"');
+    expect(readOnly.match(/aria-pressed=/g)).toHaveLength(20);
+  });
+
+  it("keeps the Workbench arrangement when maximized: observation and every output below, every controller pane beside", () => {
+    const html = render("workbench", sealedBriefing(), { ...createArticleReaderObservationMemoryV3(), observedOutputKeys: [keyB(4)] });
+    const outputsArea = html.slice(html.indexOf("article-reader-workbench-outputs"), html.indexOf("article-reader-workbench-controls"));
+    expect(outputsArea).toContain("data-reader-observation");
+    expect(outputsArea).toContain("data-reader-observation-reset");
+    expect(outputsArea.match(/aria-pressed=/g)).toHaveLength(20);
+    const controlsArea = html.slice(html.indexOf("article-reader-workbench-controls"));
+    expect(controlsArea).toContain('data-reader-section="pane/controls-a" data-reader-section-collapsed="false"');
+    expect(controlsArea).toContain('data-reader-section="pane/controls-b" data-reader-section-collapsed="true"');
+    expect(html).not.toContain("data-reader-deck-tab");
   });
 });

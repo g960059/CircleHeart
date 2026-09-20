@@ -15,6 +15,7 @@ import {
   WORKBENCH_PRESSURE_VOLUME_ANALYSIS_DEFAULT_MODE_V3,
   WORKBENCH_PRESSURE_VOLUME_ENVELOPE_DEFAULT_VISIBLE_V3,
   WORKBENCH_SWEEP_WINDOW_DEFAULT_SEC_V3,
+  WORKBENCH_DEFAULT_OUTPUT_PANE_LABEL_V3,
 } from "./WorkbenchSurfaceV3";
 
 export type WorkbenchPaneIdentityV3 = Readonly<{
@@ -131,7 +132,7 @@ export function addWorkbenchSurfacePaneV3(
     const pane: ExperimentSurfaceOutputPaneV2 = {
       paneId,
       role: "output",
-      label: "Outputs",
+      label: WORKBENCH_DEFAULT_OUTPUT_PANE_LABEL_V3,
       order,
       priority,
       binding: { mode: "active-slot" },

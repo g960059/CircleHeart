@@ -1,4 +1,6 @@
 import {
+  STUDIO_BRIEFING_PRIMARY_CONTROL_LIMIT_V2,
+  STUDIO_BRIEFING_PRIMARY_OUTPUT_LIMIT_V2,
   STUDIO_EXPERIMENT_PLACEMENT_V2_SCHEMA_ID,
   STUDIO_EXPERIMENT_SNAPSHOT_V2_SCHEMA_ID,
   STUDIO_EXPERIMENT_V2_SCHEMA_ID,
@@ -1588,9 +1590,10 @@ function assertPlacementBriefingV2(
   if (briefing === undefined) {
     throw validationErrorV2(path, "must be an object when present");
   }
-  assertExactKeysV2(
+  assertRequiredOptionalKeysV2(
     briefing,
     ["defaultTitle", "scenarioScope", "graphs", "outputs", "controls"],
+    ["presentation"],
     path,
   );
   requiredTrimmedStringV2(briefing.defaultTitle, `${path}.defaultTitle`);
@@ -1653,17 +1656,26 @@ function assertPlacementBriefingV2(
       assertGraphBriefingOverridesV2(graph.overrides, `${graphPath}.overrides`);
     }
   });
+  if (hasOwnV2(briefing, "presentation")) {
+    assertPlacementBriefingPresentationV2(
+      briefing.presentation,
+      graphPaneIds,
+      `${path}.presentation`,
+    );
+  }
 
   arrayV2(briefing.outputs, `${path}.outputs`);
   const outputKeys = new Set<string>();
   const outputOrders = new Set<number>();
   briefing.outputs.forEach((output, index) => {
     const outputPath = `${path}.outputs[${index}]`;
-    assertExactKeysV2(
+    assertRequiredOptionalKeysV2(
       output,
       ["sourcePaneId", "outputId", "scenarioId", "label", "order"],
+      ["emphasis"],
       outputPath,
     );
+    assertBriefingItemEmphasisV2(output, outputPath);
     const sourcePaneId = requiredPortableIdV2(
       output.sourcePaneId,
       `${outputPath}.sourcePaneId`,
@@ -1691,7 +1703,7 @@ function assertPlacementBriefingV2(
   const controlOrders = new Set<number>();
   briefing.controls.forEach((control, index) => {
     const controlPath = `${path}.controls[${index}]`;
-    assertExactKeysV2(
+    assertRequiredOptionalKeysV2(
       control,
       [
         "sourcePaneId",
@@ -1701,8 +1713,10 @@ function assertPlacementBriefingV2(
         "presentation",
         "binding",
       ],
+      ["emphasis"],
       controlPath,
     );
+    assertBriefingItemEmphasisV2(control, controlPath);
     const sourcePaneId = requiredPortableIdV2(
       control.sourcePaneId,
       `${controlPath}.sourcePaneId`,
@@ -1725,6 +1739,95 @@ function assertPlacementBriefingV2(
     );
     assertControlBriefingBindingV2(control.binding, `${controlPath}.binding`);
   });
+  assertBriefingPrimaryLimitV2(
+    briefing.outputs,
+    STUDIO_BRIEFING_PRIMARY_OUTPUT_LIMIT_V2,
+    `${path}.outputs`,
+  );
+  assertBriefingPrimaryLimitV2(
+    briefing.controls,
+    STUDIO_BRIEFING_PRIMARY_CONTROL_LIMIT_V2,
+    `${path}.controls`,
+  );
+}
+
+/** Item emphasis is reading density only; absent means sealed before emphasis. */
+function assertBriefingItemEmphasisV2(
+  item: Readonly<{ emphasis?: unknown }>,
+  path: string,
+): void {
+  if (!hasOwnV2(item, "emphasis")) return;
+  if (item.emphasis !== "primary" && item.emphasis !== "supporting") {
+    throw validationErrorV2(`${path}.emphasis`, "must be primary or supporting");
+  }
+}
+
+/**
+ * The primary set of one role is bounded to keep the Article's first screen
+ * short; the sealed items themselves are not. Counted in sealed references.
+ */
+function assertBriefingPrimaryLimitV2(
+  items: readonly Readonly<{ emphasis?: unknown }>[],
+  limit: number,
+  path: string,
+): void {
+  const primary = items.filter((item) => item.emphasis === "primary").length;
+  if (primary > limit) {
+    throw validationErrorV2(
+      path,
+      `must mark at most ${limit} primary items (found ${primary})`,
+    );
+  }
+}
+
+/**
+ * The sealed reading form is layout density only. Every view pane must be a
+ * selected Briefing graph, no graph may sit in two views, and a view holds one
+ * or two panes. Renderer identity and numerical semantics are not touched.
+ */
+function assertPlacementBriefingPresentationV2(
+  presentation: ExperimentPlacementBriefingV2["presentation"],
+  graphPaneIds: ReadonlySet<string>,
+  path: string,
+): void {
+  if (presentation === undefined) {
+    throw validationErrorV2(path, "must be an object when present");
+  }
+  assertRequiredOptionalKeysV2(
+    presentation,
+    ["extent"],
+    ["views", "analysisRecompute"],
+    path,
+  );
+  if (!["inline", "peek", "full"].includes(presentation.extent)) {
+    throw validationErrorV2(`${path}.extent`, "must be inline, peek, or full");
+  }
+  if (hasOwnV2(presentation, "views")) {
+    arrayV2(presentation.views, `${path}.views`);
+    const viewedPaneIds = new Set<string>();
+    presentation.views!.forEach((view, index) => {
+      const viewPath = `${path}.views[${index}]`;
+      assertExactKeysV2(view, ["paneIds"], viewPath);
+      arrayV2(view.paneIds, `${viewPath}.paneIds`);
+      if (view.paneIds.length < 1 || view.paneIds.length > 2) {
+        throw validationErrorV2(`${viewPath}.paneIds`, "must hold one or two graph panes");
+      }
+      view.paneIds.forEach((value, paneIndex) => {
+        const paneId = requiredPortableIdV2(value, `${viewPath}.paneIds[${paneIndex}]`);
+        if (!graphPaneIds.has(paneId)) {
+          throw validationErrorV2(`${viewPath}.paneIds[${paneIndex}]`, "must select a Briefing graph");
+        }
+        assertUniqueIdV2(viewedPaneIds, paneId, `${viewPath}.paneIds[${paneIndex}]`);
+      });
+    });
+  }
+  if (
+    hasOwnV2(presentation, "analysisRecompute")
+    && presentation.analysisRecompute !== "on-request"
+    && presentation.analysisRecompute !== "automatic"
+  ) {
+    throw validationErrorV2(`${path}.analysisRecompute`, "must be on-request or automatic");
+  }
 }
 
 function assertGraphAxisRangesV2(value: unknown, path: string): void {

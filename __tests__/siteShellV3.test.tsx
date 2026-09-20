@@ -1,7 +1,8 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as studioClient from "@/studio/infrastructure/supabase/StudioSupabaseClientV1";
 
 import { routeOwnsApplicationChrome } from "@/components/Layout";
 import { SiteAccountSessionProviderV3 } from "@/components/site/SiteAccountSessionV3";
@@ -73,17 +74,39 @@ describe("site shell V3", () => {
     expect(authenticated).toContain('data-testid="site-create-trigger-v3"');
     expect(authenticated).toContain('data-testid="site-profile-trigger-v3"');
   });
+
+  it("keeps unresolved authentication distinct from a confirmed guest", () => {
+    // Effects have not run yet: a configured client is still restoring its session.
+    const client = vi.spyOn(studioClient, "studioSupabaseClientV1")
+      .mockReturnValue({} as NonNullable<ReturnType<typeof studioClient.studioSupabaseClientV1>>);
+    try {
+      const pending = renderHeader();
+      expect(pending).toContain('data-testid="site-account-pending-v3"');
+      expect(pending).toContain('data-testid="site-theme-toggle-v3"');
+      expect(pending).toContain('class="home-header-search"');
+      for (const guestControl of ["anonymous-language-switch-v3", "site-start-simulation-v3", "/ja/login"])
+        expect(pending).not.toContain(guestControl);
+      expect(pending).not.toContain("site-profile-trigger-v3");
+
+      client.mockReturnValue(null);
+      const unconfigured = renderHeader();
+      expect(unconfigured).not.toContain("site-account-pending-v3");
+      expect(unconfigured).toContain("/ja/login");
+    } finally {
+      client.mockRestore();
+    }
+  });
 });
 
 function renderHeader(
-  account: Readonly<{
+  account?: Readonly<{
     accountId: string;
     displayName: string;
   }> | null,
 ): string {
   return renderToStaticMarkup(
     <MemoryRouter initialEntries={["/ja"]}>
-      <SiteAccountSessionProviderV3 session={{ account }}>
+      <SiteAccountSessionProviderV3 session={account === undefined ? undefined : { account }}>
         <SiteHeaderV3 />
       </SiteAccountSessionProviderV3>
     </MemoryRouter>,

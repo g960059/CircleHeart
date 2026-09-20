@@ -684,7 +684,32 @@ describe("Studio Experiment data V2", () => {
       malformed,
       snapshot,
     ))
-      .toThrow(/keys must be exactly/);
+      .toThrow(/field set mismatch .*unknown: unknownProjection/);
+
+    // Sealed reading form: layout density only, bound to selected graphs.
+    const sealedForm = placementWithBriefingV2();
+    const sealedPaneId = sealedForm.briefing.graphs[0].paneId;
+    sealedForm.briefing.presentation = { extent: "peek", views: [{ paneIds: [sealedPaneId] }], analysisRecompute: "on-request" };
+    expect(validateExperimentPlacementAgainstSnapshotV2(sealedForm, snapshot).briefing.presentation)
+      .toEqual({ extent: "peek", views: [{ paneIds: [sealedPaneId] }], analysisRecompute: "on-request" });
+    const minimalForm = placementWithBriefingV2();
+    minimalForm.briefing.presentation = { extent: "full" };
+    expect(() => validateExperimentPlacementAgainstSnapshotV2(minimalForm, snapshot)).not.toThrow();
+    const badExtent = placementWithBriefingV2();
+    badExtent.briefing.presentation = { extent: "modal" };
+    expect(() => validateExperimentPlacementAgainstSnapshotV2(badExtent, snapshot)).toThrow(/inline, peek, or full/);
+    const foreignView = placementWithBriefingV2();
+    foreignView.briefing.presentation = { extent: "peek", views: [{ paneIds: ["pane/missing"] }] };
+    expect(() => validateExperimentPlacementAgainstSnapshotV2(foreignView, snapshot)).toThrow(/must select a Briefing graph/);
+    const duplicateView = placementWithBriefingV2();
+    duplicateView.briefing.presentation = { extent: "peek", views: [{ paneIds: [sealedPaneId] }, { paneIds: [sealedPaneId] }] };
+    expect(() => validateExperimentPlacementAgainstSnapshotV2(duplicateView, snapshot)).toThrow(/views\[1\]/);
+    const tripleView = placementWithBriefingV2();
+    tripleView.briefing.presentation = { extent: "peek", views: [{ paneIds: [sealedPaneId, "a", "b"] }] };
+    expect(() => validateExperimentPlacementAgainstSnapshotV2(tripleView, snapshot)).toThrow(/one or two graph panes/);
+    const badRecompute = placementWithBriefingV2();
+    badRecompute.briefing.presentation = { extent: "peek", analysisRecompute: "never" };
+    expect(() => validateExperimentPlacementAgainstSnapshotV2(badRecompute, snapshot)).toThrow(/on-request or automatic/);
 
     const unknownGraph = placementWithBriefingV2();
     unknownGraph.briefing.graphs[0].paneId = "pane/missing";

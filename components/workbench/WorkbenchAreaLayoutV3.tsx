@@ -20,9 +20,10 @@ const clampRatio = (value: number, minimum: number, maximum: number) =>
 
 export function normalizeWorkbenchAreaLayoutPreferenceV3(
   value: unknown,
+  fallback: WorkbenchAreaLayoutPreferenceV3 = DEFAULT_WORKBENCH_AREA_LAYOUT_V3,
 ): WorkbenchAreaLayoutPreferenceV3 {
   if (value === null || typeof value !== "object") {
-    return DEFAULT_WORKBENCH_AREA_LAYOUT_V3;
+    return fallback;
   }
   const candidate = value as Partial<WorkbenchAreaLayoutPreferenceV3>;
   const inspectorWidthRatio = Number(candidate.inspectorWidthRatio);
@@ -30,35 +31,38 @@ export function normalizeWorkbenchAreaLayoutPreferenceV3(
   return Object.freeze({
     inspectorWidthRatio: Number.isFinite(inspectorWidthRatio)
       ? clampRatio(inspectorWidthRatio, 0.18, 0.42)
-      : DEFAULT_WORKBENCH_AREA_LAYOUT_V3.inspectorWidthRatio,
+      : fallback.inspectorWidthRatio,
     outputHeightRatio: Number.isFinite(outputHeightRatio)
       ? clampRatio(outputHeightRatio, 0.18, 0.45)
-      : DEFAULT_WORKBENCH_AREA_LAYOUT_V3.outputHeightRatio,
+      : fallback.outputHeightRatio,
   });
 }
 
 export function loadWorkbenchAreaLayoutPreferenceV3(
   storage: Pick<Storage, "getItem"> | null,
+  storageKey = WORKBENCH_AREA_LAYOUT_STORAGE_KEY_V3,
+  defaultPreference: WorkbenchAreaLayoutPreferenceV3 = DEFAULT_WORKBENCH_AREA_LAYOUT_V3,
 ): WorkbenchAreaLayoutPreferenceV3 {
-  if (storage === null) return DEFAULT_WORKBENCH_AREA_LAYOUT_V3;
+  if (storage === null) return defaultPreference;
   try {
-    const serialized = storage.getItem(WORKBENCH_AREA_LAYOUT_STORAGE_KEY_V3);
+    const serialized = storage.getItem(storageKey);
     return serialized === null
-      ? DEFAULT_WORKBENCH_AREA_LAYOUT_V3
-      : normalizeWorkbenchAreaLayoutPreferenceV3(JSON.parse(serialized));
+      ? defaultPreference
+      : normalizeWorkbenchAreaLayoutPreferenceV3(JSON.parse(serialized), defaultPreference);
   } catch {
-    return DEFAULT_WORKBENCH_AREA_LAYOUT_V3;
+    return defaultPreference;
   }
 }
 
 export function saveWorkbenchAreaLayoutPreferenceV3(
   storage: Pick<Storage, "setItem"> | null,
   preference: WorkbenchAreaLayoutPreferenceV3,
+  storageKey = WORKBENCH_AREA_LAYOUT_STORAGE_KEY_V3,
 ): void {
   if (storage === null) return;
   try {
     storage.setItem(
-      WORKBENCH_AREA_LAYOUT_STORAGE_KEY_V3,
+      storageKey,
       JSON.stringify(preference),
     );
   } catch {
@@ -73,6 +77,8 @@ type WorkbenchAreaLayoutPropsV3 = Readonly<{
   className?: string;
   inspectorResizeLabel: string;
   outputResizeLabel: string;
+  preferenceStorageKey?: string;
+  defaultPreference?: WorkbenchAreaLayoutPreferenceV3;
 }>;
 
 /**
@@ -84,6 +90,8 @@ export function WorkbenchAreaLayoutV3({
   className = "",
   inspectorResizeLabel,
   outputResizeLabel,
+  preferenceStorageKey = WORKBENCH_AREA_LAYOUT_STORAGE_KEY_V3,
+  defaultPreference = DEFAULT_WORKBENCH_AREA_LAYOUT_V3,
 }: WorkbenchAreaLayoutPropsV3) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const [desktop, setDesktop] = React.useState(() =>
@@ -92,6 +100,8 @@ export function WorkbenchAreaLayoutV3({
   const [preference, setPreference] = React.useState(() =>
     loadWorkbenchAreaLayoutPreferenceV3(
       typeof window === "undefined" ? null : window.localStorage,
+      preferenceStorageKey,
+      defaultPreference,
     ));
   const preferenceRef = React.useRef(preference);
   preferenceRef.current = preference;
@@ -125,9 +135,10 @@ export function WorkbenchAreaLayoutV3({
       saveWorkbenchAreaLayoutPreferenceV3(
         typeof window === "undefined" ? null : window.localStorage,
         normalized,
+        preferenceStorageKey,
       );
     },
-    [applyPreference],
+    [applyPreference, preferenceStorageKey],
   );
 
   React.useEffect(() => {
@@ -206,11 +217,11 @@ export function WorkbenchAreaLayoutV3({
         ...(axis === "inspector"
           ? {
               inspectorWidthRatio:
-                DEFAULT_WORKBENCH_AREA_LAYOUT_V3.inspectorWidthRatio,
+                defaultPreference.inspectorWidthRatio,
             }
           : {
               outputHeightRatio:
-                DEFAULT_WORKBENCH_AREA_LAYOUT_V3.outputHeightRatio,
+                defaultPreference.outputHeightRatio,
             }),
       });
     },

@@ -38,9 +38,22 @@ Selection-dependent Workbench bindings are resolved when the Briefing is
 sealed. Later authoring focus or Scenario selection cannot silently retarget a
 published output or control.
 
+The Briefing also seals the reading form: the resting extent in the Article,
+which selected graphs share one stage view, and whether Surface-pinned
+analyses are re-measured automatically after a reader control change or only
+on the reader's request. Output and control sections in the Reader are the
+source panes themselves; comparison across Scenarios is composed from panes,
+never from a Reader-side value matrix.
+
 Briefing may narrow presentation but cannot change renderer identity, numerical
 signals, analysis semantics, exact trace exclusions, or the Snapshot fixture.
 A numerical or Surface change requires a newly admitted Snapshot.
+
+A sealed-state analysis prepared for a Snapshot Scenario is optional
+acceleration only. It is bound to the exact capture hash, artifact revision,
+and Surface-pinned method, and it replaces the first measurement of that
+unchanged capture; it is never a substitute for a measurement of changed
+inputs and never a qualification claim.
 
 ## Reader equivalence
 

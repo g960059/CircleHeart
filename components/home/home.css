@@ -678,6 +678,12 @@ body[data-app-theme="dark"] .home-mini-demo {
   font-weight: 600;
   cursor: pointer;
 }
+.home-sort-select select:focus-visible {
+  border-color: var(--wb-accent);
+  border-radius: 999px;
+  outline: 1px solid var(--wb-accent);
+  outline-offset: 0;
+}
 .home-sort-select > svg {
   position: absolute;
   right: 14px;

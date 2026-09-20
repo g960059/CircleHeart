@@ -64,7 +64,9 @@ async function openColdPeek(page: Page, search = "") {
   await expect(placement).toHaveAttribute("data-reader-placement-live", "true");
   await expect(panel.locator("[data-reader-runtime-status]")).toHaveAttribute("data-reader-runtime-status", "playing");
   await expect(panel.getByTestId("v3-playback-rate-trigger")).toHaveText("1×");
-  await expect(panel.locator('[data-chart-kind="sweeping-waveform-v3"]')).toHaveCount(2);
+  // The stage paints one sealed view at a time; the second waveform is one rail tab away.
+  await expect(panel.locator('[data-chart-kind="sweeping-waveform-v3"]')).toHaveCount(1);
+  await expect(panel.getByTestId("article-reader-stage-rail-v3").getByRole("tab")).toHaveCount(2);
   for (const canvas of await panel.locator('[data-chart-kind="sweeping-waveform-v3"] canvas').all()) {
     await expect(canvas).toHaveAttribute("data-y-minimum", "-5");
     await expect(canvas).toHaveAttribute("data-y-maximum", "140");

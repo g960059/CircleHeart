@@ -333,7 +333,7 @@ test("@desktop @mobile @pane-picker browses sections and searches all categories
 });
 
 test("@desktop @mobile @pane-picker prioritizes clinical quantities while retaining searchable waveform values", async ({ page }, testInfo) => {
-  const { picker, addPane } = ui(page);
+  const { mobile, picker, addPane } = ui(page);
   await addPane("output");
   await picker.getByRole("button", { name: "弁", exact: true }).click();
   const forward = picker.locator('[data-item-id="hemodynamics.valve-volume.forward.MV"]');
@@ -366,7 +366,8 @@ test("@desktop @mobile @pane-picker prioritizes clinical quantities while retain
   await expect(selectedRow(picker, "hemodynamics.flow.valve.MV")).toBeVisible();
   await expect(selectedRow(picker, "hemodynamics.valve-volume.forward.MV")).toBeVisible();
   await picker.getByRole("button", { name: "追加", exact: true }).click();
-  const tile = page.locator('.workbench-output-item[data-output-id*="hemodynamics.flow.valve.MV"]');
+  const outputArea = mobile ? page.getByTestId("workbench-mobile-task-scroll") : page.getByRole("region", { name: "出力エリア" });
+  const tile = outputArea.locator('.workbench-output-item[data-output-id*="hemodynamics.flow.valve.MV"]');
   await expect(tile.getByTestId("output-value-context-v3")).toHaveText("現在値");
   await addPane("control");
   await picker.getByRole("searchbox").fill("左室収縮性");

@@ -28,6 +28,7 @@ import {
   type ExperimentPlacementBriefingGraphSeriesV2,
   type ExperimentPlacementBriefingGraphV2,
   type ExperimentPlacementBriefingOutputV2,
+  type ExperimentPlacementBriefingPresentationV2,
   type ExperimentPlacementV2,
   type ExperimentSnapshotV2,
   type ExperimentSurfaceControlItemV2,
@@ -43,8 +44,21 @@ import type {
 import {
   resolveWorkbenchAutomaticGraphColorV3,
   workbenchDefaultScenarioColorV3,
+  workbenchScenarioColorSeedV3,
 } from
   "@/components/workbench/presentation/WorkbenchGraphColorV3";
+import { ExperimentObservationV3 } from "@/components/workbench/ExperimentPanePresentationV3";
+import { articleReaderObservationGroupsV3 } from "@/components/article/reader/ArticleReaderObservationV3";
+import {
+  ARTICLE_PRIMARY_CONTROL_LIMIT_V3,
+  ARTICLE_PRIMARY_OUTPUT_LIMIT_V3,
+  articleBriefingControlKeyV3,
+  articleBriefingOutputKeyV3,
+  articleBriefingPrimaryControlKeysV3,
+  articleBriefingPrimaryOutputKeysV3,
+  articleBriefingPrimaryRoomV3,
+  withExplicitItemEmphasisV3,
+} from "@/studio/application/article/ArticleBriefingObservationV3";
 import {
   articleBriefingPresentationV3,
   defaultArticleBriefingV3,
@@ -53,6 +67,11 @@ import {
   resolveArticlePlacementBriefingV3,
   resolveArticlePlacementTitleV3,
 } from "@/studio/application/article/ArticleExperimentPlacementV3";
+import {
+  articleBriefingViewsV3,
+  defaultArticleBriefingPresentationV3,
+  suggestedArticleBriefingPresentationV3,
+} from "@/studio/application/authoring/StudioArticleBriefingPresentationV3";
 
 export type ArticleExperimentPlacementV3Props = Readonly<{
   block: StudioArticleExperimentBlockV2;
@@ -472,12 +491,13 @@ export function ArticleBriefingEditorV3({
   const graphByPaneId = new Map(
     briefing.graphs.map((graph) => [graph.paneId, graph]),
   );
-  const outputById = new Map(
-    briefing.outputs.map((output) => [
-      briefingOutputKeyV3(output.sourcePaneId, output.outputId),
-      output,
-    ]),
-  );
+  // Sealed outputs are pane + item + Scenario: the same pane item read for
+  // two Scenarios is two references, each edited on its own.
+  const outputsBySourceKey = new Map<string, ExperimentPlacementBriefingOutputV2[]>();
+  for (const output of [...briefing.outputs].sort(compareSemanticOrderV3)) {
+    const key = briefingOutputKeyV3(output.sourcePaneId, output.outputId);
+    outputsBySourceKey.set(key, [...(outputsBySourceKey.get(key) ?? []), output]);
+  }
   const controlById = new Map(
     briefing.controls.map((control) => [
       briefingControlKeyV3(control.sourcePaneId, control.controlId),
@@ -487,6 +507,23 @@ export function ArticleBriefingEditorV3({
 
   const updateBriefing = (next: ExperimentPlacementBriefingV2) => {
     onChange(Object.freeze(next));
+  };
+  // The observation is sealed explicitly for every item, so a Briefing sealed
+  // before item emphasis keeps its derived observation once it is edited.
+  const primaryControlKeys = new Set(articleBriefingPrimaryControlKeysV3(briefing));
+  const references = articleBriefingEditorReferenceHandlersV3(briefing, updateBriefing);
+  const { primaryOutputKeys, sealOutputs } = references;
+  const primaryOutputsFull = !articleBriefingPrimaryRoomV3("outputs", primaryOutputKeys.size);
+  const primaryControlsFull = !articleBriefingPrimaryRoomV3("controls", primaryControlKeys.size);
+  const sealControls = (
+    controls: readonly ExperimentPlacementBriefingControlV2[],
+    keys: ReadonlySet<string> = primaryControlKeys,
+  ) => withExplicitItemEmphasisV3(controls, keys, (control) => articleBriefingControlKeyV3(control));
+  const setControlPrimary = (key: string, primary: boolean) => {
+    if (primary && primaryControlsFull && !primaryControlKeys.has(key)) return;
+    const keys = new Set(primaryControlKeys);
+    if (primary) keys.add(key); else keys.delete(key);
+    updateBriefing({ ...briefing, controls: sealControls(briefing.controls, keys) });
   };
 
   const updateScenarioScope = (
@@ -525,9 +562,23 @@ export function ArticleBriefingEditorV3({
           : "supporting" as const,
       }]
       : briefing.graphs.filter(({ paneId }) => paneId !== pane.paneId);
+    const graphs = normalizeGraphOrderV3(next);
     updateBriefing({
       ...briefing,
-      graphs: normalizeGraphOrderV3(next),
+      graphs,
+      ...reconcilePresentationViewsV3(briefing.presentation, graphs),
+    });
+  };
+
+  const updatePresentation = (
+    patch: Partial<ExperimentPlacementBriefingPresentationV2>,
+  ) => {
+    updateBriefing({
+      ...briefing,
+      presentation: {
+        ...(briefing.presentation ?? defaultArticleBriefingPresentationV3(briefing)),
+        ...patch,
+      },
     });
   };
 
@@ -544,43 +595,34 @@ export function ArticleBriefingEditorV3({
   };
 
   const moveGraph = (paneId: string, direction: -1 | 1) => {
-    updateBriefing({
-      ...briefing,
-      graphs: moveOrderedItemV3(briefing.graphs, paneId, direction, "paneId"),
-    });
+    updateBriefing(articleBriefingEditorMoveGraphV3(briefing, paneId, direction));
   };
 
-  const toggleOutput = (source: SurfaceOutputItemV3, enabled: boolean) => {
-    const sourceKey = briefingOutputKeyV3(
-      source.pane.paneId,
-      source.item.outputId,
-    );
+  /** Picks one pane item at the pane's materialized Scenario; never duplicates a reference. */
+  const addOutput = (source: SurfaceOutputItemV3) => {
     const bindingCaptureScenarioId = captureScenarioId !== undefined &&
       snapshot.content.scenarios.some(({ scenarioId }) =>
         scenarioId === captureScenarioId)
       ? captureScenarioId
       : briefing.scenarioScope.initialFocusScenarioId;
+    const reference = {
+      sourcePaneId: source.pane.paneId,
+      outputId: source.item.outputId,
+      scenarioId: materializeSurfaceOutputPaneBindingV3(
+        source.pane.binding,
+        bindingCaptureScenarioId,
+        briefing.scenarioScope.visibleScenarioIds,
+      ),
+      label: source.item.label,
+      order: briefing.outputs.length,
+    };
+    if (briefing.outputs.some((output) => articleBriefingOutputKeyV3(output) === articleBriefingOutputKeyV3(reference))) return;
     updateBriefing({
       ...briefing,
-      outputs: enabled
-        ? normalizeSemanticOrderV3([...briefing.outputs, {
-          sourcePaneId: source.pane.paneId,
-          outputId: source.item.outputId,
-          scenarioId: materializeSurfaceOutputPaneBindingV3(
-            source.pane.binding,
-            bindingCaptureScenarioId,
-            briefing.scenarioScope.visibleScenarioIds,
-          ),
-          label: source.item.label,
-          order: briefing.outputs.length,
-        }])
-        : normalizeSemanticOrderV3(
-          briefing.outputs.filter((output) =>
-            briefingOutputKeyV3(output.sourcePaneId, output.outputId)
-              !== sourceKey),
-        ),
+      outputs: sealOutputs(normalizeSemanticOrderV3([...briefing.outputs, reference])),
     });
   };
+
 
   const toggleControl = (
     source: SurfaceControlItemV3,
@@ -597,7 +639,7 @@ export function ArticleBriefingEditorV3({
       : briefing.scenarioScope.initialFocusScenarioId;
     updateBriefing({
       ...briefing,
-      controls: enabled
+      controls: sealControls(enabled
         ? normalizeSemanticOrderV3([...briefing.controls, {
           sourcePaneId: source.pane.paneId,
           controlId: source.item.controlId,
@@ -621,7 +663,7 @@ export function ArticleBriefingEditorV3({
           briefing.controls.filter((control) =>
             briefingControlKeyV3(control.sourcePaneId, control.controlId)
               !== sourceKey),
-        ),
+        )),
     });
   };
 
@@ -712,6 +754,13 @@ export function ArticleBriefingEditorV3({
         </label>
       </fieldset>
 
+      <BriefingReadingFormV3
+        briefing={briefing}
+        snapshot={snapshot}
+        graphLabel={(paneId) => graphPanes.find((pane) => pane.paneId === paneId)?.label ?? paneId}
+        onChange={updatePresentation}
+      />
+
       <BriefingSectionV3 label={t("articleEditor.role.graph")}>
         {graphPanes.map((pane) => (
           <GraphBriefingRowV3
@@ -728,50 +777,64 @@ export function ArticleBriefingEditorV3({
         ))}
       </BriefingSectionV3>
 
-      <BriefingSectionV3 label={t("articleEditor.role.output")}>
-        {outputItems.map((source) => {
+      <BriefingSectionV3
+        label={t("articleEditor.role.output")}
+        meta={t("articleEditor.briefing.primaryCount", { count: primaryOutputKeys.size, limit: ARTICLE_PRIMARY_OUTPUT_LIMIT_V3 })}
+        metaTestId="article-briefing-primary-outputs-count-v3"
+      >
+        {outputItems.flatMap((source) => {
           const sourceKey = briefingOutputKeyV3(
             source.pane.paneId,
             source.item.outputId,
           );
-          const selected = outputById.get(sourceKey);
-          const scenarioId = selected?.scenarioId
-            ?? materializeSurfaceOutputPaneBindingV3(
-              source.pane.binding,
-              captureScenarioId ?? briefing.scenarioScope.initialFocusScenarioId,
-              briefing.scenarioScope.visibleScenarioIds,
-            );
-          const scenarioLabel = snapshot.content.scenarios.find((scenario) =>
+          const selectedReferences = outputsBySourceKey.get(sourceKey) ?? [];
+          const scenarioLabelOf = (scenarioId: string) => snapshot.content.scenarios.find((scenario) =>
             scenario.scenarioId === scenarioId)?.label ?? scenarioId;
-          return <OutputBriefingRowV3
-            key={sourceKey}
-            label={source.item.label}
-            scenarioLabel={scenarioLabel}
-            selected={selected}
-            selectedItems={briefing.outputs}
-            onToggle={(enabled) => toggleOutput(source, enabled)}
-            onChange={(next) => updateBriefing({
-              ...briefing,
-              outputs: briefing.outputs.map((output) =>
-                briefingOutputKeyV3(output.sourcePaneId, output.outputId)
-                    === sourceKey
-                  ? next
-                  : output),
-            })}
-            onMove={(direction) => updateBriefing({
-              ...briefing,
-              outputs: moveBriefingOutputV3(
-                briefing.outputs,
-                source.pane.paneId,
-                source.item.outputId,
-                direction,
-              ),
-            })}
-          />
+          const scenarioId = materializeSurfaceOutputPaneBindingV3(
+            source.pane.binding,
+            captureScenarioId !== undefined && snapshot.content.scenarios.some((scenario) => scenario.scenarioId === captureScenarioId)
+              ? captureScenarioId : briefing.scenarioScope.initialFocusScenarioId,
+            briefing.scenarioScope.visibleScenarioIds,
+          );
+          const availableRow = selectedReferences.some((reference) => reference.scenarioId === scenarioId)
+            ? [] : [<OutputBriefingRowV3
+              key={`${sourceKey}:${scenarioId}`}
+              label={source.item.label}
+              scenarioLabel={scenarioLabelOf(scenarioId)}
+              selected={undefined}
+              selectedItems={briefing.outputs}
+              primary={false}
+              primaryFull={primaryOutputsFull}
+              onPrimaryChange={() => undefined}
+              onToggle={(enabled) => { if (enabled) addOutput(source); }}
+              onChange={() => undefined}
+              onMove={() => undefined}
+            />];
+          // Every sealed reference of this pane item is its own row.
+          return [...selectedReferences.map((selected) => {
+            const referenceKey = articleBriefingOutputKeyV3(selected);
+            return <OutputBriefingRowV3
+              key={referenceKey}
+              label={source.item.label}
+              scenarioLabel={scenarioLabelOf(selected.scenarioId)}
+              selected={selected}
+              selectedItems={briefing.outputs}
+              primary={primaryOutputKeys.has(referenceKey)}
+              primaryFull={primaryOutputsFull}
+              onPrimaryChange={(primary) => references.setPrimary(selected, primary)}
+              onToggle={(enabled) => { if (!enabled) references.remove(selected); }}
+              onChange={(next) => references.relabel(selected, next.label)}
+              onMove={(direction) => references.move(selected, direction)}
+            />;
+          }), ...availableRow];
         })}
       </BriefingSectionV3>
 
-      <BriefingSectionV3 label={t("articleEditor.role.control")}>
+      <BriefingSectionV3
+        label={t("articleEditor.role.control")}
+        meta={t("articleEditor.briefing.primaryCount", { count: primaryControlKeys.size, limit: ARTICLE_PRIMARY_CONTROL_LIMIT_V3 })}
+        metaTestId="article-briefing-primary-controls-count-v3"
+      >
         {controlItems.map((source) => {
           const sourceKey = briefingControlKeyV3(
             source.pane.paneId,
@@ -786,6 +849,9 @@ export function ArticleBriefingEditorV3({
               controlId === source.item.controlId)}
             control={controlById.get(sourceKey)}
             selectedControls={briefing.controls}
+            primary={primaryControlKeys.has(articleBriefingControlKeyV3({ sourcePaneId: source.pane.paneId, controlId: source.item.controlId }))}
+            primaryFull={primaryControlsFull}
+            onPrimaryChange={(primary) => setControlPrimary(articleBriefingControlKeyV3({ sourcePaneId: source.pane.paneId, controlId: source.item.controlId }), primary)}
             scenarios={snapshot.content.scenarios}
             visibleScenarioIds={briefing.scenarioScope.visibleScenarioIds}
             initialFocusScenarioId={briefing.scenarioScope.initialFocusScenarioId}
@@ -818,17 +884,338 @@ export function ArticleBriefingEditorV3({
   );
 }
 
+/**
+ * Edits addressed to one sealed output reference (pane, item and Scenario).
+ * A sibling reference of the same pane item at another Scenario is never
+ * touched; every result re-seals explicit emphasis.
+ */
+export function articleBriefingEditorReferenceHandlersV3(
+  briefing: ExperimentPlacementBriefingV2,
+  update: (next: ExperimentPlacementBriefingV2) => void,
+) {
+  const primaryOutputKeys = new Set(articleBriefingPrimaryOutputKeysV3(briefing));
+  const sealOutputs = (
+    outputs: readonly ExperimentPlacementBriefingOutputV2[],
+    keys: ReadonlySet<string> = primaryOutputKeys,
+  ) => withExplicitItemEmphasisV3(outputs, keys, (output) => articleBriefingOutputKeyV3(output));
+  const keyOf = (reference: Pick<ExperimentPlacementBriefingOutputV2, "sourcePaneId" | "outputId" | "scenarioId">) => articleBriefingOutputKeyV3(reference);
+  return {
+    primaryOutputKeys,
+    sealOutputs,
+    setPrimary(reference: ExperimentPlacementBriefingOutputV2, primary: boolean) {
+      // A full primary set ignores a further mark; the reference stays sealed.
+      if (primary && !primaryOutputKeys.has(keyOf(reference))
+        && !articleBriefingPrimaryRoomV3("outputs", primaryOutputKeys.size)) return;
+      const keys = new Set(primaryOutputKeys);
+      if (primary) keys.add(keyOf(reference)); else keys.delete(keyOf(reference));
+      update({ ...briefing, outputs: sealOutputs(briefing.outputs, keys) });
+    },
+    relabel(reference: ExperimentPlacementBriefingOutputV2, label: string) {
+      const key = keyOf(reference);
+      update({
+        ...briefing,
+        outputs: briefing.outputs.map((output) => keyOf(output) === key ? { ...output, label } : output),
+      });
+    },
+    remove(reference: ExperimentPlacementBriefingOutputV2) {
+      const key = keyOf(reference);
+      update({
+        ...briefing,
+        outputs: sealOutputs(normalizeSemanticOrderV3(briefing.outputs.filter((output) => keyOf(output) !== key))),
+      });
+    },
+    move(reference: ExperimentPlacementBriefingOutputV2, direction: -1 | 1) {
+      update({ ...briefing, outputs: sealOutputs(moveBriefingOutputV3(briefing.outputs, reference, direction)) });
+    },
+  };
+}
+
+/** Reordering graphs also orders sealed views; only pairs still adjacent survive. */
+export function articleBriefingEditorMoveGraphV3(
+  briefing: ExperimentPlacementBriefingV2,
+  paneId: string,
+  direction: -1 | 1,
+): ExperimentPlacementBriefingV2 {
+  const graphs = moveOrderedItemV3(briefing.graphs, paneId, direction, "paneId");
+  if (briefing.presentation?.views === undefined) return { ...briefing, graphs };
+  const viewByPane = new Map(briefing.presentation.views.flatMap((view, index) =>
+    view.paneIds.map((id) => [id, index] as const)));
+  const views: { paneIds: string[] }[] = [];
+  for (const graph of graphs) {
+    const previous = views.at(-1);
+    const group = viewByPane.get(graph.paneId);
+    if (previous?.paneIds.length === 1 && group !== undefined
+      && viewByPane.get(previous.paneIds[0]!) === group) {
+      previous.paneIds.push(graph.paneId);
+    } else {
+      views.push({ paneIds: [graph.paneId] });
+    }
+  }
+  return { ...briefing, graphs, presentation: { ...briefing.presentation, views } };
+}
+
+/** Sealed views may only name selected graphs; dropping a graph drops it from its view. */
+function reconcilePresentationViewsV3(
+  presentation: ExperimentPlacementBriefingPresentationV2 | undefined,
+  graphs: readonly ExperimentPlacementBriefingGraphV2[],
+): Pick<ExperimentPlacementBriefingV2, "presentation"> {
+  if (presentation?.views === undefined) return presentation === undefined ? {} : { presentation };
+  const selected = new Set(graphs.map(({ paneId }) => paneId));
+  const views = presentation.views
+    .map((view) => ({ paneIds: view.paneIds.filter((paneId) => selected.has(paneId)) }))
+    .filter((view) => view.paneIds.length > 0);
+  return { presentation: { ...presentation, views } };
+}
+
+/**
+ * The author seals how the Placement reads: where it rests, which graphs
+ * share a view, and whether expensive analyses re-run on every control change.
+ */
+function BriefingReadingFormV3({
+  briefing,
+  graphLabel,
+  snapshot,
+  onChange,
+}: Readonly<{
+  briefing: ExperimentPlacementBriefingV2;
+  graphLabel: (paneId: string) => string;
+  snapshot: ExperimentSnapshotV2;
+  onChange: (patch: Partial<ExperimentPlacementBriefingPresentationV2>) => void;
+}>) {
+  const { t } = useTranslation();
+  const effective = briefing.presentation ?? defaultArticleBriefingPresentationV3(briefing);
+  const suggested = suggestedArticleBriefingPresentationV3(briefing) === "inflow" ? "inline" : "peek";
+  const extentLabel = (extent: ExperimentPlacementBriefingPresentationV2["extent"]) =>
+    t(extent === "inline" ? "articleEditor.briefing.extentInline"
+      : extent === "peek" ? "articleEditor.briefing.extentPeek" : "articleEditor.briefing.extentFull");
+  const ordered = [...briefing.graphs].sort(compareSemanticOrderV3);
+  const views = articleBriefingViewsV3(briefing);
+  const viewIndexOf = (paneId: string) => views.findIndex((view) => view.paneIds.includes(paneId));
+  const paired = (index: number) => index > 0
+    && viewIndexOf(ordered[index]!.paneId) === viewIndexOf(ordered[index - 1]!.paneId);
+  const setPaired = (index: number, on: boolean) => {
+    const flags = ordered.map((_, candidate) => candidate === index ? on : paired(candidate));
+    const next: string[][] = [];
+    ordered.forEach((graph, candidate) => {
+      const current = next.at(-1);
+      if (candidate > 0 && flags[candidate] && current !== undefined && current.length === 1) current.push(graph.paneId);
+      else next.push([graph.paneId]);
+    });
+    onChange({ views: next.map((paneIds) => ({ paneIds })) });
+  };
+  const segment = <T extends string>(
+    groupLabel: string,
+    value: T,
+    options: readonly Readonly<{ value: T; label: string }>[],
+    select: (value: T) => void,
+  ) => (
+    <div className="workbench-control-segments article-briefing-segments" role="radiogroup" aria-label={groupLabel}>
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="radio"
+          aria-checked={option.value === value}
+          data-active={option.value === value ? "true" : "false"}
+          className="workbench-control-segment text-[10px]"
+          onClick={() => select(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+  return (
+    <fieldset className="mt-4 border-t border-wb-line/60 pt-3" data-testid="article-briefing-reading-form-v3">
+      <legend className="px-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-wb-subtle">
+        {t("articleEditor.briefing.reading")}
+      </legend>
+      <div className="grid gap-3 px-1 text-[10px] text-wb-muted">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span>{t("articleEditor.briefing.extent")}</span>
+          {segment(t("articleEditor.briefing.extent"), effective.extent, [
+            { value: "inline" as const, label: extentLabel("inline") },
+            { value: "peek" as const, label: extentLabel("peek") },
+            { value: "full" as const, label: extentLabel("full") },
+          ], (extent) => onChange({ extent }))}
+          <span className="text-wb-subtle">
+            {t("articleEditor.briefing.extentSuggested", { extent: extentLabel(suggested) })}
+          </span>
+        </div>
+        <BriefingPhonePreviewV3 briefing={briefing} snapshot={snapshot} graphLabel={graphLabel} />
+        {ordered.length > 1 && (
+          <div>
+            <p>{t("articleEditor.briefing.views")}</p>
+            <p className="text-wb-subtle">{t("articleEditor.briefing.viewsHint")}</p>
+            <div className="mt-1 grid gap-1">
+              {ordered.map((graph, index) => index === 0 ? null : (
+                <label key={graph.paneId} className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    className="h-3 w-3 accent-wb-accent"
+                    checked={paired(index)}
+                    disabled={index > 1 && paired(index - 1)}
+                    onChange={(event) => setPaired(index, event.currentTarget.checked)}
+                  />
+                  <span className="truncate">
+                    {t("articleReader.viewPair", {
+                      first: graphLabel(ordered[index - 1]!.paneId),
+                      second: graphLabel(graph.paneId),
+                    })}
+                    {" · "}
+                    {t(paired(index) ? "articleEditor.briefing.viewPairWithPrevious" : "articleEditor.briefing.viewSingle")}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span>{t("articleEditor.briefing.analysisRecompute")}</span>
+          {segment(t("articleEditor.briefing.analysisRecompute"), effective.analysisRecompute ?? "on-request", [
+            { value: "on-request" as const, label: t("articleEditor.briefing.analysisOnRequest") },
+            { value: "automatic" as const, label: t("articleEditor.briefing.analysisAutomatic") },
+          ], (analysisRecompute) => onChange({ analysisRecompute }))}
+          <span className="basis-full text-wb-subtle">{t("articleEditor.briefing.analysisRecomputeHint")}</span>
+        </div>
+      </div>
+    </fieldset>
+  );
+}
+
+/**
+ * The first screen at phone width, measured as rendered: the first stage
+ * view, the observation, and the primary controls, or the "open to operate"
+ * row when controllers are sealed without a primary mark. Authors see
+ * whether the observation wraps into several rows before sealing; nothing is
+ * trimmed.
+ */
+function BriefingPhonePreviewV3({
+  briefing,
+  graphLabel,
+  snapshot,
+}: Readonly<{
+  briefing: ExperimentPlacementBriefingV2;
+  graphLabel: (paneId: string) => string;
+  snapshot: ExperimentSnapshotV2;
+}>) {
+  const { t } = useTranslation();
+  const { appTheme } = useAppTheme();
+  const frameRef = React.useRef<HTMLDivElement>(null);
+  const [height, setHeight] = React.useState(0);
+  React.useLayoutEffect(() => {
+    const frame = frameRef.current;
+    if (frame === null || typeof ResizeObserver === "undefined") return undefined;
+    const measure = () => setHeight(frame.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, []);
+  const firstView = articleBriefingViewsV3(briefing)[0];
+  const primaryOutputKeys = new Set(articleBriefingPrimaryOutputKeysV3(briefing));
+  const primaryControlKeys = new Set(articleBriefingPrimaryControlKeysV3(briefing));
+  const outputs = [...briefing.outputs].sort(compareSemanticOrderV3)
+    .filter((output) => primaryOutputKeys.has(articleBriefingOutputKeyV3(output)));
+  const controls = [...briefing.controls].sort(compareSemanticOrderV3)
+    .filter((control) => primaryControlKeys.has(articleBriefingControlKeyV3(control)));
+  const multiScenario = briefing.scenarioScope.visibleScenarioIds.length > 1;
+  const scenarioMeta = (scenarioId: string) => {
+    const scenarioIndex = snapshot.content.scenarios.findIndex((scenario) => scenario.scenarioId === scenarioId);
+    return {
+      label: snapshot.content.scenarios[scenarioIndex]?.label ?? scenarioId,
+      colorHex: resolveWorkbenchAutomaticGraphColorV3({
+        colorHex: workbenchScenarioColorSeedV3({ surface: snapshot.content.surface, scenarioId, scenarioIndex: Math.max(0, scenarioIndex) }),
+        appTheme,
+      }),
+    };
+  };
+  const openToOperate = controls.length === 0 && briefing.controls.length > 0;
+  if (firstView === undefined && outputs.length === 0 && controls.length === 0 && !openToOperate) return null;
+  return (
+    <div className="article-briefing-phone-preview" data-testid="article-briefing-phone-preview-v3">
+      <p>{t("articleEditor.briefing.phonePreview")}</p>
+      <div
+        ref={frameRef}
+        className="article-briefing-phone-frame"
+        data-primary-outputs={outputs.length}
+        data-primary-controls={controls.length}
+        data-open-operate={openToOperate ? "true" : undefined}
+      >
+        {firstView !== undefined && (
+          <div className="article-briefing-phone-stage">
+            {firstView.paneIds.map(graphLabel).join(" + ")}
+          </div>
+        )}
+        {outputs.length > 0 && (
+          <ExperimentObservationV3
+            className="article-reader-observation"
+            label={t("articleReader.observation")}
+            groups={articleReaderObservationGroupsV3(outputs.map((output) => ({
+              itemId: articleBriefingOutputKeyV3(output),
+              outputId: output.outputId,
+              scenarioId: output.scenarioId,
+              sourcePaneId: output.sourcePaneId,
+              label: output.label,
+              value: null,
+              unit: "",
+            })), {
+              multiScenario,
+              paneLabel: (paneId) => snapshot.content.surface.outputPanes.find((pane) => pane.paneId === paneId)?.label?.trim() || undefined,
+              scenarioLabel: (scenarioId) => scenarioMeta(scenarioId).label,
+              scenarioColor: (scenarioId) => scenarioMeta(scenarioId).colorHex,
+            })}
+          />
+        )}
+        {controls.length > 0 && (
+          <ul className="article-briefing-phone-controls">
+            {controls.map((control) => (
+              <li key={articleBriefingControlKeyV3(control)}>
+                <span className="truncate">{control.label}</span>
+                {control.presentation.kind === "buttons"
+                  ? <span className="article-briefing-phone-segments" aria-hidden="true">{control.presentation.options.map((option) => <span key={`${option.label}:${option.value}`}>{option.label}</span>)}</span>
+                  : <span className="article-briefing-phone-slider" aria-hidden="true" />}
+              </li>
+            ))}
+          </ul>
+        )}
+        {openToOperate && (
+          // The reader's row, drawn but not operable: the sealed controllers wait in the opened form.
+          <span className="article-reader-open-operate article-briefing-phone-open-operate" aria-hidden="true" data-briefing-phone-open-operate>
+            {t("articleReader.openToOperate")}
+            <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+          </span>
+        )}
+      </div>
+      <p className="text-wb-subtle">
+        {height > 0 && t("articleEditor.briefing.phonePreviewHeight", { px: Math.round(height) })}
+        {height > 480 && ` ${t("articleEditor.briefing.phonePreviewTall")}`}
+        {" "}
+        {t("articleEditor.briefing.primaryItemHint")}
+      </p>
+    </div>
+  );
+}
+
 function BriefingSectionV3({
   label,
+  meta,
+  metaTestId,
   children,
 }: Readonly<{
   label: string;
+  /** Short state beside the legend, e.g. how much of the primary set is used. */
+  meta?: string;
+  metaTestId?: string;
   children: React.ReactNode;
 }>) {
   return (
     <fieldset className="mt-4 border-t border-wb-line/60 pt-3">
       <legend className="px-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-wb-subtle">
         {label}
+        {meta !== undefined && (
+          <span className="ml-2 font-medium normal-case tracking-normal tabular-nums" data-testid={metaTestId}>{meta}</span>
+        )}
       </legend>
       <div className="grid gap-1.5">{children}</div>
     </fieldset>
@@ -1107,11 +1494,43 @@ function GraphBriefingRowV3({
   );
 }
 
+/**
+ * Item emphasis toggle shared by output and control rows. Once the role's
+ * primary set is full, unmarked items cannot join until one is unmarked;
+ * the sealed item itself is never removed by the limit.
+ */
+function PrimaryItemToggleV3({ primary, full, limit, onChange }: Readonly<{
+  primary: boolean;
+  /** The role's primary set has reached its limit. */
+  full: boolean;
+  limit: number;
+  onChange: (primary: boolean) => void;
+}>) {
+  const { t } = useTranslation();
+  const blocked = !primary && full;
+  return (
+    <button
+      type="button"
+      className="article-briefing-primary-toggle"
+      aria-pressed={primary}
+      aria-disabled={blocked || undefined}
+      title={blocked ? t("articleEditor.briefing.primaryLimitReached", { limit }) : undefined}
+      data-briefing-primary-blocked={blocked ? "true" : undefined}
+      onClick={() => { if (!blocked) onChange(!primary); }}
+    >
+      {t("articleEditor.briefing.primaryItem")}
+    </button>
+  );
+}
+
 function OutputBriefingRowV3({
   label,
   scenarioLabel,
   selected,
   selectedItems,
+  primary,
+  primaryFull,
+  onPrimaryChange,
   onToggle,
   onChange,
   onMove,
@@ -1120,13 +1539,16 @@ function OutputBriefingRowV3({
   scenarioLabel: string;
   selected: ExperimentPlacementBriefingOutputV2 | undefined;
   selectedItems: readonly ExperimentPlacementBriefingOutputV2[];
+  primary: boolean;
+  primaryFull: boolean;
+  onPrimaryChange: (primary: boolean) => void;
   onToggle: (enabled: boolean) => void;
   onChange: (item: ExperimentPlacementBriefingOutputV2) => void;
   onMove: (direction: -1 | 1) => void;
 }>) {
   const { t } = useTranslation();
   return (
-    <div className="rounded-lg px-2 py-1.5 hover:bg-wb-hover">
+    <div className="rounded-lg px-2 py-1.5 hover:bg-wb-hover" data-briefing-output-primary={selected === undefined ? undefined : primary ? "true" : "false"}>
       <div className="flex min-h-8 items-center gap-2">
         <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
           <input
@@ -1144,6 +1566,7 @@ function OutputBriefingRowV3({
             </span>
           </span>
         </label>
+        {selected !== undefined && <PrimaryItemToggleV3 primary={primary} full={primaryFull} limit={ARTICLE_PRIMARY_OUTPUT_LIMIT_V3} onChange={onPrimaryChange} />}
         {selected !== undefined && (
           <OrderControlsV3
             order={selected.order}
@@ -1174,6 +1597,9 @@ function ControlBriefingRowV3({
   sourcePaneId,
   control,
   selectedControls,
+  primary,
+  primaryFull,
+  onPrimaryChange,
   scenarios,
   visibleScenarioIds,
   initialFocusScenarioId,
@@ -1186,6 +1612,9 @@ function ControlBriefingRowV3({
   sourcePaneId: string;
   control: ExperimentPlacementBriefingControlV2 | undefined;
   selectedControls: readonly ExperimentPlacementBriefingControlV2[];
+  primary: boolean;
+  primaryFull: boolean;
+  onPrimaryChange: (primary: boolean) => void;
   scenarios: ExperimentSnapshotV2["content"]["scenarios"];
   visibleScenarioIds: readonly string[];
   initialFocusScenarioId: string;
@@ -1201,6 +1630,7 @@ function ControlBriefingRowV3({
     <div
       className="rounded-lg px-2 py-1.5 hover:bg-wb-hover"
       data-source-pane-id={sourcePaneId}
+      data-briefing-control-primary={control === undefined ? undefined : primary ? "true" : "false"}
     >
       <div className="flex min-h-8 items-center gap-2">
         <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
@@ -1212,6 +1642,7 @@ function ControlBriefingRowV3({
           />
           <span className="truncate text-[11px] font-medium">{item.label}</span>
         </label>
+        {control !== undefined && <PrimaryItemToggleV3 primary={primary} full={primaryFull} limit={ARTICLE_PRIMARY_CONTROL_LIMIT_V3} onChange={onPrimaryChange} />}
         {control !== undefined && (
           <OrderControlsV3
             order={control.order}
@@ -1673,14 +2104,12 @@ function moveBriefingControlV3(
 
 function moveBriefingOutputV3(
   outputs: readonly ExperimentPlacementBriefingOutputV2[],
-  sourcePaneId: string,
-  outputId: string,
+  reference: Pick<ExperimentPlacementBriefingOutputV2, "sourcePaneId" | "outputId" | "scenarioId">,
   direction: -1 | 1,
 ): ExperimentPlacementBriefingOutputV2[] {
   const sorted = normalizeSemanticOrderV3(outputs);
-  const key = briefingOutputKeyV3(sourcePaneId, outputId);
-  const currentIndex = sorted.findIndex((output) =>
-    briefingOutputKeyV3(output.sourcePaneId, output.outputId) === key);
+  const key = articleBriefingOutputKeyV3(reference);
+  const currentIndex = sorted.findIndex((output) => articleBriefingOutputKeyV3(output) === key);
   const nextIndex = currentIndex + direction;
   if (currentIndex < 0 || nextIndex < 0 || nextIndex >= sorted.length) {
     return sorted;

@@ -92,11 +92,16 @@ describe('application theme', () => {
       'components/article/reader/ArticleReaderExperimentV3.tsx',
       'utf8',
     );
+    // Reading layouts: the maximized controls column plays the inspector role.
+    const embed = readFileSync(
+      'components/article/reader/ArticleReaderEmbedV3.tsx',
+      'utf8',
+    );
 
     expect(pane).toContain('bg-wb-canvas');
     expect(placement).toContain('bg-wb-inspector');
     expect(reader).toContain('bg-wb-floating');
-    expect(reader).toContain('bg-wb-inspector');
+    expect(embed).toContain('bg-wb-inspector');
   });
 
   it('keeps subtle small text above the WCAG AA contrast threshold', () => {

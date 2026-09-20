@@ -32,7 +32,7 @@ import {
 } from "@/components/workbench/WorkbenchAnalysisState";
 import { workbenchScenarioRuntimeStatusV3 } from "@/components/workbench/WorkbenchSessionPolicy";
 import { mainWireFormalPvAnalysisIdV1 } from "@/analysis/methods/mainWire/MainWireStructuralAnalysisContractV3";
-import type { MainWirePeriodicPvaV1 } from "@/analysis/methods/mainWire/MainWirePeriodicPvaV1";
+import { periodicPvaFromAnalysisV3 } from "./presentation/WorkbenchPeriodicPvaProjectionV3";
 import { CompletedEjectionWaveformV1 } from "./presentation/CompletedEjectionWaveformV1";
 import { WorkbenchChartLegendRowV3 } from "./presentation/WorkbenchChartTraceStyleV3";
 import type { MainWirePeriodicPvaDerivationV1 } from "@/analysis/methods/mainWire/MainWireAnalysisMethodRegistryV1";
@@ -596,41 +596,6 @@ function pressureVolumeRelationSideV3(
   if (seriesId === "LV") return "left";
   if (seriesId === "RV") return "right";
   return null;
-}
-
-const PERIODIC_PVA_CACHE_V3 = new WeakMap<
-  StudioSimulationAnalysisV2,
-  Map<string, MainWirePeriodicPvaV1 | null>
->();
-
-export function periodicPvaFromAnalysisV3(
-  analysis: StudioSimulationAnalysisV2 | undefined,
-  side: "left" | "right",
-  derivation: MainWirePeriodicPvaDerivationV1 | null,
-): MainWirePeriodicPvaV1 | undefined {
-  if (analysis === undefined || derivation === null) return undefined;
-  const cacheKey = `${derivation.methodId}\u0000${side}`;
-  const cached = PERIODIC_PVA_CACHE_V3.get(analysis)?.get(cacheKey);
-  if (cached !== undefined) return cached ?? undefined;
-  const orientation = structuralReturnOrientationFromPayloadV3(
-    analysis.payload,
-    side,
-  );
-  let pva: MainWirePeriodicPvaV1 | null = null;
-  try {
-    if (orientation !== null) {
-      pva = derivation.build(
-        orientation.starlingLocus,
-        side === "left" ? "LV" : "RV",
-      );
-    }
-  } catch {
-    pva = null;
-  }
-  const analysisCache = PERIODIC_PVA_CACHE_V3.get(analysis) ?? new Map();
-  analysisCache.set(cacheKey, pva);
-  PERIODIC_PVA_CACHE_V3.set(analysis, analysisCache);
-  return pva ?? undefined;
 }
 
 type StructuralReturnScenarioTraceV3 = Readonly<{

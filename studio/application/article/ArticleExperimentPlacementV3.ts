@@ -13,6 +13,13 @@ import {
 import {
   validateExperimentPlacementAgainstSnapshotV2,
 } from "@/studio/application/authoring/StudioExperimentDataV2";
+import {
+  articleBriefingControlKeyV3,
+  articleBriefingOutputKeyV3,
+  articleBriefingPrimaryControlKeysV3,
+  articleBriefingPrimaryOutputKeysV3,
+  withExplicitItemEmphasisV3,
+} from "@/studio/application/article/ArticleBriefingObservationV3";
 import type {
   StudioArticleExperimentBlockV2,
 } from "@/studio/contracts/v2/article";
@@ -90,7 +97,7 @@ export function defaultArticleBriefingV3(
         ? "primary" as const
         : "supporting" as const,
     })));
-  const outputs = Object.freeze([...surface.outputPanes]
+  const unmarkedOutputs = [...surface.outputPanes]
     .sort(compareSurfacePaneOrderV3)
     .flatMap((pane) => [...pane.items]
       .sort(compareItemOrderV3)
@@ -105,8 +112,8 @@ export function defaultArticleBriefingV3(
       ),
       label: item.label,
       order,
-    })));
-  const controls = Object.freeze([...surface.controlPanes]
+    }));
+  const unmarkedControls = [...surface.controlPanes]
     .sort(compareSurfacePaneOrderV3)
     .flatMap((pane) => [...pane.items]
       .sort(compareItemOrderV3)
@@ -128,7 +135,19 @@ export function defaultArticleBriefingV3(
         initialFocusScenarioId,
         visibleScenarioIds,
       ),
-    })));
+    }));
+  // The initial observation is sealed explicitly so the author sees and can
+  // change exactly what the Reader keeps beside the graph.
+  const outputs = withExplicitItemEmphasisV3(
+    unmarkedOutputs,
+    new Set(articleBriefingPrimaryOutputKeysV3({ outputs: unmarkedOutputs })),
+    (output) => articleBriefingOutputKeyV3(output),
+  );
+  const controls = withExplicitItemEmphasisV3(
+    unmarkedControls,
+    new Set(articleBriefingPrimaryControlKeysV3({ controls: unmarkedControls })),
+    (control) => articleBriefingControlKeyV3(control),
+  );
   return Object.freeze({
     defaultTitle: normalizedBriefingTitleV3(
       defaultTitle,
