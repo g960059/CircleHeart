@@ -2219,7 +2219,7 @@ body[data-app-theme="light"] .public-static-theme-moon {
   transition: none;
 }
 
-@media (max-width: 899px) {
+@media (max-width: 899px), ((pointer: coarse) and (max-width: 1023px) and (max-height: 520px)) {
   .article-reader-article-pane {
     flex: 0 0 100%;
     inline-size: 100%;
@@ -3384,7 +3384,7 @@ body[data-app-theme="light"] .public-static-theme-moon {
   .article-reader-analysis-action-label { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
 /* Landscape phones: the graph on the left, the observation and deck on the right. */
-@media (max-width: 899px) and (min-width: 640px) and (max-height: 520px) {
+@media (max-width: 1023px) and (min-width: 640px) and (max-height: 520px) {
   .article-reader-embed[data-reader-layout="sheet"] {
     --reader-stage-height: calc(100dvh - 7rem);
     display: grid;

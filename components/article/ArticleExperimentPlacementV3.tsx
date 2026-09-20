@@ -595,10 +595,7 @@ export function ArticleBriefingEditorV3({
   };
 
   const moveGraph = (paneId: string, direction: -1 | 1) => {
-    updateBriefing({
-      ...briefing,
-      graphs: moveOrderedItemV3(briefing.graphs, paneId, direction, "paneId"),
-    });
+    updateBriefing(articleBriefingEditorMoveGraphV3(briefing, paneId, direction));
   };
 
   /** Picks one pane item at the pane's materialized Scenario; never duplicates a reference. */
@@ -931,6 +928,30 @@ export function articleBriefingEditorReferenceHandlersV3(
       update({ ...briefing, outputs: moveBriefingOutputV3(briefing.outputs, reference, direction) });
     },
   };
+}
+
+/** Reordering graphs also orders sealed views; only pairs still adjacent survive. */
+export function articleBriefingEditorMoveGraphV3(
+  briefing: ExperimentPlacementBriefingV2,
+  paneId: string,
+  direction: -1 | 1,
+): ExperimentPlacementBriefingV2 {
+  const graphs = moveOrderedItemV3(briefing.graphs, paneId, direction, "paneId");
+  if (briefing.presentation?.views === undefined) return { ...briefing, graphs };
+  const viewByPane = new Map(briefing.presentation.views.flatMap((view, index) =>
+    view.paneIds.map((id) => [id, index] as const)));
+  const views: { paneIds: string[] }[] = [];
+  for (const graph of graphs) {
+    const previous = views.at(-1);
+    const group = viewByPane.get(graph.paneId);
+    if (previous?.paneIds.length === 1 && group !== undefined
+      && viewByPane.get(previous.paneIds[0]!) === group) {
+      previous.paneIds.push(graph.paneId);
+    } else {
+      views.push({ paneIds: [graph.paneId] });
+    }
+  }
+  return { ...briefing, graphs, presentation: { ...briefing.presentation, views } };
 }
 
 /** Sealed views may only name selected graphs; dropping a graph drops it from its view. */

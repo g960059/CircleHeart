@@ -477,7 +477,8 @@ export function ArticleReaderScenarioSelectorV3({
   scenarios: readonly Readonly<{ scenarioId: string; label: string; colorHex: string }>[];
   onSelect: (scenarioId: string) => void;
 }>) {
-  if (scenarios.length < 2) return null;
+  if (scenarios.length === 0
+    || (scenarios.length === 1 && scenarios[0]!.scenarioId === activeScenarioId)) return null;
   return (
     <div className="article-reader-scenario-selector" role="group" aria-label={label}>
       <span className="article-reader-scenario-selector-label">{label}</span>

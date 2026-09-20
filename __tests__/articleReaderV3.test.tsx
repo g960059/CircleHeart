@@ -6,7 +6,7 @@ import { periodicPvaFromAnalysisV3 } from "@/components/workbench/presentation/W
 import { structuralReturnOrientationFromPayloadV3 } from "@/components/workbench/presentation/GuytonStarlingOrientationCanvasV3";
 import { buildMainWirePeriodicPvaMethodV16, MAIN_WIRE_PERIODIC_PVA_METHOD_V16_ID } from "@/analysis/methods/mainWire/MainWirePeriodicPvaV1";
 
-import "@/i18n";
+import i18n from "@/i18n";
 import {
   ARTICLE_OBSERVATION_DEFAULT_BUDGET_V3,
   ARTICLE_PRIMARY_CONTROL_LIMIT_V3,
@@ -1460,6 +1460,32 @@ describe("Article Reader V3 experiment anchor", () => {
 });
 
 describe("Article Reader V3 sealed-state analysis policy", () => {
+  it.each(["inline", "peek", "sheet", "workbench"] as const)(
+    "keeps output-only analysis recovery reachable in %s",
+    (layout) => {
+      const briefing = { ...briefingV3(), graphs: [], outputs: [{
+        sourcePaneId: "pane/outputs", outputId: MAIN_WIRE_PERIODIC_PVA_OUTPUT_IDS_V1.pressureVolumeAreaMilliJoule,
+        scenarioId: "scenario/comparison", label: "PVA", order: 0,
+      }] };
+      const render = (runtime: UseArticleReaderLiveRuntimeResultV3) => renderToStaticMarkup(
+        <ArticleReaderEmbedSurfaceV3
+          analysisRecompute="on-request" briefing={briefing} contract={contractV3()}
+          layout={layout} runtime={{ ...runtime, periodicPvaDerivation: {
+            methodId: MAIN_WIRE_PERIODIC_PVA_METHOD_V16_ID,
+            sourceAnalysisId: MAIN_WIRE_INTEGRATED_MODEL_FORMAL_PRESSURE_VOLUME_RELATIONS_V3_ID,
+            build: buildMainWirePeriodicPvaMethodV16,
+          } }} snapshot={snapshotV3()}
+        />,
+      );
+      expect(render(readerRuntimeStubV3({ changedScenarioIds: ["scenario/comparison"] })))
+        .toContain("data-reader-recompute-analysis");
+      const key = articleReaderAnalysisKeyV3("scenario/comparison", MAIN_WIRE_INTEGRATED_MODEL_FORMAL_PRESSURE_VOLUME_RELATIONS_V3_ID);
+      const failed = render(readerRuntimeStubV3({ analysisErrorByKey: { [key]: "measurement failed" } }));
+      expect(failed).toContain('data-reader-analysis-state="error"');
+      expect(failed).toContain(`aria-label="${i18n.t("articleReader.recomputeAnalysis")}"`);
+    },
+  );
+
   it("lists the Scenarios whose Surface-pinned analysis the Briefing displays", () => {
     expect(articleReaderAnalysisScenarioIdsV3(briefingV3(), snapshotV3(), contractV3(), true))
       .toEqual(["scenario/comparison"]);
@@ -2042,6 +2068,24 @@ describe("Article Reader first screen and opened forms", () => {
   );
   const sliders = (html: string) => (html.match(/type="range"/g) ?? []).length;
   const sealedBriefing = () => defaultArticleBriefingV3(observationSnapshotV3(), "scenario/a", "Observation");
+
+  it("keeps every controller's reader-focus target reachable, including a singleton outside the current focus", () => {
+    const sealed = sealedBriefing();
+    const singleton = { ...sealed, controls: [{ ...sealed.controls[0]!,
+      binding: { mode: "reader-focus" as const, allowedScenarioIds: ["scenario/b"] },
+    }] };
+    expect(validateExperimentPlacementBriefingV2(singleton, observationSnapshotV3().content)).toEqual(singleton);
+    for (const layout of ["inline", "peek", "sheet"] as const) {
+      expect(render(layout, singleton).match(/article-reader-scenario-chip/g)).toHaveLength(1);
+    }
+    const differing = { ...singleton, controls: [...singleton.controls, { ...sealed.controls[1]!,
+      binding: { mode: "reader-focus" as const, allowedScenarioIds: ["scenario/a"] },
+    }] };
+    expect(render("peek", differing).match(/article-reader-scenario-chip/g)).toHaveLength(2);
+    // Fixed bindings still need no selector and retain their original targets.
+    expect(render("peek", sealed)).not.toContain("article-reader-scenario-chip");
+    expect(sealed.controls[0]!.binding).toEqual({ mode: "fixed", scenarioIds: ["scenario/a"], application: "absolute" });
+  });
 
   it("reads the author's primary outputs and controls inline at every width, with nothing to unfold", () => {
     const html = render("inline", sealedBriefing());

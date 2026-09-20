@@ -713,10 +713,14 @@ function ArticleReaderLiveOwnerV3({
   );
 }
 
+// Match the Workbench phone shell on wide, short touch screens as well.
+const READER_SHEET_QUERY_V3 =
+  "(max-width: 899px), ((pointer: coarse) and (max-width: 1023px) and (max-height: 520px))";
+
 function useReaderNarrowScreenV3() {
   const [narrow, setNarrow] = React.useState(false);
   React.useEffect(() => {
-    const media = window.matchMedia("(max-width: 899px)");
+    const media = window.matchMedia(READER_SHEET_QUERY_V3);
     const update = () => setNarrow(media.matches);
     update(); media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
@@ -935,7 +939,7 @@ export function ArticleReaderEmbedSurfaceV3({
         <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
       </button>
     ) : null;
-    const stage = graphs.length === 0 ? null : (
+    const stage = graphs.length === 0 ? status : (
       <ArticleReaderStageV3
         layout={layout}
         views={views}
@@ -1006,7 +1010,7 @@ export function ArticleReaderEmbedSurfaceV3({
       </div>
     );
   }
-  const stage = graphs.length === 0 ? null : (
+  const stage = graphs.length === 0 ? status : (
     <ArticleReaderStageV3
       layout={layout}
       views={views}
@@ -2187,16 +2191,17 @@ function ArticleReaderControlsV3({
   const sections: ArticleReaderSectionV3[] = sourcePaneIds.map((sourcePaneId) => {
     const controls = [...selectedControls].filter((control) => control.sourcePaneId === sourcePaneId).sort(compareOrderV3);
     const pane = snapshot.content.surface.controlPanes.find((candidate) => candidate.paneId === sourcePaneId);
-    const readerFocusBinding = controls.map(({ binding }) => binding).find((binding) => binding.mode === "reader-focus");
+    const readerFocusBindings = controls.flatMap(({ binding }) => binding.mode === "reader-focus" ? [binding] : []);
     // One heading names the target only when every control in the pane
     // shares the same sealed binding; otherwise each row names its own.
     const bindingSignatures = new Set(controls.map((control) => articleReaderControlBindingSignatureV3(control, briefing.scenarioScope.visibleScenarioIds)));
     const sharedFixedTargets = bindingSignatures.size === 1 && controls[0]?.binding.mode === "fixed"
       ? controls[0].binding.scenarioIds.filter((scenarioId) => briefing.scenarioScope.visibleScenarioIds.includes(scenarioId))
       : [];
-    const allowed = readerFocusBinding?.mode === "reader-focus"
-      ? visibleScenarios.filter(({ scenarioId }) => readerFocusBinding.allowedScenarioIds.includes(scenarioId))
-      : [];
+    const allowed = visibleScenarios.filter(({ scenarioId }) =>
+      readerFocusBindings.some((binding) => binding.allowedScenarioIds.includes(scenarioId)));
+    const showFocusSelector = allowed.length > 1
+      || (allowed.length === 1 && allowed[0]!.scenarioId !== runtime.state.activeScenarioId);
     return {
       key: sourcePaneId,
       title: pane?.label?.trim() || t("articleReader.controls"),
@@ -2204,7 +2209,7 @@ function ArticleReaderControlsV3({
       ...(multiScenario && sharedFixedTargets.length > 0
         ? { scenario: { label: sharedFixedTargets.map(scenarioLabel).join(", "), colorHex: scenarioColor(sharedFixedTargets[0]!) } }
         : {}),
-      ...(readerFocusBinding !== undefined && allowed.length > 1 ? {
+      ...(showFocusSelector ? {
         lead: (
           <ArticleReaderScenarioSelectorV3
             label={t("articleReader.scenarioFocus")}
@@ -2230,7 +2235,7 @@ function ArticleReaderControlsV3({
                 definition={definition}
                 runtime={runtime}
                 scenarioColor={scenarioColor}
-                showTarget={multiScenario && (readerFocusBinding !== undefined || bindingSignatures.size > 1)}
+                showTarget={multiScenario && (readerFocusBindings.length > 0 || bindingSignatures.size > 1)}
                 snapshot={snapshot}
               />
             );
@@ -2458,7 +2463,7 @@ export function ArticleReaderExperimentPeekPanelV3({
   const [draftTitle, setDraftTitle] = React.useState(title);
   const [mobile, setMobile] = React.useState(false);
   React.useEffect(() => {
-    const media = window.matchMedia("(max-width: 899px)");
+    const media = window.matchMedia(READER_SHEET_QUERY_V3);
     const update = () => setMobile(media.matches);
     update(); media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);

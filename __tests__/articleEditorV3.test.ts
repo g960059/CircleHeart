@@ -29,6 +29,7 @@ import {
 } from "@/components/article/editor/ArticleEditorPolicy";
 import {
   ArticleBriefingEditorV3,
+  articleBriefingEditorMoveGraphV3,
   ArticleExperimentPlacementV3,
 } from "@/components/article/ArticleExperimentPlacementV3";
 import {
@@ -1102,6 +1103,29 @@ describe("Article Briefing sealed reading form", () => {
     { paneId: "pane/pressure", order: 2, emphasis: "supporting" as const },
   ];
   const scenarioScope = { visibleScenarioIds: ["a", "b"], initialFocusScenarioId: "a" };
+
+  it("keeps the reading order in sync after an author moves a graph with sealed views", () => {
+    const original = {
+      ...defaultArticleBriefingV3(snapshotV3(), "scenario/baseline", "Reading"),
+      graphs,
+      presentation: defaultArticleBriefingPresentationV3({ graphs }),
+    };
+    const moved = articleBriefingEditorMoveGraphV3(original, "pane/starling", -1);
+    expect(articleBriefingViewsV3(moved).flatMap((view) => view.paneIds))
+      .toEqual(["pane/starling", "pane/pv", "pane/pressure"]);
+    expect(moved.outputs).toBe(original.outputs);
+    expect(moved.controls).toBe(original.controls);
+    expect(articleBriefingViewsV3(original).flatMap((view) => view.paneIds))
+      .toEqual(["pane/pv", "pane/starling", "pane/pressure"]);
+
+    const paired = { ...original, presentation: { ...original.presentation,
+      views: [{ paneIds: ["pane/pv", "pane/starling"] }, { paneIds: ["pane/pressure"] }],
+    } };
+    expect(articleBriefingViewsV3(articleBriefingEditorMoveGraphV3(paired, "pane/starling", -1)))
+      .toEqual([{ paneIds: ["pane/starling", "pane/pv"] }, { paneIds: ["pane/pressure"] }]);
+    expect(articleBriefingViewsV3(articleBriefingEditorMoveGraphV3(paired, "pane/pressure", -1)))
+      .toEqual([{ paneIds: ["pane/pv"] }, { paneIds: ["pane/pressure"] }, { paneIds: ["pane/starling"] }]);
+  });
 
   it("reads an explicit extent ahead of the complexity heuristic and defaults to on-request analyses", () => {
     expect(articleBriefingPresentationV3({ graphs, scenarioScope, presentation: { extent: "inline" } })).toBe("inflow");
