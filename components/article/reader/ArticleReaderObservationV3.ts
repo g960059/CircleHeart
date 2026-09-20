@@ -1,6 +1,27 @@
 import type { ExperimentObservationGroupV3, ExperimentOutputPresentationItemV3 } from "@/components/workbench/ExperimentPanePresentationV3";
 import { isGenericOutputPaneLabelV3 } from "@/components/workbench/presentation/WorkbenchObservationV3";
 import { articleBriefingOutputGroupKeyV3 } from "@/studio/application/article/ArticleBriefingObservationV3";
+import type { ExperimentPlacementBriefingV2 } from "@/studio/contracts/v2/content";
+
+/** Only exposed targets need distinguishing; unused snapshot scenarios do not. */
+export function articleReaderNeedsScenarioLabelsV3(briefing: ExperimentPlacementBriefingV2): boolean {
+  const exposed = new Set(briefing.outputs.map(item => item.scenarioId));
+  for (const { binding } of briefing.controls) {
+    for (const id of binding.mode === "fixed" ? binding.scenarioIds : binding.allowedScenarioIds) exposed.add(id);
+  }
+  // Graph panes compare the sealed visible scope. Keep targets legible even
+  // when only one of those scenarios has controllers or measurements.
+  if (briefing.graphs.length > 0) for (const id of briefing.scenarioScope.visibleScenarioIds) exposed.add(id);
+  return briefing.scenarioScope.visibleScenarioIds.filter(id => exposed.has(id)).length > 1;
+}
+
+/** Suppress a repeated target only for explicit, unambiguous title forms. */
+export function articleReaderTitleNamesScenarioV3(title: string, scenario: string): boolean {
+  const name = scenario.trim();
+  const text = title.trim();
+  return text === name || text === `${name}を操作` || text === `${name} を操作`
+    || text.includes(`（${name}）`) || text.includes(`(${name})`);
+}
 
 /**
  * Groups observed items by source pane and Scenario. Headings appear only

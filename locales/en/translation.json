@@ -813,7 +813,8 @@
       "incorrect": "Not quite—try once more",
       "retry": "Answer again"
     },
-    "openDetails": "View side by side",
+    "openDetails": "Explore",
+    "openBeside": "View beside the article",
     "moreActions": "More actions",
     "handoffFailed": "Could not transfer the current state. Please try again.",
     "displayedInPanel": "Shown in panel",
@@ -831,13 +832,7 @@
     "analysisError": "Measurement failed",
     "observation": "Observed outputs",
     "openToOperate": "Open to operate",
-    "resetObservation": "Author's selection",
-    "primaryOutputs": "Key measurements",
-    "chooseOutputs": "Choose displayed measurements",
-    "adjustOutputs": "Customize",
-    "cancelOutputSelection": "Cancel",
-    "finishOutputSelection": "Done",
-    "selectedOutputs": "Selected measurements",
+    "foldOutputs": "Show less",
     "allOutputs": "All measurements · {{count}}"
   },
   "snapshotReader": {

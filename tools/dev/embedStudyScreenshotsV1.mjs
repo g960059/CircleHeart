@@ -103,17 +103,14 @@ async function moveFirstSlider(page, scope, from = 0.27, to = 0.45) {
   }
   return { sliderValue: await slider.inputValue(), afterMs: null };
 }
-/** Configuration is reached from the expanded measurement area. */
-async function showOutputEditor(scope) {
-  const choose = scope.locator("[data-reader-output-choose]");
-  if (!(await choose.count())) await scope.locator("[data-reader-output-expand]").click();
-  await choose.click();
+/** Readers reveal authored values; they do not edit membership. */
+async function showAllOutputs(scope) {
+  const toggle = scope.locator("[data-reader-output-expand]");
+  if (await toggle.count() && await toggle.getAttribute("aria-expanded") === "false") await toggle.click();
 }
-async function toggleOutput(scope, label) {
-  await showOutputEditor(scope);
-  const checkbox = scope.getByRole("checkbox", { name: label, exact: true }).first();
-  await checkbox.setChecked(!(await checkbox.isChecked()));
-  await scope.getByRole("button", { name: "完了", exact: true }).click();
+async function foldOutputs(scope) {
+  const toggle = scope.locator("[data-reader-output-expand]");
+  if (await toggle.count() && await toggle.getAttribute("aria-expanded") === "true") await toggle.click();
 }
 
 async function desktop(theme) {
@@ -141,7 +138,7 @@ async function desktop(theme) {
   record(`desktop-${theme}-peek`, await loop(page, panel));
   if (theme === "light") { await context.close(); return errors; }
 
-  // Operate while the observation stays in view, then re-select the observation.
+  // Operate while the observation stays in view, then expand the authored values.
   const before = (await loop(page, panel)).observedTiles;
   const moved = await moveFirstSlider(page, panel);
   await page.waitForTimeout(2500);
@@ -149,14 +146,13 @@ async function desktop(theme) {
   await page.screenshot({ path: join(outputDir, "desktop-dark-peek-after-control.png") });
   record("desktop-dark-peek-after-control", { ...moved, observationVisible: after.observationVisible, slidersVisible: after.slidersVisible,
     valuesChanged: before.map((t, i) => t.value !== after.observedTiles[i]?.value), tiles: after.observedTiles });
-  await toggleOutput(panel, "LVEF");
-  await toggleOutput(panel, "LVEDV");
+  await showAllOutputs(panel);
   await page.waitForTimeout(800);
   await page.screenshot({ path: join(outputDir, "desktop-dark-peek-reselected.png") });
   const reselected = await loop(page, panel);
-  record("desktop-dark-peek-reselected", { observedTiles: reselected.observedTiles, reset: await panel.locator("[data-reader-observation-reset]").count() });
+  record("desktop-dark-peek-reselected", { observedTiles: reselected.observedTiles, readerPicker: await panel.locator(".article-reader-output-editor, .workbench-output-toggle").count() });
 
-  // Extent changes keep the reader's selection, the graph tab, and the values.
+  // Extent changes keep the reader's expansion, the graph tab, and the values.
   await panel.locator("[data-testid='article-reader-stage-rail-v3'] [role='tab']").nth(1).click();
   await page.waitForTimeout(600);
   await panel.getByRole("button", { name: "広く表示" }).click();
@@ -177,8 +173,7 @@ async function desktop(theme) {
   record("desktop-dark-back-to-peek", { selectionKept: JSON.stringify(back.observedTiles.map((t) => t.label)) === JSON.stringify(reselected.observedTiles.map((t) => t.label)),
     activePane: await panel.locator(".article-reader-stage").getAttribute("data-reader-stage-active-pane"), sliderValue: await panel.getByRole("slider").first().inputValue(),
     outputView: back.outputView });
-  await showOutputEditor(panel);
-  await panel.locator("[data-reader-observation-reset]").click();
+  await foldOutputs(panel);
   await page.waitForTimeout(500);
   record("desktop-dark-reset", { observedTiles: (await loop(page, panel)).observedTiles.map((t) => t.label) });
   // Closing returns the Article column to the author's first screen; reopening restores the reader's deck.
@@ -237,19 +232,19 @@ async function phone(name, viewport, { landscape = false } = {}) {
   await page.waitForTimeout(2500);
   await page.screenshot({ path: join(outputDir, `${name}-sheet-after-control.png`) });
   record(`${name}-sheet-after-control`, { ...moved, ...(await loop(page, panel)) });
-  await toggleOutput(panel, "LVEF");
+  await showAllOutputs(panel);
   await page.waitForTimeout(800);
   await page.screenshot({ path: join(outputDir, `${name}-sheet-outputs.png`) });
   record(`${name}-sheet-outputs`, { ...(await loop(page, panel)), outputEditorVisible: await panel.locator(".article-reader-output-editor").count(),
-    reset: await panel.locator("[data-reader-observation-reset]").count() });
+    readerPicker: await panel.locator(".article-reader-output-editor, .workbench-output-toggle").count() });
   // The loop after a control change: graph, bounded observation, analysis strip
   // and the current control on one screen, with controllers remaining available.
   await panel.locator(".article-reader-deck-panel").evaluate((deck) => deck.scrollTo(0, 0));
   await page.waitForTimeout(500);
   await page.screenshot({ path: join(outputDir, `${name}-loop.png`) });
   record(`${name}-loop`, { ...(await loop(page, panel)), status: await box(panel.locator("[data-reader-analysis-state]").first()) });
-  // A long reader selection stays bounded: the strip scrolls inside its bound and never covers the controls.
-  for (const label of ["LVEDP", "AV 拍出量/分", "平均AoP", "AoP max", "CVP", "mLAP"]) await toggleOutput(panel, label);
+  // The full sealed set stays bounded: the strip scrolls inside its bound and never covers the controls.
+  await showAllOutputs(panel);
   await panel.locator(".article-reader-deck-panel").evaluate((deck) => deck.scrollTo(0, 0));
   await page.waitForTimeout(700);
   await page.screenshot({ path: join(outputDir, `${name}-loop-long.png`) });
@@ -263,7 +258,7 @@ async function phone(name, viewport, { landscape = false } = {}) {
     await page.waitForTimeout(400);
     record(`${name}-loop-other-pane`, { ...(await loop(page, panel)) });
   }
-  // Closing returns the Article column to the author's first screen; reopening restores the reader's selection.
+  // Closing returns the Article column to the author's first screen; reopening restores the reader's expansion.
   await page.keyboard.press("Escape");
   await page.waitForTimeout(800);
   await anchor.click();

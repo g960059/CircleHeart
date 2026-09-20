@@ -173,7 +173,7 @@ export const STUDY_PLACEMENTS_V1: readonly StudyPlacementV1[] = [
   {
     placementId: "study-peek-heavy",
     title: "循環血液量の段階的増加（全部入り）",
-    caption: "本文の横。3 Scenario・4 graph（2画面×2列）・3 control pane（8 control）・output pane 3つ（基準12・TBV +500 12・弁8 = 32指標）。主要は基準と+500のLVEDV/LVSVと弁の2指標、controllerは基準のTBVとSVR。開くとgraphの下に観察中の指標、その下にpaneごとのcontrollerが並ぶ。指標は同じ領域で全32件へ展開でき、表示する指標の変更は必要時だけ開く。ESPVR/EDPVR・Starlingは封入時の測定済み結果を読み込み、操作後は読者が求めたときだけ再測定する。",
+    caption: "本文の横。3 Scenario・4 graph（2画面×2列）・3 control pane（8 control）・output pane 3つ（基準12・TBV +500 12・弁8 = 32指標）。主要は基準と+500のLVEDV/LVSVと弁の2指標、controllerは基準のTBVとSVR。開くとgraphの下に観察中の指標、その下にpaneごとのcontrollerが並ぶ。指標は同じ領域で全32件へ展開でき、主要と封入全体の構成は著者が決め、読者は同じ領域を広げて見る。ESPVR/EDPVR・Starlingは封入時の測定済み結果を読み込み、操作後は読者が求めたときだけ再測定する。",
     briefing: (base) => withPresentation(
       withPrimary(base, HEAVY_PRIMARY_OUTPUTS, HEAVY_PRIMARY_CONTROLS),
       { extent: "peek", views: ALL_VIEWS, analysisRecompute: "on-request" },
@@ -215,6 +215,21 @@ export const STUDY_PLACEMENTS_V1: readonly StudyPlacementV1[] = [
       { extent: "peek", analysisRecompute: "on-request" },
     ),
   },
+  {
+    placementId: "study-single-scenario",
+    title: "ひとつの条件で循環血液量を変える",
+    caption: "1 Scenario。対象が一意なのでScenario名と汎用pane見出しを省略し、graph・指標・controllerだけを読む。主要と封入全体は著者が指定する。",
+    briefing: (base) => {
+      const selected = withPrimary(
+        onlyControls(onlyOutputs(onlyGraphs(base, [P.pv]), [{ paneId: P.outputsBaseline, outputIds: KEY_OUTPUTS }]), [P.controlsBaseline]),
+        [{ paneId: P.outputsBaseline, outputIds: KEY_OUTPUTS }],
+        [{ paneId: P.controlsBaseline, controlIds: ["hemodynamics.total-blood-volume-ml"] }],
+      );
+      const scenarioId = selected.outputs[0]!.scenarioId;
+      return withPresentation({ ...selected, scenarioScope: { ...selected.scenarioScope, visibleScenarioIds: [scenarioId], initialFocusScenarioId: scenarioId } },
+        { extent: "inline", analysisRecompute: "on-request" });
+    },
+  },
 ];
 
 function paragraph(blockId: string, text: string): StudioArticleBlockV2 {
@@ -238,7 +253,7 @@ export function buildArticleEmbedStudyArticleV1(snapshot: ExperimentSnapshotV2):
       placement: { ...block.placement, titleOverride: placement.title, caption: placement.caption },
     };
   };
-  const [inlineLight, inlineCompare, inlineOpenOperate, peekHeavy, fullHeavy, peekAutomatic, peekReaderFocus] = STUDY_PLACEMENTS_V1.map(experimentBlock);
+  const [inlineLight, inlineCompare, inlineOpenOperate, peekHeavy, fullHeavy, peekAutomatic, peekReaderFocus, singleScenario] = STUDY_PLACEMENTS_V1.map(experimentBlock);
   return {
     schemaId: STUDIO_ARTICLE_DRAFT_V2_SCHEMA_ID,
     articleId: ARTICLE_EMBED_STUDY_ARTICLE_ID_V1,
@@ -251,16 +266,16 @@ export function buildArticleEmbedStudyArticleV1(snapshot: ExperimentSnapshotV2):
       heading("h-inline", "1. 本文内で一目で読む"),
       paragraph("p-inline-1", "静脈側に血液を足すと、まず右房圧が上がり、右室・左室の拡張末期容積が増えます。Frank–Starlingの関係により一回拍出量も増えますが、その増え方は容積が増えるほど鈍ります。下の埋め込みは、PVループ1枚に3つのScenarioを重ね、基準の4指標だけを添えた最小構成です。枠線もcontrolもありません。"),
       inlineLight!,
-      paragraph("p-inline-2", "比較したい値がある場合は、Workbenchでoutput paneを比較したいScenarioごとに作り、両方を封入します。封入時に「主要」にした指標とcontroller（指標は6件、controllerは2件まで）が本文内の最初の画面で、幅が変わっても同じです。残りの指標は、右上のボタンで開き、同じ指標領域を広げて確認できます。表示する指標を選び直しても、paneとScenarioのまとまりは保たれます。graphは2枚を1画面に2列で封入しました。スマートフォンの幅では自動で1枚ずつのタブになります。"),
+      paragraph("p-inline-2", "比較したい値がある場合は、Workbenchでoutput paneを比較したいScenarioごとに作り、両方を封入します。封入時に「主要」にした指標とcontroller（指標は6件、controllerは2件まで）が本文内の最初の画面で、幅が変わっても同じです。残りの指標は、右上のボタンで開き、同じ指標領域を広げて確認できます。主要と封入全体の構成は著者が決め、読者は変更しません。別の指標を調べたい場合はWorkbenchを開きます。graphは2枚を1画面に2列で封入しました。スマートフォンの幅では自動で1枚ずつのタブになります。"),
       inlineCompare!,
       paragraph("p-inline-3", "controllerを封入しても主要に印を付けなければ、本文内はgraphと値だけになります。その場合だけ、graphの下に「開いて操作」の一行が出ます。"),
       inlineOpenOperate!,
       heading("h-peek", "2. 本文と並べる"),
-      paragraph("p-peek-1", "4枚のgraph、3つのcontrol pane、指標構成の異なる3つのoutput pane（基準12・TBV +500 12・弁8）を読む場合は本文内では長すぎます。下のアンカーから本文の横に開きます。graphは「PVループ + Guyton/Starling」「圧波形 + 弁流量」の2画面で上に固定され、その下に観察中の指標、その下に3つのcontrol paneが並び、主要（基準のTBVとSVR）を含むpaneから操作できます。指標は同じ領域で全32件へ広げられ、必要なときだけ表示する指標を変更します。その間もcontrollerは同じ位置に残ります。対象Scenarioは封入時のbindingのままで、各指標は自分のScenarioを名乗ります。"),
+      paragraph("p-peek-1", "4枚のgraph、3つのcontrol pane、指標構成の異なる3つのoutput pane（基準12・TBV +500 12・弁8）を読む場合は本文内では長すぎます。下のアンカーから本文の横に開きます。graphは「PVループ + Guyton/Starling」「圧波形 + 弁流量」の2画面で上に固定され、その下に観察中の指標、その下に3つのcontrol paneが並び、主要（基準のTBVとSVR）を含むpaneから操作できます。指標は同じ領域で全32件へ広げられ、著者が封入した指標をすべて確認できます。その間もcontrollerは同じ位置に残ります。対象Scenarioは封入時のbindingのままで、各指標は自分のScenarioを名乗ります。"),
       peekHeavy!,
       paragraph("p-peek-2", "スライダーを動かすと拍ごとの応答（ループ、波形、出力値）はすぐに変わりますが、ESPVR/EDPVR・Starling曲線は封入時の条件の測定結果のまま薄く残り、graphの下に「操作後の条件はまだ測定していません」と再測定ボタンが出ます。再測定は1 Scenarioあたり数十秒から数分かかるので、読者が求めたときだけ走らせます。"),
       heading("h-full", "3. 全幅で開く"),
-      paragraph("p-full-1", "全幅は同じパネルを最大幅で開いた状態で、Workbenchと同じ区画（graphを左上にタイル、左下にすべての封入指標を一度だけ、右にpaneごとのcontrol）になります。観察する指標の選択は並置・全幅・スマートフォンの間で保たれ、本文内に戻ると著者の主要に戻ります。ヘッダーの「記事と並べる」で並置に戻れます。"),
+      paragraph("p-full-1", "全幅は同じパネルを最大幅で開いた状態で、Workbenchと同じ区画（graphを左上にタイル、左下にすべての封入指標を一度だけ、右にpaneごとのcontrol）になります。指標の展開状態は並置・全幅・スマートフォンの間で保たれ、本文内に戻ると著者の主要に戻ります。ヘッダーの「記事と並べる」で並置に戻れます。"),
       fullHeavy!,
       heading("h-auto", "4. 比較用：自動で再測定する封入"),
       paragraph("p-auto-1", "著者が「操作のたびに自動」で封入した場合の配置です。操作のたびに対象Scenarioの測定が走り、その間はcontrolが使えません。デスクトップ向けの記事や、controlが1つだけの短い実験ではこちらが自然な場合もあります。"),
@@ -268,6 +283,8 @@ export function buildArticleEmbedStudyArticleV1(snapshot: ExperimentSnapshotV2):
       heading("h-focus", "5. 読者が操作対象を選ぶ教材"),
       paragraph("p-focus-1", "controllerを読者のフォーカスに追従させると、同じスライダーで基準・TBV +500・TBV +1000 のどれを動かすかを読者が選びます。指標は封入時のScenarioに固定されたままなので、観察中の各項目に書かれたScenarioと、controllerの「対象」を見比べれば、どの値が動くはずかが分かります。"),
       peekReaderFocus!,
+      heading("h-single", "6. 対象がひとつの実験"),
+      singleScenario!,
       paragraph("p-tail", "ここまでの埋め込みは、どれも同じ数値lane・同じrenderer・同じBriefingデータを使っています。変わるのは封入した読み方だけです。"),
     ],
   };

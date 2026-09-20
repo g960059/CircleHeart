@@ -1,5 +1,5 @@
 import { articleReaderShowAllOutputsV3 } from "@/components/article/reader/ArticleReaderOutputDisclosureV3";
-import { articleReaderObservationGroupsV3 } from "@/components/article/reader/ArticleReaderObservationV3";
+import { articleReaderNeedsScenarioLabelsV3, articleReaderTitleNamesScenarioV3, articleReaderObservationGroupsV3 } from "@/components/article/reader/ArticleReaderObservationV3";
 import { articleReaderPlacementAfterViewportExitV3, articleReaderPlacementInReadingAreaV3 } from "@/components/article/reader/ArticleReaderPlacementV3";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -18,7 +18,6 @@ import {
   articleBriefingOutputKeyV3,
   articleBriefingPrimaryControlKeysV3,
   articleBriefingPrimaryOutputKeysV3,
-  articleReaderObservedOutputKeysV3,
   defaultObservedItemKeysV3,
   withExplicitItemEmphasisV3,
 } from "@/studio/application/article/ArticleBriefingObservationV3";
@@ -1678,14 +1677,6 @@ describe("Article Briefing observation", () => {
     expect(articleBriefingPrimaryOutputKeysV3({ outputs: briefing.outputs.map((output) => ({ ...output, emphasis: "supporting" as const })) })).toEqual([]);
   });
 
-  it("resolves a reader's selection against the sealed Briefing in sealed order", () => {
-    const legacy = legacyBriefingV3();
-    expect(articleReaderObservedOutputKeysV3(legacy, null)).toEqual(articleBriefingPrimaryOutputKeysV3(legacy));
-    expect(articleReaderObservedOutputKeysV3(legacy, [keyB(8), "pane/zzzoutput/xscenario/a", keyA(12), keyA(1)]))
-      .toEqual([keyA(1), keyA(12), keyB(8)]);
-    expect(articleReaderObservedOutputKeysV3(legacy, [])).toEqual([]);
-  });
-
   it("seals explicit emphasis by default, validates it, and carries it through re-capture", () => {
     const snapshot = observationSnapshotV3();
     const sealed = defaultArticleBriefingV3(snapshot, "scenario/a", "Observation");
@@ -2136,21 +2127,45 @@ describe("Article Reader first screen and opened forms", () => {
     expect(render("inline", noPrimaryControls, createArticleReaderObservationMemoryV3(), null)).not.toContain("data-reader-open-operate");
   });
 
-  it("keeps the reader's observation in opened forms only and the author's inline", () => {
+  it("keeps authored sets unchanged when readers expand or change extent", () => {
     const sealed = sealedBriefing();
-    const memory = { ...createArticleReaderObservationMemoryV3(), observedOutputKeys: [keyA(12), keyB(8)] };
-    const sheet = render("sheet", sealed, memory);
-    expect(sheet).toContain('data-reader-observed-count="2"');
-    expect(sheet).toContain(`data-output-id="${keyA(12)}"`);
-    // The same memory read inline: the author's six, untouched.
+    const before = JSON.stringify(sealed);
+    const memory: ArticleReaderObservationMemoryV3 = { ...createArticleReaderObservationMemoryV3(), outputView: "all" };
+    for (const layout of ["sheet", "peek", "workbench"] as const) {
+      const html = render(layout, sealed, memory);
+      expect(html.match(/data-output-id=/g)).toHaveLength(20);
+      expect(html).not.toContain("data-reader-output-choose");
+      expect(html).not.toContain("data-reader-observation-reset");
+      expect(html).not.toContain("workbench-output-toggle");
+      expect(html).not.toContain('type="checkbox"');
+    }
     const inline = render("inline", sealed, memory);
-    expect(inline).toContain('data-reader-observed-count="6"');
+    expect(inline.match(/data-output-id=/g)).toHaveLength(6);
     expect(inline).not.toContain(`data-output-id="${keyA(12)}"`);
-    expect(memory.observedOutputKeys).toEqual([keyA(12), keyB(8)]);
-    // An explicit empty selection stays empty in the opened forms.
-    const empty = render("peek", sealed, { ...createArticleReaderObservationMemoryV3(), observedOutputKeys: [] });
-    expect(empty).toContain('data-reader-observed-count="0"');
-    expect(empty).not.toContain('data-reader-observation="true"');
+    expect(JSON.stringify(sealed)).toBe(before);
+    expect(createArticleReaderObservationMemoryV3()).not.toHaveProperty("observedOutputKeys");
+  });
+
+  it("omits redundant target headings for a lone exposed scenario while preserving comparison context", () => {
+    const sealed = sealedBriefing();
+    const single = { ...sealed, graphs: [],
+      outputs: sealed.outputs.filter(item => item.scenarioId === "scenario/a"),
+      controls: sealed.controls.filter(item => item.sourcePaneId === "pane/controls-a"),
+    };
+    expect(articleReaderNeedsScenarioLabelsV3(single)).toBe(false);
+    for (const layout of ["inline", "sheet", "peek", "workbench"] as const) {
+      const html = render(layout, single);
+      expect(html).not.toContain('class="article-reader-section-title"');
+      expect(html).not.toContain('class="experiment-observation-heading"');
+    }
+    expect(articleReaderNeedsScenarioLabelsV3(sealed)).toBe(true);
+    const compared = render("sheet", sealed);
+    expect(compared).toContain('class="article-reader-section-title"');
+    expect(compared).toContain('class="experiment-observation-heading"');
+    // Pane titles can identify targets once; semantic titles cannot be discarded.
+    expect(articleReaderTitleNamesScenarioV3("基準を操作", "基準")).toBe(true);
+    expect(articleReaderTitleNamesScenarioV3("TBV +1000 を操作", "TBV +1000")).toBe(true);
+    expect(articleReaderTitleNamesScenarioV3("弁の指標", "基準")).toBe(false);
   });
 
   it("keeps one output area and the controllers present without a permanent picker", () => {
@@ -2168,23 +2183,20 @@ describe("Article Reader first screen and opened forms", () => {
     expect(expanded.match(/data-output-id=/g)).toHaveLength(20);
     expect(sliders(expanded)).toBe(2);
     expect(expanded).not.toContain("aria-pressed");
-    const changed = render("sheet", sealed, { ...createArticleReaderObservationMemoryV3(), observedOutputKeys: [keyA(1)] });
-    expect(changed).not.toContain("data-reader-observation-reset");
-    expect(changed).not.toContain("data-reader-output-choose");
-    expect(expanded).toContain("data-reader-output-choose");
+    expect(expanded).not.toContain("data-reader-output-choose");
+    expect(expanded).not.toContain("workbench-output-toggle");
   });
 
-  it("opens to operate with selected values and preserves the reader's observation", () => {
+  it("opens to operate with the author's primary values", () => {
     const sealed = sealedBriefing();
     const noPrimaryControls = { ...sealed, controls: withExplicitItemEmphasisV3(sealed.controls, new Set(), control => articleBriefingControlKeyV3(control)) };
-    const memory: ArticleReaderObservationMemoryV3 = { ...createArticleReaderObservationMemoryV3(), outputView: "all", observedOutputKeys: [keyA(12)] };
+    const memory: ArticleReaderObservationMemoryV3 = { ...createArticleReaderObservationMemoryV3(), outputView: "all" };
     let opened = 0;
     openArticleReaderToOperateV3(memory, () => { opened += 1; });
     expect(opened).toBe(1);
-    expect(memory.outputView).toBe("selected");
-    expect(memory.observedOutputKeys).toEqual([keyA(12)]);
+    expect(memory.outputView).toBe("primary");
     const reopened = render("sheet", noPrimaryControls, memory);
-    expect(reopened).toContain('data-reader-observed-count="1"');
+    expect(reopened).toContain('data-reader-observed-count="6"');
     expect(sliders(reopened)).toBe(2);
   });
 
@@ -2202,15 +2214,14 @@ describe("Article Reader first screen and opened forms", () => {
     }
   });
 
-  it("uses space only for defaults; reader selections and explicit expansions survive extent changes", () => {
-    expect(articleReaderShowAllOutputsV3("peek", null, false, true)).toBe(true);
-    expect(articleReaderShowAllOutputsV3("peek", null, false, false)).toBe(false);
-    expect(articleReaderShowAllOutputsV3("sheet", null, false, true)).toBe(false);
-    expect(articleReaderShowAllOutputsV3("workbench", null, false, false)).toBe(true);
+  it("uses space for defaults and preserves explicit expansion across extents", () => {
+    expect(articleReaderShowAllOutputsV3("peek", null, true)).toBe(true);
+    expect(articleReaderShowAllOutputsV3("peek", null, false)).toBe(false);
+    expect(articleReaderShowAllOutputsV3("sheet", null, true)).toBe(false);
+    expect(articleReaderShowAllOutputsV3("workbench", null, false)).toBe(true);
     for (const layout of ["peek", "sheet", "workbench"] as const) {
-      expect(articleReaderShowAllOutputsV3(layout, null, true, true)).toBe(false);
-      expect(articleReaderShowAllOutputsV3(layout, "selected", false, true)).toBe(false);
-      expect(articleReaderShowAllOutputsV3(layout, "all", true, false)).toBe(true);
+      expect(articleReaderShowAllOutputsV3(layout, "primary", true)).toBe(false);
+      expect(articleReaderShowAllOutputsV3(layout, "all", false)).toBe(true);
     }
   });
 

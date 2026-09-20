@@ -7,7 +7,6 @@ import { CompletedEjectionWaveformV1 } from "@/components/workbench/presentation
 import { createPortal } from "react-dom";
 import {
   ChevronRight,
-  PanelRightOpen,
   MoreHorizontal,
   LoaderCircle,
   CircleAlert,
@@ -123,10 +122,9 @@ import {
   articleBriefingOutputKeyV3,
   articleBriefingPrimaryControlKeysV3,
   articleBriefingPrimaryOutputKeysV3,
-  articleReaderObservedOutputKeysV3,
 } from "@/studio/application/article/ArticleBriefingObservationV3";
 import { workbenchScenarioColorSeedV3 } from "@/components/workbench/presentation/WorkbenchGraphColorV3";
-import { articleReaderObservationGroupsV3, type ArticleReaderOutputItemV3 } from "./ArticleReaderObservationV3";
+import { articleReaderNeedsScenarioLabelsV3, articleReaderObservationGroupsV3, type ArticleReaderOutputItemV3 } from "./ArticleReaderObservationV3";
 
 export type ArticleReaderExperimentV3Props = Readonly<{
   block: StudioArticleExperimentBlockV2;
@@ -637,14 +635,16 @@ function ArticleReaderLiveOwnerV3({
             <div className="article-reader-inflow-header">
               <p className="reader-experiment-title min-w-0 flex-1">{title}</p>
               {!forceInline && (
-                <SimulationIconButtonV3
-                  label={t(narrow ? "articleReader.openMobile" : "articleReader.openDetails")}
+                <button type="button" className="article-reader-open-link"
+                  aria-label={`${title}：${t("articleReader.openDetails")}`}
+                  title={t(narrow ? "articleReader.openMobile" : "articleReader.openBeside")}
                   onClick={() => onExpand("peek")}
                   data-reader-return-focus
                   data-reader-open-details
                 >
-                  {narrow ? <Maximize2 className="h-4 w-4" aria-hidden="true" /> : <PanelRightOpen className="h-4 w-4" aria-hidden="true" />}
-                </SimulationIconButtonV3>
+                  {t("articleReader.openDetails")}
+                  <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
               )}
             </div>
           }
@@ -731,13 +731,16 @@ function ArticleReaderPeekAnchorV3({ active = false, title, onOpen }: Readonly<{
   const { t } = useTranslation();
   const narrow = useReaderNarrowScreenV3();
   return <button type="button" onClick={onOpen}
-    className="article-reader-peek-anchor flex w-full items-center gap-3 rounded-xl border border-wb-line px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wb-accent"
+    className="article-reader-peek-anchor flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wb-accent"
     data-reader-peek-active={active} data-reader-return-focus
     aria-expanded={active} aria-controls={active ? "article-reader-experiment-companion-v3" : undefined}
-    aria-label={t(active ? "articleReader.returnInline" : narrow ? "articleReader.openMobile" : "articleReader.openDetails")}>
+    title={t(active ? "articleReader.returnInline" : narrow ? "articleReader.openMobile" : "articleReader.openBeside")}
+    aria-label={`${title}：${t(active ? "common.close" : "articleReader.openDetails")}`}>
     <span className="reader-experiment-title min-w-0 flex-1">{title}</span>
-    {active && <span className="shrink-0 text-xs text-wb-subtle">{t("articleReader.displayedInPanel")}</span>}
-    {active ? <X className="h-4 w-4 shrink-0" aria-hidden="true" /> : narrow ? <Maximize2 className="h-4 w-4 shrink-0" aria-hidden="true" /> : <PanelRightOpen className="h-4 w-4 shrink-0" aria-hidden="true" />}
+    <span className="article-reader-open-link" aria-hidden="true">
+      {t(active ? "common.close" : "articleReader.openDetails")}
+      {active ? <X className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+    </span>
   </button>;
 }
 
@@ -788,9 +791,8 @@ function ArticleReaderExperimentToolbarV3({ runtime, contract, snapshot }: Reado
  * one or two graphs at a time), the observation (outputs kept beside the
  * graph), then the author's primary controls (inline) or sealed controllers
  * by pane in an opened form. Opened outputs expand in one measurement area. `layout` changes density and scroll ownership;
- * the reader's selections live in the placement memory and follow the
- * opened forms, while the Article column always reads the author's first
- * screen.
+ * view memory follows opened forms; the Article column always reads the
+ * author's first screen.
  */
 export function ArticleReaderEmbedSurfaceV3({
   analysisRecompute,
@@ -820,8 +822,6 @@ export function ArticleReaderEmbedSurfaceV3({
   // The selection is a pane, not a view index: pairs split and rejoin with width.
   const [activePaneId, setActivePaneIdState] = React.useState<string | null>(memory.activePaneId);
   const setActivePaneId = (paneId: string) => { memory.activePaneId = paneId; setActivePaneIdState(paneId); };
-  const [observedSelection, setObservedSelectionState] = React.useState<readonly string[] | null>(memory.observedOutputKeys);
-  const setObservedSelection = (keys: readonly string[] | null) => { memory.observedOutputKeys = keys; setObservedSelectionState(keys); };
   const [outputView, setOutputViewState] = React.useState<ArticleReaderOutputViewV3 | null>(memory.outputView);
   const setOutputView = (view: ArticleReaderOutputViewV3 | null) => { memory.outputView = view; setOutputViewState(view); };
   const [spaceForAllControls, setSpaceForAllControls] = React.useState(false);
@@ -870,9 +870,8 @@ export function ArticleReaderEmbedSurfaceV3({
   const scenarioLabels = Object.fromEntries(snapshot.content.scenarios.map(scenario => [scenario.scenarioId, scenario.label]));
   const inline = layout === "inline";
   const authoredKeys = articleBriefingPrimaryOutputKeysV3(briefing);
-  // The Article column is the author's first screen. Opened forms read the
-  // reader's selection, which an explicit empty choice keeps empty.
-  const observedKeys = inline ? authoredKeys : articleReaderObservedOutputKeysV3(briefing, observedSelection);
+  // The author defines the primary set; opened forms may reveal the rest.
+  const observedKeys = authoredKeys;
   const primaryControlKeys = new Set(articleBriefingPrimaryControlKeysV3(briefing));
   const primaryControls = briefing.controls.filter((control) => primaryControlKeys.has(articleBriefingControlKeyV3(control)));
   const controlPaneIds = [...new Set([...briefing.controls].sort(compareOrderV3).map(({ sourcePaneId }) => sourcePaneId))];
@@ -954,8 +953,8 @@ export function ArticleReaderEmbedSurfaceV3({
       </div>
     );
   }
-  // A single measurement area expands in place; selecting what to keep is
-  // temporary. Controllers stay available throughout reading and selection.
+  // A single measurement area reveals the author-sealed values in place.
+  // Controllers stay available while readers expand or fold the values.
   const controlsNode = briefing.controls.length > 0 ? (
     <ArticleReaderControlsV3
       {...controlProps}
@@ -972,16 +971,15 @@ export function ArticleReaderEmbedSurfaceV3({
     unit: contract.outputCatalog.find(candidate => candidate.outputId === output.outputId)?.unit ?? "",
     value: null,
   })), {
-    multiScenario: briefing.scenarioScope.visibleScenarioIds.length > 1,
+    multiScenario: articleReaderNeedsScenarioLabelsV3(briefing),
     paneLabel: paneId => snapshot.content.surface.outputPanes.find(pane => pane.paneId === paneId)?.label?.trim() || undefined,
     scenarioLabel: scenarioId => scenarioLabels[scenarioId] ?? scenarioId,
     scenarioColor,
     genericTitles: [t("articleReader.outputs"), t("workbench.live.mobilePaneAreas.output")],
   });
   const outputsNode = <ArticleReaderOutputDisclosureV3
-    groups={outputGroups} layout={layout} selectedKeys={observedKeys} primaryKeys={authoredKeys}
-    hasReaderSelection={observedSelection !== null} view={outputView}
-    onViewChange={setOutputView} onSelectionChange={setObservedSelection}
+    groups={outputGroups} layout={layout} primaryKeys={authoredKeys} view={outputView}
+    onViewChange={setOutputView}
     fullControlsHeight={briefing.controls.length * 64 + controlPaneIds.length * 40}
     onSpaceForAllControls={setSpaceForAllControls}
     renderOutputs={keys => <ArticleReaderObservationV3 briefing={briefing} contract={contract} runtime={runtime}
@@ -1010,7 +1008,7 @@ export function ArticleReaderEmbedSurfaceV3({
       status={status}
     />
   );
-  // Controls never disappear behind an output-selection task.
+  // Revealing more measurements never replaces the controllers.
   return (
     <div {...rootProps}>
       {stage}
@@ -1089,7 +1087,7 @@ export function ArticleReaderObservationV3({
   const outputs = briefing.outputs.filter((output) => observed.has(articleBriefingOutputKeyV3(output)));
   const items = useArticleReaderOutputItemsV3(outputs, contract, runtime, sampleStore);
   const groups = articleReaderObservationGroupsV3(items, {
-    multiScenario: briefing.scenarioScope.visibleScenarioIds.length > 1,
+    multiScenario: articleReaderNeedsScenarioLabelsV3(briefing),
     paneLabel: (paneId) => snapshot?.content.surface.outputPanes.find((pane) => pane.paneId === paneId)?.label?.trim() || undefined,
     scenarioLabel: (scenarioId) => scenarioLabels?.[scenarioId] ?? scenarioId,
     scenarioColor: (scenarioId) => scenarioColor?.(scenarioId) ?? "#64748b",
@@ -2071,7 +2069,7 @@ function ArticleReaderControlsV3({
   const { t } = useTranslation();
   const visibleScenarios = snapshot.content.scenarios.filter(({ scenarioId }) =>
     briefing.scenarioScope.visibleScenarioIds.includes(scenarioId));
-  const multiScenario = visibleScenarios.length > 1;
+  const multiScenario = articleReaderNeedsScenarioLabelsV3(briefing);
   const scenarioLabel = (scenarioId: string) =>
     snapshot.content.scenarios.find((scenario) => scenario.scenarioId === scenarioId)?.label ?? scenarioId;
   const selectionDisabled = runtime.state.status !== "playing" && runtime.state.status !== "paused";

@@ -813,7 +813,8 @@
       "incorrect": "もう一度考えてみましょう",
       "retry": "もう一度回答する"
     },
-    "openDetails": "横に並べて見る",
+    "openDetails": "詳しく見る",
+    "openBeside": "本文と並べて表示",
     "moreActions": "その他の操作",
     "handoffFailed": "現在の状態を引き継げませんでした。もう一度お試しください。",
     "displayedInPanel": "パネルに表示中",
@@ -831,13 +832,7 @@
     "analysisError": "測定できませんでした",
     "observation": "観察中の指標",
     "openToOperate": "開いて操作",
-    "resetObservation": "著者の選択に戻す",
-    "primaryOutputs": "主要指標",
-    "chooseOutputs": "表示する指標を変更",
-    "adjustOutputs": "表示を調整",
-    "cancelOutputSelection": "キャンセル",
-    "finishOutputSelection": "完了",
-    "selectedOutputs": "選んだ指標",
+    "foldOutputs": "折りたたむ",
     "allOutputs": "すべての指標 {{count}}"
   },
   "snapshotReader": {

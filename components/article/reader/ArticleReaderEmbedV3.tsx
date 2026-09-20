@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { WorkbenchAreaLayoutV3 } from "@/components/workbench/WorkbenchAreaLayoutV3";
 import type { ExperimentPlacementBriefingViewV2 } from "@/studio/contracts/v2/content";
 import { articleBriefingSplitViewsV3 } from "@/studio/application/authoring/StudioArticleBriefingPresentationV3";
+import { articleReaderTitleNamesScenarioV3 } from "./ArticleReaderObservationV3";
 
 /**
  * Reading layouts shared by every extent of an embedded experiment.
@@ -26,37 +27,23 @@ export type ArticleReaderEmbedLayoutV3 = "inline" | "peek" | "sheet" | "workbenc
 
 export type ArticleReaderStageViewV3 = ExperimentPlacementBriefingViewV2;
 
-/**
- * What the reader keeps while moving between opened forms and viewports: the
- * selected graph pane, the observed outputs (null until the reader changes
- * the author's observation; an explicit empty selection stays empty), the
- * output expansion, and which controller panes are collapsed (null until the reader
- * changes the initial arrangement). It is a mutable per-Placement memory, not
- * durable content. The inline form reads the author's observation and never
- * consults the reader's selection.
- */
+/** Per-placement view memory only: graph, expansion and folded controls. */
 export type ArticleReaderObservationMemoryV3 = {
   activePaneId: string | null;
-  observedOutputKeys: readonly string[] | null;
   outputView: ArticleReaderOutputViewV3 | null;
   collapsedControlPaneIds: readonly string[] | null;
 };
 
 export function createArticleReaderObservationMemoryV3(): ArticleReaderObservationMemoryV3 {
-  return { activePaneId: null, observedOutputKeys: null, outputView: null, collapsedControlPaneIds: null };
+  return { activePaneId: null, outputView: null, collapsedControlPaneIds: null };
 }
 
-/**
- * The explicit "open to operate" action starts with the selected measurements
- * to keep the controllers close. The header's open button keeps the reader's
- * chosen expansion. Observed outputs,
- * folded panes, control values and bindings are untouched.
- */
+/** Opening to operate starts with the author's primary values, keeping controls close. */
 export function openArticleReaderToOperateV3(
   memory: ArticleReaderObservationMemoryV3,
   open: () => void,
 ): void {
-  memory.outputView = "selected";
+  memory.outputView = "primary";
   open();
 }
 
@@ -287,7 +274,7 @@ export function ArticleReaderSectionsV3({
               />
             )}
             <span className="truncate">{section.title}</span>
-            {section.scenario && section.scenario.label !== section.title && (
+            {section.scenario && !articleReaderTitleNamesScenarioV3(section.title, section.scenario.label) && (
               <span className="article-reader-section-scenario">{section.scenario.label}</span>
             )}
           </>

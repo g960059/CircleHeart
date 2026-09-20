@@ -14,8 +14,8 @@ import {
  * Emphasis is item-level and Article-local. It never changes an item's
  * Scenario binding, its value, or whether it can be operated; every sealed
  * item stays reachable from the same Placement. The author's primary marks
- * are the first screen and the initial observation; a reader may re-select
- * outputs in an opened form without changing the sealed Briefing.
+ * are the first screen; opened forms reveal the remaining sealed items.
+ * Readers configure a different set only after continuing in the Workbench.
  */
 
 /** Item keys are Article-local identities; outputs include their sealed Scenario. */
@@ -146,24 +146,6 @@ export function articleBriefingOutputGroupsV3(
     groups.set(key, group);
   }
   return Object.freeze([...groups].map(([key, group]) => Object.freeze({ key, ...group, outputs: Object.freeze(group.outputs) })));
-}
-
-/**
- * Resolves a reader's ephemeral output selection against the sealed
- * Briefing: unknown keys are dropped and sealed order is restored, so a
- * selection made in one opened form reads identically in every other.
- * `null` means the reader has not changed the author's observation; an
- * explicit empty selection stays empty.
- */
-export function articleReaderObservedOutputKeysV3(
-  briefing: Pick<ExperimentPlacementBriefingV2, "outputs">,
-  readerSelection: readonly string[] | null,
-): readonly string[] {
-  if (readerSelection === null) return articleBriefingPrimaryOutputKeysV3(briefing);
-  const selected = new Set(readerSelection);
-  return Object.freeze(sortedByOrderV3(briefing.outputs)
-    .map(articleBriefingOutputKeyV3)
-    .filter((key) => selected.has(key)));
 }
 
 /**
