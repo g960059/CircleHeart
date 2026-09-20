@@ -49,4 +49,3 @@ export function articleReaderObservationGroupsV3(
 }
 
 export type ArticleReaderOutputItemV3 = ExperimentOutputPresentationItemV3 & Readonly<{ scenarioId: string; sourcePaneId: string }>;
-
