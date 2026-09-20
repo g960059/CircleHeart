@@ -1,3 +1,4 @@
+import { articleReaderObservationGroupsV3 } from "@/components/article/reader/ArticleReaderObservationV3";
 import { articleReaderPlacementAfterViewportExitV3, articleReaderPlacementInReadingAreaV3 } from "@/components/article/reader/ArticleReaderPlacementV3";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -47,7 +48,6 @@ import {
   ArticleReaderObservationV3,
   ArticleReaderOutputsV3,
   articleReaderControlBindingSignatureV3,
-  articleReaderObservationGroupsV3,
   ArticleReaderStructuralReturnGraphV3,
   articleReaderAnalysisScenarioIdsV3,
   articleReaderPeriodicPvaEnabledV3,
@@ -1885,6 +1885,8 @@ describe("Article Reader observation rendering", () => {
     expect(distinct).toContain("連動</span>TBV +1000");
     expect(render("基準", false)).not.toContain("連動");
     expect(render("弁", false, "TBV +1000")).toContain("TBV +1000");
+    expect(render("MAP", false, "A")).toContain('class="experiment-observation-scenario">A</span>');
+    expect(render("弁(A)", false, "A")).not.toContain('class="experiment-observation-scenario"');
   });
 
   it("edits one of two sealed references of the same pane item without touching its sibling", () => {
@@ -1912,6 +1914,32 @@ describe("Article Reader observation rendering", () => {
     expect(removed!.outputs).toEqual([a]);
     expect(moved!.outputs.map((output) => `${output.scenarioId}:${output.order}`)).toEqual(["scenario/b:0", "scenario/a:1"]);
     for (const change of changes) expect(() => validateExperimentPlacementBriefingV2(change, snapshot.content)).not.toThrow();
+  });
+
+  it("can add the current pane Scenario alongside a retained sealed reference after re-capture", () => {
+    const original = observationSnapshotV3();
+    const briefing = defaultArticleBriefingV3(original, "scenario/a", "Observation");
+    const snapshot = { ...original, content: { ...original.content, surface: { ...original.content.surface,
+      outputPanes: original.content.surface.outputPanes.map((pane) => pane.paneId === "pane/a"
+        ? { ...pane, binding: { mode: "fixed" as const, scenarioId: "scenario/b" } } : pane),
+    } } };
+    const html = renderToStaticMarkup(<ArticleBriefingEditorV3 snapshot={snapshot} briefing={briefing} onChange={() => undefined} />);
+    const matches: readonly string[] = html.match(/<label\b[^>]*>[\s\S]*?<\/label>/g) ?? [];
+    const labels = matches.filter((label) => label.includes(">A1</span>"));
+    expect(labels).toHaveLength(2);
+    expect(labels.find((label) => label.includes("基準"))).toContain('checked=""');
+    expect(labels.find((label) => label.includes("TBV +1000"))).not.toContain('checked=""');
+  });
+
+  it("retains derived primary outputs when reordering a Briefing sealed without emphasis", () => {
+    const briefing = legacyBriefingV3();
+    const originalKeys = articleBriefingPrimaryOutputKeysV3(briefing);
+    const changes: ExperimentPlacementBriefingV2[] = [];
+    articleBriefingEditorReferenceHandlersV3(briefing, (next) => changes.push(next)).move(briefing.outputs[3]!, -1);
+    expect(changes).toHaveLength(1);
+    expect(articleBriefingPrimaryOutputKeysV3(changes[0]!).slice().sort()).toEqual([...originalKeys].sort());
+    expect(changes[0]!.outputs[2]!.outputId).toBe(briefing.outputs[3]!.outputId);
+    expect(changes[0]!.outputs.every((output) => output.emphasis !== undefined)).toBe(true);
   });
 
   it("names a shared control target once and per-row targets only when bindings differ", () => {

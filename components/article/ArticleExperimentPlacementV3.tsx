@@ -48,7 +48,7 @@ import {
 } from
   "@/components/workbench/presentation/WorkbenchGraphColorV3";
 import { ExperimentObservationV3 } from "@/components/workbench/ExperimentPanePresentationV3";
-import { articleReaderObservationGroupsV3 } from "@/components/article/reader/ArticleReaderExperimentV3";
+import { articleReaderObservationGroupsV3 } from "@/components/article/reader/ArticleReaderObservationV3";
 import {
   ARTICLE_PRIMARY_CONTROL_LIMIT_V3,
   ARTICLE_PRIMARY_OUTPUT_LIMIT_V3,
@@ -790,14 +790,15 @@ export function ArticleBriefingEditorV3({
           const selectedReferences = outputsBySourceKey.get(sourceKey) ?? [];
           const scenarioLabelOf = (scenarioId: string) => snapshot.content.scenarios.find((scenario) =>
             scenario.scenarioId === scenarioId)?.label ?? scenarioId;
-          if (selectedReferences.length === 0) {
-            const scenarioId = materializeSurfaceOutputPaneBindingV3(
-              source.pane.binding,
-              captureScenarioId ?? briefing.scenarioScope.initialFocusScenarioId,
-              briefing.scenarioScope.visibleScenarioIds,
-            );
-            return [<OutputBriefingRowV3
-              key={sourceKey}
+          const scenarioId = materializeSurfaceOutputPaneBindingV3(
+            source.pane.binding,
+            captureScenarioId !== undefined && snapshot.content.scenarios.some((scenario) => scenario.scenarioId === captureScenarioId)
+              ? captureScenarioId : briefing.scenarioScope.initialFocusScenarioId,
+            briefing.scenarioScope.visibleScenarioIds,
+          );
+          const availableRow = selectedReferences.some((reference) => reference.scenarioId === scenarioId)
+            ? [] : [<OutputBriefingRowV3
+              key={`${sourceKey}:${scenarioId}`}
               label={source.item.label}
               scenarioLabel={scenarioLabelOf(scenarioId)}
               selected={undefined}
@@ -809,9 +810,8 @@ export function ArticleBriefingEditorV3({
               onChange={() => undefined}
               onMove={() => undefined}
             />];
-          }
           // Every sealed reference of this pane item is its own row.
-          return selectedReferences.map((selected) => {
+          return [...selectedReferences.map((selected) => {
             const referenceKey = articleBriefingOutputKeyV3(selected);
             return <OutputBriefingRowV3
               key={referenceKey}
@@ -826,7 +826,7 @@ export function ArticleBriefingEditorV3({
               onChange={(next) => references.relabel(selected, next.label)}
               onMove={(direction) => references.move(selected, direction)}
             />;
-          });
+          }), ...availableRow];
         })}
       </BriefingSectionV3>
 
@@ -925,7 +925,7 @@ export function articleBriefingEditorReferenceHandlersV3(
       });
     },
     move(reference: ExperimentPlacementBriefingOutputV2, direction: -1 | 1) {
-      update({ ...briefing, outputs: moveBriefingOutputV3(briefing.outputs, reference, direction) });
+      update({ ...briefing, outputs: sealOutputs(moveBriefingOutputV3(briefing.outputs, reference, direction)) });
     },
   };
 }

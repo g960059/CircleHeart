@@ -270,7 +270,11 @@ export function ExperimentObservationV3({
                       // The Scenario name is not repeated when the pane title already carries
                       // it; the binding mode is shown regardless, so a following pane never
                       // reads as fixed.
-                      const scenarioLabel = group.scenario !== undefined && !(group.title ?? "").includes(group.scenario.label)
+                      const title = group.title?.trim() ?? "";
+                      const name = group.scenario?.label.trim();
+                      const namesScenario = name !== undefined && (title === name
+                        || title.includes(`（${name}）`) || title.includes(`(${name})`));
+                      const scenarioLabel = group.scenario !== undefined && !namesScenario
                         ? group.scenario.label : undefined;
                       const following = group.following === true && followingLabel !== undefined ? followingLabel : undefined;
                       if (scenarioLabel === undefined && following === undefined) return null;
