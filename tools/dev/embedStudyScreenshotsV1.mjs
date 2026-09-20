@@ -82,8 +82,7 @@ async function loop(page, scope) {
     viewport, stage, stageVisible: inside(stage), observation, observationVisible: inside(observation),
     observedCount: observedTiles.length, observedTiles,
     slidersVisible: sliderBoxes.filter(inside).length, sliderCount: sliderBoxes.length,
-    deckTabs: await scope.locator("[data-reader-deck-tab]").allTextContents(),
-    deckTask: await scope.locator("[data-reader-deck]").getAttribute("data-reader-deck-task").catch(() => null),
+    outputView: await scope.locator("[data-reader-output-view]").getAttribute("data-reader-output-view").catch(() => null),
     controlPanes: await scope.locator("[data-reader-sections='controls'] .article-reader-section").evaluateAll((nodes) =>
       nodes.map((node) => `${node.getAttribute("data-reader-section")}:${node.getAttribute("data-reader-section-collapsed")}`)),
     observationScrollable: await scope.locator("[data-reader-observation]").evaluate((el) => el.scrollHeight > el.clientHeight + 1).catch(() => false),
@@ -104,15 +103,17 @@ async function moveFirstSlider(page, scope, from = 0.27, to = 0.45) {
   }
   return { sliderValue: await slider.inputValue(), afterMs: null };
 }
-/** Opened forms: the deck's outputs task lists every sealed output as an observation toggle. */
-async function showDeckTask(scope, task) {
-  const tab = scope.locator(`[data-reader-deck-tab='${task}']`);
-  if (await tab.count() && (await tab.getAttribute("aria-selected")) !== "true") await tab.click();
+/** Configuration is reached from the expanded measurement area. */
+async function showOutputEditor(scope) {
+  const choose = scope.locator("[data-reader-output-choose]");
+  if (!(await choose.count())) await scope.locator("[data-reader-output-expand]").click();
+  await choose.click();
 }
 async function toggleOutput(scope, label) {
-  await showDeckTask(scope, "outputs");
-  const tile = scope.locator("[data-reader-sections='outputs'] .workbench-output-item").filter({ has: scope.page().locator(`.workbench-output-label:text-is("${label}")`) }).first();
-  await tile.locator(".workbench-output-toggle").click();
+  await showOutputEditor(scope);
+  const checkbox = scope.getByRole("checkbox", { name: label, exact: true }).first();
+  await checkbox.setChecked(!(await checkbox.isChecked()));
+  await scope.getByRole("button", { name: "完了", exact: true }).click();
 }
 
 async function desktop(theme) {
@@ -164,7 +165,7 @@ async function desktop(theme) {
   const full = await loop(page, panel);
   record("desktop-dark-full", { ...full, overflowSources: await overflowSources(panel),
     selectionKept: JSON.stringify(full.observedTiles.map((t) => t.label)) === JSON.stringify(reselected.observedTiles.map((t) => t.label)),
-    sliderValue: await panel.getByRole("slider").first().inputValue(), outputToggles: await panel.locator("[data-reader-sections='outputs'] .workbench-output-toggle").count() });
+    sliderValue: await panel.getByRole("slider").first().inputValue(), outputEditorVisible: await panel.locator(".article-reader-output-editor").count() });
   await page.setViewportSize({ width: 1100, height: 700 });
   await page.waitForTimeout(1200);
   await page.screenshot({ path: join(outputDir, "desktop-dark-full-1100x700.png") });
@@ -175,8 +176,8 @@ async function desktop(theme) {
   const back = await loop(page, panel);
   record("desktop-dark-back-to-peek", { selectionKept: JSON.stringify(back.observedTiles.map((t) => t.label)) === JSON.stringify(reselected.observedTiles.map((t) => t.label)),
     activePane: await panel.locator(".article-reader-stage").getAttribute("data-reader-stage-active-pane"), sliderValue: await panel.getByRole("slider").first().inputValue(),
-    deckTask: back.deckTask });
-  await showDeckTask(panel, "outputs");
+    outputView: back.outputView });
+  await showOutputEditor(panel);
   await panel.locator("[data-reader-observation-reset]").click();
   await page.waitForTimeout(500);
   record("desktop-dark-reset", { observedTiles: (await loop(page, panel)).observedTiles.map((t) => t.label) });
@@ -239,18 +240,16 @@ async function phone(name, viewport, { landscape = false } = {}) {
   await toggleOutput(panel, "LVEF");
   await page.waitForTimeout(800);
   await page.screenshot({ path: join(outputDir, `${name}-sheet-outputs.png`) });
-  record(`${name}-sheet-outputs`, { ...(await loop(page, panel)), outputToggles: await panel.locator("[data-reader-sections='outputs'] .workbench-output-toggle").count(),
+  record(`${name}-sheet-outputs`, { ...(await loop(page, panel)), outputEditorVisible: await panel.locator(".article-reader-output-editor").count(),
     reset: await panel.locator("[data-reader-observation-reset]").count() });
   // The loop after a control change: graph, bounded observation, analysis strip
-  // and the current control on one screen, with the controls task showing.
-  await showDeckTask(panel, "controls");
+  // and the current control on one screen, with controllers remaining available.
   await panel.locator(".article-reader-deck-panel").evaluate((deck) => deck.scrollTo(0, 0));
   await page.waitForTimeout(500);
   await page.screenshot({ path: join(outputDir, `${name}-loop.png`) });
   record(`${name}-loop`, { ...(await loop(page, panel)), status: await box(panel.locator("[data-reader-analysis-state]").first()) });
   // A long reader selection stays bounded: the strip scrolls inside its bound and never covers the controls.
   for (const label of ["LVEDP", "AV 拍出量/分", "平均AoP", "AoP max", "CVP", "mLAP"]) await toggleOutput(panel, label);
-  await showDeckTask(panel, "controls");
   await panel.locator(".article-reader-deck-panel").evaluate((deck) => deck.scrollTo(0, 0));
   await page.waitForTimeout(700);
   await page.screenshot({ path: join(outputDir, `${name}-loop-long.png`) });
@@ -271,7 +270,7 @@ async function phone(name, viewport, { landscape = false } = {}) {
   await panel.waitFor();
   await page.waitForTimeout(1200);
   const reopened = await loop(page, panel);
-  record(`${name}-sheet-reopened`, { observedTiles: reopened.observedTiles.map((t) => t.label), deckTask: reopened.deckTask,
+  record(`${name}-sheet-reopened`, { observedTiles: reopened.observedTiles.map((t) => t.label), outputView: reopened.outputView,
     selectionKept: JSON.stringify(reopened.observedTiles.map((t) => t.label)) === JSON.stringify(long.observedTiles.map((t) => t.label)) });
   await context.close();
   return errors;

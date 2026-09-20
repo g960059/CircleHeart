@@ -1,3 +1,4 @@
+import { articleReaderShowAllOutputsV3 } from "@/components/article/reader/ArticleReaderOutputDisclosureV3";
 import { articleReaderObservationGroupsV3 } from "@/components/article/reader/ArticleReaderObservationV3";
 import { articleReaderPlacementAfterViewportExitV3, articleReaderPlacementInReadingAreaV3 } from "@/components/article/reader/ArticleReaderPlacementV3";
 import React from "react";
@@ -46,7 +47,6 @@ import {
   ArticleReaderExperimentV3,
   ArticleReaderControlV3,
   ArticleReaderObservationV3,
-  ArticleReaderOutputsV3,
   articleReaderControlBindingSignatureV3,
   ArticleReaderStructuralReturnGraphV3,
   articleReaderAnalysisScenarioIdsV3,
@@ -1082,7 +1082,7 @@ describe("Article Reader V3 experiment anchor", () => {
     const contract: ModelContractV2 = { ...contractV3(), outputCatalog: ids.map(outputId => ({
       outputId, kind: "metric", unit: "1", shape: "scalar", scope: "instant", dependencies: [], significantDigits: 3,
     })) };
-    const html = renderToStaticMarkup(<ArticleReaderOutputsV3 briefing={briefing} contract={contract} sampleStore={store} />);
+    const html = renderToStaticMarkup(<ArticleReaderObservationV3 briefing={briefing} contract={contract} sampleStore={store} />);
     expect(html).toContain("56<span");
     expect(html).toContain("25.0");
     expect(html.match(/%<\/span>/g)).toHaveLength(2);
@@ -1105,13 +1105,13 @@ describe("Article Reader V3 experiment anchor", () => {
     const contract: ModelContractV2 = { ...contractV3(), outputCatalog: [{
       outputId, kind: "metric", unit: "1", shape: "scalar", scope: "instant", dependencies: [], significantDigits: 3,
     }] };
-    const html = renderToStaticMarkup(<ArticleReaderOutputsV3 briefing={briefing} contract={contract} sampleStore={store}
+    const html = renderToStaticMarkup(<ArticleReaderObservationV3 briefing={briefing} contract={contract} sampleStore={store}
       scenarioLabels={{ baseline: "基準条件", higher: "張力増加" }} />);
     // Each section is one source pane read for its sealed Scenario; the
     // Scenario name is the section title when the pane label is unavailable.
-    expect(html).toMatch(/<h3[^>]*>.*基準条件<\/span><\/h3>/);
-    expect(html).toMatch(/<h3[^>]*>.*張力増加<\/span><\/h3>/);
-    expect(html).toContain('data-reader-section-count="2"');
+    expect(html).toContain('class="experiment-observation-scenario">基準条件</span>');
+    expect(html).toContain('class="experiment-observation-scenario">張力増加</span>');
+    expect(html.match(/data-observation-group=/g)).toHaveLength(2);
     expect(html).toContain("55<span");
     expect(html).toContain("65<span");
   });
@@ -1144,7 +1144,7 @@ describe("Article Reader V3 experiment anchor", () => {
       ],
     };
     const html = renderToStaticMarkup(
-      <ArticleReaderOutputsV3
+      <ArticleReaderObservationV3
         briefing={briefing}
         contract={contract}
         sampleStore={store}
@@ -1185,7 +1185,7 @@ describe("Article Reader V3 experiment anchor", () => {
       ],
     };
     const html = renderToStaticMarkup(
-      <ArticleReaderOutputsV3
+      <ArticleReaderObservationV3
         briefing={briefing}
         contract={contract}
         sampleStore={store}
@@ -1211,7 +1211,7 @@ describe("Article Reader V3 experiment anchor", () => {
     const briefing = { ...briefingV3(), outputs: Object.values(MAIN_WIRE_PERIODIC_PVA_OUTPUT_IDS_V1).map((outputId, order) => ({
       sourcePaneId: "pane/energetics", outputId, scenarioId: analysis.scenarioId, label: outputId, order,
     })) };
-    const render = () => renderToStaticMarkup(<ArticleReaderOutputsV3 briefing={briefing} contract={contractV3()} runtime={runtime} />);
+    const render = () => renderToStaticMarkup(<ArticleReaderObservationV3 briefing={briefing} contract={contractV3()} runtime={runtime} />);
     render();
     // Several energetics outputs consume one immutable measurement, not one
     // expensive fit per output or per new exact presentation frame.
@@ -1549,10 +1549,11 @@ describe("Article Reader V3 sealed-state analysis policy", () => {
     const contract: ModelContractV2 = { ...contractV3(), outputCatalog: [{
       outputId, kind: "metric", unit: "mL", shape: "scalar", scope: "instant", dependencies: [], significantDigits: 3,
     }] };
-    const html = renderToStaticMarkup(<ArticleReaderOutputsV3 briefing={briefing} contract={contract} sampleStore={store}
+    const html = renderToStaticMarkup(<ArticleReaderObservationV3 briefing={briefing} contract={contract} sampleStore={store}
       snapshot={snapshot} scenarioLabels={{ "scenario/baseline": "Baseline", "scenario/comparison": "Comparison" }} />);
-    expect(html).toContain('data-reader-section-count="2"');
-    expect(html).toMatch(/<h3[^>]*>.*弁関連<\/span><span class="article-reader-section-scenario">Baseline<\/span><\/h3>/);
+    expect(html.match(/data-observation-group=/g)).toHaveLength(2);
+    expect(html).toContain('class="experiment-observation-title">弁関連</span>');
+    expect(html).toContain('class="experiment-observation-scenario">Baseline</span>');
     expect(html).toContain("弁関連（比較）");
     expect(html).toContain("70<span");
     expect(html).toContain("90<span");
@@ -1744,26 +1745,21 @@ describe("Article Reader observation rendering", () => {
     expect(html).not.toContain("aria-pressed");
   });
 
-  it("offers every sealed output as a toggle grouped by source pane, pressed for the observed ones", () => {
+  it("renders every sealed output once when expanded, retaining each pane and fixed Scenario", () => {
     const briefing = legacyBriefingV3();
-    const observed = new Set([keyA(2), keyB(2), keyB(3)]);
     const html = renderToStaticMarkup(
-      <ArticleReaderOutputsV3
+      <ArticleReaderObservationV3
         briefing={briefing}
         contract={observationContractV3()}
         sampleStore={storeV3()}
         snapshot={observationSnapshotV3()}
         scenarioLabels={{ "scenario/a": "基準", "scenario/b": "TBV +1000" }}
-        selection={{ selectedItemIds: observed, onToggle: () => undefined, toggleLabel: (label, selected) => `${selected ? "-" : "+"}${label}` }}
       />,
     );
-    expect(html).toContain('data-reader-section-count="2"');
+    expect(html.match(/data-observation-group=/g)).toHaveLength(2);
     expect(html).toContain("弁");
     expect(html.match(/class="workbench-output-item/g)).toHaveLength(20);
-    expect(html.match(/aria-pressed="true"/g)).toHaveLength(3);
-    expect(html.match(/aria-pressed="false"/g)).toHaveLength(17);
-    expect(html).toContain('aria-label="-A2"');
-    expect(html).toContain('aria-label="+A1"');
+    expect(html).not.toContain("aria-pressed");
     // Each tile keeps its sealed Scenario in its identity; the reference never renames a value.
     expect(html).toContain(`data-output-id="${keyB(2)}"`);
   });
@@ -2154,67 +2150,68 @@ describe("Article Reader first screen and opened forms", () => {
     // An explicit empty selection stays empty in the opened forms.
     const empty = render("peek", sealed, { ...createArticleReaderObservationMemoryV3(), observedOutputKeys: [] });
     expect(empty).toContain('data-reader-observed-count="0"');
-    expect(empty).not.toContain("data-reader-observation");
+    expect(empty).not.toContain('data-reader-observation="true"');
   });
 
-  it("arranges an opened form as stage, observation, then a controls/outputs deck with primary panes open", () => {
+  it("keeps one output area and the controllers present without a permanent picker", () => {
     const sealed = sealedBriefing();
     const html = render("sheet", sealed);
     expect(html.indexOf("article-reader-stage")).toBeLessThan(html.indexOf("data-reader-observation"));
     expect(html.indexOf("data-reader-observation")).toBeLessThan(html.indexOf("data-reader-deck"));
-    expect(html).toContain('data-reader-deck-task="controls"');
-    expect(html).toContain('data-reader-deck-tab="controls"');
-    expect(html).toContain('data-reader-deck-tab="outputs"');
-    // Pane a holds the primary controllers and opens; pane b waits folded with its sliders unmounted.
+    expect(html).not.toContain("data-reader-deck-tab");
+    expect(html).not.toContain("aria-pressed");
     expect(html).toContain('data-reader-section="pane/controls-a" data-reader-section-collapsed="false"');
     expect(html).toContain('data-reader-section="pane/controls-b" data-reader-section-collapsed="true"');
     expect(sliders(html)).toBe(2);
-    expect(html).toContain("TBV +1000 を操作");
-    expect(html).toContain('aria-expanded="false"');
-    // No output toggles until the outputs task is chosen.
-    expect(html).not.toContain("aria-pressed");
-    const outputs = render("sheet", sealed, { ...createArticleReaderObservationMemoryV3(), deckTask: "outputs" });
-    expect(outputs).toContain('data-reader-deck-task="outputs"');
-    expect(outputs.match(/aria-pressed="true"/g)).toHaveLength(6);
-    expect(outputs.match(/aria-pressed="false"/g)).toHaveLength(14);
-    expect(outputs).not.toContain("data-reader-observation-reset");
-    const changed = render("sheet", sealed, { ...createArticleReaderObservationMemoryV3(), deckTask: "outputs", observedOutputKeys: [keyA(1)] });
-    expect(changed).toContain("data-reader-observation-reset");
-    expect(changed).toContain("観察中 1件");
+    expect(html.match(/data-output-id=/g)).toHaveLength(6);
+    const expanded = render("sheet", sealed, { ...createArticleReaderObservationMemoryV3(), outputView: "all" });
+    expect(expanded.match(/data-output-id=/g)).toHaveLength(20);
+    expect(sliders(expanded)).toBe(2);
+    expect(expanded).not.toContain("aria-pressed");
+    const changed = render("sheet", sealed, { ...createArticleReaderObservationMemoryV3(), observedOutputKeys: [keyA(1)] });
+    expect(changed).not.toContain("data-reader-observation-reset");
+    expect(changed).not.toContain("data-reader-output-choose");
+    expect(expanded).toContain("data-reader-output-choose");
   });
 
-  it("opens on the controls task from the explicit open-to-operate row, keeping the reader's observation", () => {
+  it("opens to operate with selected values and preserves the reader's observation", () => {
     const sealed = sealedBriefing();
-    const noPrimaryControls = { ...sealed, controls: withExplicitItemEmphasisV3(sealed.controls, new Set(), (control) => articleBriefingControlKeyV3(control)) };
-    // The reader left the deck on the outputs task with a changed observation, then closed.
-    const memory: ArticleReaderObservationMemoryV3 = { ...createArticleReaderObservationMemoryV3(), deckTask: "outputs", observedOutputKeys: [keyA(12)] };
-    expect(render("inline", noPrimaryControls, memory)).toContain("data-reader-open-operate");
+    const noPrimaryControls = { ...sealed, controls: withExplicitItemEmphasisV3(sealed.controls, new Set(), control => articleBriefingControlKeyV3(control)) };
+    const memory: ArticleReaderObservationMemoryV3 = { ...createArticleReaderObservationMemoryV3(), outputView: "all", observedOutputKeys: [keyA(12)] };
     let opened = 0;
     openArticleReaderToOperateV3(memory, () => { opened += 1; });
     expect(opened).toBe(1);
-    expect(memory.deckTask).toBe("controls");
+    expect(memory.outputView).toBe("selected");
     expect(memory.observedOutputKeys).toEqual([keyA(12)]);
     const reopened = render("sheet", noPrimaryControls, memory);
-    expect(reopened).toContain('data-reader-deck-task="controls"');
     expect(reopened).toContain('data-reader-observed-count="1"');
-    // Without a primary controller the first sealed pane opens, so the reader lands on sliders.
-    expect(reopened).toContain('data-reader-section="pane/controls-a" data-reader-section-collapsed="false"');
     expect(sliders(reopened)).toBe(2);
   });
 
-  it("gives the deck one tab stop and its own panel per task", () => {
+  it("shows a read-only primary-only seal once without redundant disclosure controls", () => {
     const sealed = sealedBriefing();
-    const html = render("sheet", sealed, { ...createArticleReaderObservationMemoryV3(), deckTask: "outputs" });
-    expect(html).toMatch(/data-reader-deck-tab="controls"[^>]*>|tabindex="-1"[^>]*data-reader-deck-tab="controls"/);
-    const controlsTab = html.match(/<button[^>]*data-reader-deck-tab="controls"[^>]*>/)?.[0] ?? "";
-    const outputsTab = html.match(/<button[^>]*data-reader-deck-tab="outputs"[^>]*>/)?.[0] ?? "";
-    expect(controlsTab).toContain('tabindex="-1"');
-    expect(controlsTab).toContain('aria-selected="false"');
-    expect(outputsTab).toContain('tabindex="0"');
-    expect(outputsTab).toContain('aria-selected="true"');
-    expect(html).toContain('data-reader-deck-panel="outputs"');
-    expect(html).not.toContain('data-reader-deck-panel="controls"');
-    expect(render("sheet", sealed)).toContain('data-reader-deck-panel="controls"');
+    const primary = new Set(articleBriefingPrimaryOutputKeysV3(sealed));
+    const readOnly = { ...sealed, controls: [], outputs: sealed.outputs.filter(item => primary.has(articleBriefingOutputKeyV3(item))) };
+    for (const layout of ["peek", "sheet", "workbench"] as const) {
+      const html = render(layout, readOnly);
+      expect(html.match(/data-output-id=/g)).toHaveLength(6);
+      expect(html).not.toContain("data-reader-deck");
+      expect(html).not.toContain("data-reader-output-choose");
+      expect(html).not.toContain("data-reader-output-expand");
+      expect(html).not.toContain('type="checkbox"');
+    }
+  });
+
+  it("uses space only for defaults; reader selections and explicit expansions survive extent changes", () => {
+    expect(articleReaderShowAllOutputsV3("peek", null, false, true)).toBe(true);
+    expect(articleReaderShowAllOutputsV3("peek", null, false, false)).toBe(false);
+    expect(articleReaderShowAllOutputsV3("sheet", null, false, true)).toBe(false);
+    expect(articleReaderShowAllOutputsV3("workbench", null, false, false)).toBe(true);
+    for (const layout of ["peek", "sheet", "workbench"] as const) {
+      expect(articleReaderShowAllOutputsV3(layout, null, true, true)).toBe(false);
+      expect(articleReaderShowAllOutputsV3(layout, "selected", false, true)).toBe(false);
+      expect(articleReaderShowAllOutputsV3(layout, "all", true, false)).toBe(true);
+    }
   });
 
   it("previews the open-to-operate row for authors when controllers are sealed without a primary mark", () => {
@@ -2232,28 +2229,24 @@ describe("Article Reader first screen and opened forms", () => {
     expect(noControls).not.toContain("data-briefing-phone-open-operate");
   });
 
-  it("keeps the deck task and folded panes the reader chose, and skips the switch when only one task exists", () => {
+  it("preserves folded controls while outputs expand in place", () => {
     const sealed = sealedBriefing();
-    const memory = { ...createArticleReaderObservationMemoryV3(), collapsedControlPaneIds: ["pane/controls-a"] };
+    const memory: ArticleReaderObservationMemoryV3 = { ...createArticleReaderObservationMemoryV3(), outputView: "all", collapsedControlPaneIds: ["pane/controls-a"] };
     const html = render("peek", sealed, memory);
     expect(html).toContain('data-reader-section="pane/controls-a" data-reader-section-collapsed="true"');
     expect(html).toContain('data-reader-section="pane/controls-b" data-reader-section-collapsed="false"');
     expect(sliders(html)).toBe(1);
-    const readOnly = render("peek", { ...sealed, controls: [] });
-    expect(readOnly).toContain('data-reader-deck-task="outputs"');
-    expect(readOnly).not.toContain('role="tablist" aria-label="操作と指標"');
-    expect(readOnly.match(/aria-pressed=/g)).toHaveLength(20);
+    expect(html.match(/data-output-id=/g)).toHaveLength(20);
+    expect(html).not.toContain('type="checkbox"');
   });
 
-  it("keeps the Workbench arrangement when maximized: observation and every output below, every controller pane beside", () => {
-    const html = render("workbench", sealedBriefing(), { ...createArticleReaderObservationMemoryV3(), observedOutputKeys: [keyB(4)] });
+  it("uses the maximized output area for all sealed values without a second selected strip", () => {
+    const html = render("workbench", sealedBriefing());
     const outputsArea = html.slice(html.indexOf("article-reader-workbench-outputs"), html.indexOf("article-reader-workbench-controls"));
-    expect(outputsArea).toContain("data-reader-observation");
-    expect(outputsArea).toContain("data-reader-observation-reset");
-    expect(outputsArea.match(/aria-pressed=/g)).toHaveLength(20);
-    const controlsArea = html.slice(html.indexOf("article-reader-workbench-controls"));
-    expect(controlsArea).toContain('data-reader-section="pane/controls-a" data-reader-section-collapsed="false"');
-    expect(controlsArea).toContain('data-reader-section="pane/controls-b" data-reader-section-collapsed="true"');
+    expect(outputsArea.match(/data-output-id=/g)).toHaveLength(20);
+    expect(outputsArea).not.toContain("aria-pressed");
+    expect(sliders(html)).toBe(3);
     expect(html).not.toContain("data-reader-deck-tab");
   });
+
 });

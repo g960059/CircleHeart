@@ -1,4 +1,5 @@
 import React from "react";
+import type { ArticleReaderOutputViewV3 } from "./ArticleReaderOutputDisclosureV3";
 import { ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -12,7 +13,7 @@ import { articleBriefingSplitViewsV3 } from "@/studio/application/authoring/Stud
  * `inline`     lives in the Article column: stage, the author's primary
  *              observation and primary controls, nothing else.
  * `peek`       beside the Article: stage and observation stay put while the
- *              deck (controllers by pane, every output) scrolls beneath.
+ *              controllers scroll beneath the single measurement area.
  * `sheet`      phone-width Peek/Full: the same order as Peek in one sheet.
  * `workbench`  maximized on a desktop: the Workbench area arrangement (graphs
  *              tiled top-left, outputs bottom-left, controls right).
@@ -25,13 +26,11 @@ export type ArticleReaderEmbedLayoutV3 = "inline" | "peek" | "sheet" | "workbenc
 
 export type ArticleReaderStageViewV3 = ExperimentPlacementBriefingViewV2;
 
-export type ArticleReaderDeckTaskV3 = "controls" | "outputs";
-
 /**
  * What the reader keeps while moving between opened forms and viewports: the
  * selected graph pane, the observed outputs (null until the reader changes
  * the author's observation; an explicit empty selection stays empty), the
- * deck task, and which controller panes are collapsed (null until the reader
+ * output expansion, and which controller panes are collapsed (null until the reader
  * changes the initial arrangement). It is a mutable per-Placement memory, not
  * durable content. The inline form reads the author's observation and never
  * consults the reader's selection.
@@ -39,25 +38,25 @@ export type ArticleReaderDeckTaskV3 = "controls" | "outputs";
 export type ArticleReaderObservationMemoryV3 = {
   activePaneId: string | null;
   observedOutputKeys: readonly string[] | null;
-  deckTask: ArticleReaderDeckTaskV3 | null;
+  outputView: ArticleReaderOutputViewV3 | null;
   collapsedControlPaneIds: readonly string[] | null;
 };
 
 export function createArticleReaderObservationMemoryV3(): ArticleReaderObservationMemoryV3 {
-  return { activePaneId: null, observedOutputKeys: null, deckTask: null, collapsedControlPaneIds: null };
+  return { activePaneId: null, observedOutputKeys: null, outputView: null, collapsedControlPaneIds: null };
 }
 
 /**
- * The explicit "open to operate" action asks for the controllers: it selects
- * the controls task before opening, whatever task the reader left the deck
- * on. The header's open button keeps the remembered task. Observed outputs,
+ * The explicit "open to operate" action starts with the selected measurements
+ * to keep the controllers close. The header's open button keeps the reader's
+ * chosen expansion. Observed outputs,
  * folded panes, control values and bindings are untouched.
  */
 export function openArticleReaderToOperateV3(
   memory: ArticleReaderObservationMemoryV3,
   open: () => void,
 ): void {
-  memory.deckTask = "controls";
+  memory.outputView = "selected";
   open();
 }
 
@@ -324,99 +323,6 @@ export function ArticleReaderSectionsV3({
         );
       })}
     </section>
-  );
-}
-
-/**
- * The deck beneath the observation in an opened form: one segmented switch
- * between the controllers (every sealed pane) and the outputs (every sealed
- * measurement as an observation toggle). It mirrors the phone Workbench deck,
- * so a reader who continues into the Workbench meets the same arrangement.
- * With a single task there is no switch, only that task's content.
- */
-export function ArticleReaderDeckV3({
-  task,
-  onTaskChange,
-  controls,
-  outputs,
-  actions,
-}: Readonly<{
-  task: ArticleReaderDeckTaskV3;
-  onTaskChange: (task: ArticleReaderDeckTaskV3) => void;
-  controls: React.ReactNode | null;
-  outputs: React.ReactNode | null;
-  /** Row above the outputs, e.g. return to the author's observation. */
-  actions?: React.ReactNode;
-}>) {
-  const { t } = useTranslation();
-  const id = React.useId();
-  const tabRefs = React.useRef(new Map<ArticleReaderDeckTaskV3, HTMLButtonElement>());
-  const tasks = ([
-    ["controls", controls] as const,
-    ["outputs", outputs] as const,
-  ]).filter(([, node]) => node !== null);
-  if (tasks.length === 0) return null;
-  const active = tasks.some(([candidate]) => candidate === task) ? task : tasks[0]![0];
-  const panel = tasks.find(([candidate]) => candidate === active)?.[1] ?? null;
-  const select = (next: ArticleReaderDeckTaskV3) => {
-    onTaskChange(next);
-    tabRefs.current.get(next)?.focus();
-  };
-  // One tab stop; arrows, Home and End move the selection, as on the graph tabs.
-  const moveSelection = (event: React.KeyboardEvent<HTMLButtonElement>, current: number) => {
-    const count = tasks.length;
-    let next: number | null = null;
-    if (event.key === "ArrowRight" || event.key === "ArrowDown") next = (current + 1) % count;
-    else if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = (current - 1 + count) % count;
-    else if (event.key === "Home") next = 0;
-    else if (event.key === "End") next = count - 1;
-    if (next === null) return;
-    event.preventDefault();
-    select(tasks[next]![0]);
-  };
-  return (
-    <div className="article-reader-deck" data-reader-deck data-reader-deck-task={active}>
-      {tasks.length > 1 && (
-        <div className="workbench-mobile-task-tabs article-reader-deck-tabs" role="tablist" aria-label={t("articleReader.deck")}>
-          {tasks.map(([candidate], index) => {
-            const selected = candidate === active;
-            return (
-              <button
-                key={candidate}
-                ref={(element) => {
-                  if (element === null) tabRefs.current.delete(candidate);
-                  else tabRefs.current.set(candidate, element);
-                }}
-                id={`${id}-${candidate}-tab`}
-                type="button"
-                role="tab"
-                aria-controls={`${id}-${candidate}-panel`}
-                aria-selected={selected}
-                tabIndex={selected ? 0 : -1}
-                className="workbench-mobile-task-tab"
-                onClick={() => onTaskChange(candidate)}
-                onKeyDown={(event) => moveSelection(event, index)}
-                data-reader-deck-tab={candidate}
-              >
-                {t(candidate === "controls" ? "articleReader.taskControls" : "articleReader.taskOutputs")}
-              </button>
-            );
-          })}
-        </div>
-      )}
-      {/* Each task owns its scroll container: switching tasks never carries a scroll offset across. */}
-      <div
-        key={active}
-        id={`${id}-${active}-panel`}
-        role={tasks.length > 1 ? "tabpanel" : undefined}
-        aria-labelledby={tasks.length > 1 ? `${id}-${active}-tab` : undefined}
-        className="article-reader-deck-panel"
-        data-reader-deck-panel={active}
-      >
-        {active === "outputs" && actions}
-        {panel}
-      </div>
-    </div>
   );
 }
 
