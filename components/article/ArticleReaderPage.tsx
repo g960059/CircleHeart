@@ -1,3 +1,4 @@
+import { ArticleReaderWorkerResourcesProviderV1 } from "./reader/ArticleReaderWorkerResourcesV1";
 import { readStudioPublicArticleAsyncV1 } from "@/studio/infrastructure/browser/StudioPublicArticleLoaderV1";
 import { ResourceAuthorV1 } from "@/components/site/PublicAuthorV1";
 import { ArticleCourseNavigationV1 } from "@/components/course/ArticleCourseNavigationV1";
@@ -119,13 +120,14 @@ export function ArticleReaderPage() {
   const location = useLocation();
   const { articleId } = useParams();
   return (
+    <ArticleReaderWorkerResourcesProviderV1 key={articleId ?? "missing-article"}>
     <ArticleReaderV3Resource
-      key={articleId ?? "missing-article"}
       articleId={articleId}
       hash={location.hash}
       pathname={location.pathname}
       search={location.search}
     />
+    </ArticleReaderWorkerResourcesProviderV1>
   );
 }
 

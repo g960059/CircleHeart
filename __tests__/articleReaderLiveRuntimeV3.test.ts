@@ -1,3 +1,7 @@
+import { ArticleReaderWorkerResourcesV1 } from "@/components/article/reader/ArticleReaderWorkerResourcesV1";
+import { WorkbenchBackgroundWorkerPoolV3 } from "@/components/workbench/runtime/WorkbenchBackgroundWorkerPoolV3";
+import type { StudioSimulationWorkerClientV2 } from "@/studio/workers/StudioSimulationWorkerClientV2";
+
 import { describe, expect, it, vi } from "vitest";
 import { StudioExperimentSessionHandoffStoreV3 } from "@/studio/infrastructure/browser/StudioExperimentSessionHandoffV3";
 
@@ -76,6 +80,8 @@ describe("ArticleReaderLiveRuntimeV3", () => {
     const controller = new ArticleReaderLiveRuntimeV3(snapshot, { createRuntime: harness.createRuntime });
     await controller.start();
     const editing = controller.applyControl({ controlInstanceId: "test", controlId: "afterload", scenarioIds: ["scenario/one"], value: 7 });
+    await expect(controller.applyControl({ controlInstanceId: "second", controlId: "preload", scenarioIds: ["scenario/one"], value: 9 }))
+      .rejects.toThrow("applying another control");
     const capturing = controller.captureContinuation(false);
     pauseGate.resolve();
     await editing;
@@ -487,10 +493,10 @@ describe("ArticleReaderLiveRuntimeV3", () => {
       articleReaderAnalysisKeyV3("scenario/one", "analysis/return"),
       articleReaderAnalysisKeyV3("scenario/two", "analysis/return"),
     ]);
-    expect(harness.playAll).toHaveBeenCalledTimes(2);
+    expect(harness.playAll).toHaveBeenCalledTimes(1);
   });
 
-  it("serializes analysis against controls and publishes recoverable analysis errors", async () => {
+  it("allows controls during analysis, rejects late old-input results, and keeps other Scenarios independent", async () => {
     const snapshot = snapshotV3();
     const analysisGate = deferredV3<void>();
     const harness = runtimeHarnessV3(snapshot, { analysisGate });
@@ -501,18 +507,24 @@ describe("ArticleReaderLiveRuntimeV3", () => {
 
     const analysis = controller.requestAnalysis({
       analysisId: "analysis/return",
-      scenarioIds: ["scenario/one"],
+      scenarioIds: ["scenario/one", "scenario/two"],
     });
-    await Promise.resolve();
-    expect(controller.getSnapshot().status).toBe("requesting-analysis");
+    await vi.waitFor(() => expect(harness.requestAnalysis).toHaveBeenCalledTimes(2));
+    expect(controller.getSnapshot().status).toBe("playing");
     await expect(controller.applyControl({
       controlInstanceId: "pane/control\u001fcontrol/svr",
       controlId: "control/svr",
       scenarioIds: ["scenario/one"],
       value: 44,
-    })).rejects.toThrow(/active live runtime/);
+    })).resolves.toBeUndefined();
+    expect(controller.getSnapshot().pendingAnalysisKeys).toEqual([
+      articleReaderAnalysisKeyV3("scenario/two", "analysis/return"),
+    ]);
     analysisGate.resolve(undefined);
     await analysis;
+    expect(controller.getSnapshot().analysisByKey[articleReaderAnalysisKeyV3("scenario/one", "analysis/return")]).toBeUndefined();
+    expect(controller.getSnapshot().analysisErrorByKey).toEqual({});
+    expect(controller.getSnapshot().analysisByKey[articleReaderAnalysisKeyV3("scenario/two", "analysis/return")]).toBeDefined();
 
     const failingHarness = runtimeHarnessV3(snapshot, {
       analysisError: new Error("analysis unavailable"),
@@ -530,6 +542,55 @@ describe("ArticleReaderLiveRuntimeV3", () => {
       articleReaderAnalysisKeyV3("scenario/one", "analysis/return")
     ]).toBe("analysis unavailable");
     expect(failingHarness.terminate).not.toHaveBeenCalled();
+  });
+
+  it("coalesces overlapping pane requests without blocking independent analysis types", async () => {
+    const snapshot = snapshotV3();
+    const gate = deferredV3<void>();
+    const harness = runtimeHarnessV3(snapshot, { analysisGate: gate });
+    const controller = new ArticleReaderLiveRuntimeV3(snapshot, { createRuntime: harness.createRuntime });
+    await controller.start();
+    const first = controller.requestAnalysis({ analysisId: "analysis/return", scenarioIds: ["scenario/one"] });
+    const joined = controller.requestAnalysis({ analysisId: "analysis/return", scenarioIds: ["scenario/one", "scenario/two"] });
+    const other = controller.requestAnalysis({ analysisId: "analysis/other", scenarioIds: ["scenario/one"] });
+    await vi.waitFor(() => expect(harness.requestAnalysis).toHaveBeenCalledTimes(3));
+    expect(controller.getSnapshot().pendingAnalysisKeys).toHaveLength(3);
+    gate.resolve();
+    await Promise.all([first, joined, other]);
+    expect(Object.keys(controller.getSnapshot().analysisByKey)).toHaveLength(3);
+    expect(controller.getSnapshot().pendingAnalysisKeys).toEqual([]);
+    expect(harness.resumeScenario).not.toHaveBeenCalled();
+    await controller.dispose();
+  });
+
+  it("never lets an old error clear the pending replacement analysis for a new input", async () => {
+    const snapshot = snapshotV3();
+    const oldGate = deferredV3<StudioSimulationAnalysisV2>();
+    const newGate = deferredV3<StudioSimulationAnalysisV2>();
+    const harness = runtimeHarnessV3(snapshot);
+    const controller = new ArticleReaderLiveRuntimeV3(snapshot, { createRuntime: input => {
+      const runtime = harness.createRuntime(input);
+      let requests = 0;
+      return { ...runtime, requestAnalysis: () => ++requests === 1 ? oldGate.promise : newGate.promise };
+    } });
+    await controller.start();
+    const key = articleReaderAnalysisKeyV3("scenario/one", "analysis/return");
+    const old = controller.requestAnalysis({ analysisId: "analysis/return", scenarioIds: ["scenario/one"] });
+    await vi.waitFor(() => expect(harness.pauseScenario).toHaveBeenCalledOnce());
+    await controller.applyControl({ controlInstanceId: "test", controlId: "preload", scenarioIds: ["scenario/one"], value: 42 });
+    const replacement = controller.requestAnalysis({ analysisId: "analysis/return", scenarioIds: ["scenario/one"] });
+    await vi.waitFor(() => expect(harness.pauseScenario).toHaveBeenCalledTimes(2));
+    oldGate.reject(new Error("cancelled old input"));
+    await old;
+    expect(controller.getSnapshot().pendingAnalysisKeys).toEqual([key]);
+    expect(controller.getSnapshot().analysisErrorByKey).toEqual({});
+    newGate.resolve({ modelId: snapshot.content.modelId, runtimeSessionId: "runtime/scenario/one",
+      scenarioId: "scenario/one", analysisId: "analysis/return", inputEpoch: 1,
+      sourceAcceptedRevision: 500, sourceAcceptedTimeSec: 1, payload: { status: "available" } });
+    await replacement;
+    expect(controller.getSnapshot().analysisByKey[key]!.inputEpoch).toBe(1);
+    expect(controller.getSnapshot().pendingAnalysisKeys).toEqual([]);
+    await controller.dispose();
   });
 
   it("honors a pause intent that arrives while exact analysis is in flight", async () => {
@@ -567,7 +628,7 @@ describe("ArticleReaderLiveRuntimeV3", () => {
     await Promise.resolve();
     await controller.setPresentationVisible(false);
     expect(harness.pauseAll).toHaveBeenCalled();
-    expect(controller.getSnapshot().status).toBe("requesting-analysis");
+    expect(controller.getSnapshot().status).toBe("paused");
     analysisGate.resolve();
     await pending;
     const key = articleReaderAnalysisKeyV3("scenario/one", "analysis/return");
@@ -582,6 +643,96 @@ describe("ArticleReaderLiveRuntimeV3", () => {
     await controller.setPresentationVisible(true);
     expect(controller.getSnapshot().analysisByKey[key]).toBe(measured);
     expect(harness.requestAnalysis).toHaveBeenCalledTimes(1);
+    await controller.dispose();
+  });
+
+  it("parks idle Workers and restores the edited checkpoint, waveform and measured results without another analysis", async () => {
+    const snapshot = snapshotV3();
+    const harnesses: ReturnType<typeof runtimeHarnessV3>[] = [];
+    const controller = new ArticleReaderLiveRuntimeV3(snapshot, { createRuntime: input => {
+      const harness = runtimeHarnessV3(snapshot);
+      harnesses.push(harness);
+      return harness.createRuntime(input);
+    }, structuralAnalyses: [{ analysisId: "analysis/return", historyDepth: 3 }] });
+    await controller.start();
+    await controller.requestAnalysis({ analysisId: "analysis/return", scenarioIds: ["scenario/one"] });
+    await controller.applyControl({ controlInstanceId: "test", controlId: "preload", scenarioIds: ["scenario/one"], value: 42 });
+    await controller.requestAnalysis({ analysisId: "analysis/return", scenarioIds: ["scenario/one"] });
+    const key = articleReaderAnalysisKeyV3("scenario/one", "analysis/return");
+    const measured = controller.getSnapshot().analysisByKey[key]!;
+    expect(await controller.parkIfHidden()).toBe(false);
+    await controller.setPresentationVisible(false);
+    const waveformLength = controller.sampleStore.getScenarioSnapshot("scenario/one").length;
+    expect(await controller.parkIfHidden()).toBe(true);
+    expect(harnesses[0]!.dispose).toHaveBeenCalledOnce();
+    expect((await controller.captureContinuation()).content.scenarios[0]!.capture.fixture).toMatchObject({ preload: 42 });
+    await controller.setPresentationVisible(true);
+    expect(harnesses).toHaveLength(2);
+    expect(harnesses[1]!.initializeInput?.scenarios[0]?.fixture).toMatchObject({ preload: 42 });
+    expect(harnesses[1]!.requestAnalysis).not.toHaveBeenCalled();
+    expect(controller.getSnapshot().analysisByKey[key]!.payload).toBe(measured.payload);
+    expect(controller.getSnapshot().analysisByKey[key]!.sourceAcceptedTimeSec).toBe(measured.sourceAcceptedTimeSec);
+    expect(controller.getSnapshot().analysisByKey[key]!.inputEpoch).toBe(0);
+    expect(controller.getSnapshot().changedScenarioIds).toContain("scenario/one");
+    expect(controller.sampleStore.getScenarioSnapshot("scenario/one").length).toBeGreaterThanOrEqual(waveformLength);
+    expect(controller.sampleStore.getScenarioOrbitHistorySnapshot("scenario/one")).toHaveLength(1);
+    expect(controller.presentationAnalysisEpoch(controller.getSnapshot().analysisByKey[key]!)).toBe(1);
+    await controller.applyControl({ controlInstanceId: "test", controlId: "preload", scenarioIds: ["scenario/one"], value: 43 });
+    const history = controller.getSnapshot().analysisHistoryByKey[key]!;
+    expect(history).toHaveLength(2);
+    // Worker epochs may restart at zero; earlier scientific records remain
+    // untouched, while their display epochs cannot alias the restored condition.
+    expect(history.map(analysis => controller.presentationAnalysisEpoch(analysis))).toEqual([0, 1]);
+    expect(controller.sampleStore.getScenarioOrbitHistorySnapshot("scenario/one").map(entry => entry.inputEpoch)).toEqual([0, 1]);
+    expect(controller.sampleStore.getScenarioExactOrbitSnapshot("scenario/one").at(-1)?.inputEpoch).toBe(2);
+    await controller.requestAnalysis({ analysisId: "analysis/return", scenarioIds: ["scenario/one"] });
+    await controller.setPresentationVisible(false);
+    expect(await controller.parkIfHidden()).toBe(true);
+    controller.selectScenario("scenario/two");
+    await controller.setPresentationVisible(true);
+    expect(controller.getSnapshot().activeScenarioId).toBe("scenario/two");
+    expect(controller.presentationAnalysisEpoch(controller.getSnapshot().analysisByKey[key]!)).toBe(2);
+    await controller.applyControl({ controlInstanceId: "test", controlId: "preload", scenarioIds: ["scenario/one"], value: 44 });
+    expect(controller.sampleStore.getScenarioOrbitHistorySnapshot("scenario/one").map(entry => entry.inputEpoch)).toEqual([0, 1, 2]);
+    expect(controller.getSnapshot().analysisHistoryByKey[key]!.map(analysis => controller.presentationAnalysisEpoch(analysis))).toEqual([0, 1, 2]);
+    await controller.dispose();
+  });
+
+  it("does not sacrifice running measurements for parking, and a capture failure keeps the reader usable", async () => {
+    const snapshot = snapshotV3();
+    const gate = deferredV3<void>();
+    const harness = runtimeHarnessV3(snapshot, { analysisGate: gate, captureScenarioError: new Error("capture refused") });
+    const controller = new ArticleReaderLiveRuntimeV3(snapshot, { createRuntime: harness.createRuntime });
+    await controller.start();
+    const analysis = controller.requestAnalysis({ analysisId: "analysis/return", scenarioIds: ["scenario/one"] });
+    await controller.setPresentationVisible(false);
+    expect(await controller.parkIfHidden()).toBe(false);
+    gate.resolve();
+    await analysis;
+    expect(await controller.parkIfHidden()).toBe(false);
+    await controller.setPresentationVisible(true);
+    expect(controller.getSnapshot().status).toBe("playing");
+    expect(harness.dispose).not.toHaveBeenCalled();
+    await controller.dispose();
+  });
+
+  it("waits for a pending park before restoring a placement revisited during capture", async () => {
+    const snapshot = snapshotV3();
+    const gate = deferredV3<void>();
+    const harnesses: ReturnType<typeof runtimeHarnessV3>[] = [];
+    const controller = new ArticleReaderLiveRuntimeV3(snapshot, { createRuntime: input => {
+      const harness = runtimeHarnessV3(snapshot, { captureGate: gate });
+      harnesses.push(harness); return harness.createRuntime(input);
+    } });
+    await controller.start();
+    await controller.setPresentationVisible(false);
+    const park = controller.parkIfHidden();
+    const revisit = controller.setPresentationVisible(true);
+    gate.resolve();
+    await Promise.all([park, revisit]);
+    expect(harnesses).toHaveLength(2);
+    expect(harnesses[0]!.dispose).toHaveBeenCalledOnce();
+    expect(controller.getSnapshot().status).toBe("playing");
     await controller.dispose();
   });
 
@@ -873,6 +1024,30 @@ describe("ArticleReaderLiveRuntimeV3", () => {
     });
   });
 
+  it("keeps complete beats and their clock when a restored Worker starts a new exact epoch", () => {
+    const store = new WorkbenchScenarioPresentationSampleStoreV3();
+    store.setCyclePhaseOutputId("phase");
+    const frame = (i: number, inputEpoch: number) => ({
+      ...frameV3("scenario/one", i / 500, 8, inputEpoch),
+      outputs: {
+        phase: { outputId: "phase", value: (i % 500) / 500,
+          availability: "available" as const, quality: "accepted-derived" as const },
+      },
+    });
+    appendArticleReaderFramesV3(Array.from({ length: 601 }, (_, i) => frame(i, 7)), store);
+    const cycles = store.getPressureVolumeSnapshot().completedCyclesByScenarioId["scenario/one"]!;
+    const history = store.getScenarioOrbitHistorySnapshot("scenario/one");
+    expect(cycles.length).toBeGreaterThan(0);
+    const restored = frame(601, 0);
+    appendArticleReaderFramesV3([restored], store, undefined, new Map([["scenario/one", 7]]));
+    expect(restored.inputEpoch).toBe(0);
+    expect(store.getPressureVolumeSnapshot().completedCyclesByScenarioId["scenario/one"]).toEqual(cycles);
+    expect(store.getScenarioOrbitHistorySnapshot("scenario/one")).toBe(history);
+    expect(store.getScenarioSnapshot("scenario/one").at(-1)).toMatchObject({
+      inputEpoch: 7, acceptedTimeSec: 1.202, presentationTimeSec: 1.202,
+    });
+  });
+
   it("retains only Placement-selected output histories", () => {
     const store = new WorkbenchScenarioPresentationSampleStoreV3();
     const base = frameV3("scenario/one", 1, 8);
@@ -1069,9 +1244,9 @@ function runtimeHarnessV3(
     expectedAcceptedTimeSec: number;
     sourceAlreadyPaused?: boolean;
   }>): Promise<StudioSimulationAnalysisV2> => {
+    const frame = frames.get(input.scenarioId)!;
     await gates.analysisGate?.promise;
     if (gates.analysisError !== undefined) throw gates.analysisError;
-    const frame = frames.get(input.scenarioId)!;
     return Object.freeze({
       modelId: frame.modelId,
       runtimeSessionId: frame.runtimeSessionId,
@@ -1173,12 +1348,72 @@ function runtimeHarnessV3(
 type DeferredV3<T> = Readonly<{
   promise: Promise<T>;
   resolve(value: T): void;
+  reject(error: Error): void;
 }>;
 
 function deferredV3<T>(): DeferredV3<T> {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((next, fail) => {
     resolve = next;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
+
+describe("article-wide Worker resources", () => {
+  it("aggregates live demand and ignores paused owners' playback ceilings", () => {
+    const pool = new WorkbenchBackgroundWorkerPoolV3({ warmSize: 0, maxSize: 1 });
+    const counts = vi.spyOn(pool, "setLiveScenarioCount");
+    const playback = vi.spyOn(pool, "setForegroundPlaybackState");
+    const disposed = vi.spyOn(pool, "dispose");
+    const resources = new ArticleReaderWorkerResourcesV1();
+    const first = resources.acquire(() => pool);
+    const second = resources.acquire(() => pool);
+    first.setForegroundPlaybackState({ playbackRate: 1, maximumRate: 3, calibrating: false });
+    first.setLiveScenarioCount(3);
+    second.setForegroundPlaybackState({ playbackRate: 1, maximumRate: null, calibrating: true });
+    expect(counts).toHaveBeenLastCalledWith(3);
+    expect(playback).toHaveBeenLastCalledWith({ playbackRate: 1, maximumRate: 3, calibrating: false });
+    second.setLiveScenarioCount(2);
+    expect(counts).toHaveBeenLastCalledWith(5);
+    expect(playback.mock.lastCall?.[0].calibrating).toBe(true);
+    first.release();
+    expect(counts).toHaveBeenLastCalledWith(2);
+    expect(disposed).not.toHaveBeenCalled();
+    second.release();
+    expect(disposed).toHaveBeenCalledOnce();
+  });
+
+  it("shares the actual concurrency cap and releases only the retiring owner's jobs", async () => {
+    const clients: { terminate: ReturnType<typeof vi.fn> }[] = [];
+    const create = vi.fn(() => new WorkbenchBackgroundWorkerPoolV3({ warmSize: 0, maxSize: 1 }, () => {
+      const client = { terminate: vi.fn() };
+      clients.push(client);
+      return client as unknown as StudioSimulationWorkerClientV2;
+    }, 2));
+    const resources = new ArticleReaderWorkerResourcesV1();
+    const first = resources.acquire(create);
+    const second = resources.acquire(create);
+    let finish!: () => void;
+    const gate = new Promise<void>(resolve => { finish = resolve; });
+    const active = first.run("analysis", () => gate);
+    const never = vi.fn(async () => undefined);
+    const cancelled = second.run("analysis", never);
+    const rejected = expect(cancelled).rejects.toThrow(/cancelled/);
+    await Promise.resolve();
+    expect(create).toHaveBeenCalledOnce();
+    expect(clients).toHaveLength(1);
+    second.release();
+    await rejected;
+    expect(never).not.toHaveBeenCalled();
+    expect(clients[0]!.terminate).not.toHaveBeenCalled();
+    finish();
+    await active;
+    first.release();
+    // A StrictMode replay or later article placement can acquire a fresh pool.
+    const replay = resources.acquire(create);
+    expect(create).toHaveBeenCalledTimes(2);
+    replay.release();
+  });
+});

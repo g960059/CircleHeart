@@ -278,7 +278,7 @@ export function buildArticleEmbedStudyArticleV1(snapshot: ExperimentSnapshotV2):
       paragraph("p-full-1", "全幅は同じパネルを最大幅で開いた状態で、Workbenchと同じ区画（graphを左上にタイル、左下にすべての封入指標を一度だけ、右にpaneごとのcontrol）になります。指標の展開状態は並置・全幅・スマートフォンの間で保たれ、本文内に戻ると著者の主要に戻ります。ヘッダーの「記事と並べる」で並置に戻れます。"),
       fullHeavy!,
       heading("h-auto", "4. 比較用：自動で再測定する封入"),
-      paragraph("p-auto-1", "著者が「操作のたびに自動」で封入した場合の配置です。操作のたびに対象Scenarioの測定が走り、その間はcontrolが使えません。デスクトップ向けの記事や、controlが1つだけの短い実験ではこちらが自然な場合もあります。"),
+      paragraph("p-auto-1", "著者が「操作のたびに自動」で封入した場合の配置です。操作のたびに対象Scenarioの測定が走ります。測定中も操作でき、条件を変えたScenarioの古い解析は中止されます。デスクトップ向けの記事や、controlが1つだけの短い実験ではこちらが自然な場合もあります。"),
       peekAutomatic!,
       heading("h-focus", "5. 読者が操作対象を選ぶ教材"),
       paragraph("p-focus-1", "controllerを読者のフォーカスに追従させると、同じスライダーで基準・TBV +500・TBV +1000 のどれを動かすかを読者が選びます。指標は封入時のScenarioに固定されたままなので、観察中の各項目に書かれたScenarioと、controllerの「対象」を見比べれば、どの値が動くはずかが分かります。"),

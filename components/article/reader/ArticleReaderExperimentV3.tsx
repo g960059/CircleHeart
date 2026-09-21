@@ -188,7 +188,7 @@ export function ArticleReaderExperimentV3({
   const viewportVisibilityRef = React.useRef(onViewportVisibilityChange);
   viewportVisibilityRef.current = onViewportVisibilityChange;
   // Keep this reading session and its measured analyses while the article is
-  // open. Offscreen owners pause; moving or expanding never rebuilds a model.
+  // open. Briefly offscreen owners pause; distant owners park at an exact checkpoint.
   const [started, setStarted] = React.useState(false);
   React.useEffect(() => { if (live) setStarted(true); }, [live]);
   const inlinePresentation = forceInline || articleBriefingPresentationV3(block.placement.briefing) === "inflow";
@@ -772,7 +772,7 @@ function ArticleReaderExperimentToolbarV3({ runtime, contract, snapshot }: Reado
     returnObjects: true,
   }) as string[];
   const unavailable = ["idle", "starting", "failed", "disposed"].includes(runtime.state.status);
-  const busy = ["idle", "starting", "applying-control", "requesting-analysis"].includes(runtime.state.status);
+  const busy = ["idle", "starting", "applying-control"].includes(runtime.state.status);
   return <div className="flex shrink-0 items-center gap-0.5" data-reader-toolbar>
     {busy && <span role="status" aria-label={t("articleReader.preparingSimulation")}><LoaderCircle className="h-3.5 w-3.5 animate-spin text-wb-subtle" aria-hidden="true" /></span>}
     <WorkbenchPlaybackControlV3 disabled={unavailable || busy} playing={runtime.state.status === "playing"}
@@ -1761,7 +1761,7 @@ function ArticleReaderPressureVolumeCanvasV3({
             periodicPvaHistory: articleReaderBoundedHistoryV3(runtime.state.analysisHistoryByKey[key] ?? [], historyDepth)
               .flatMap(analysis => {
                 const prior = periodicPvaFromAnalysisV3(analysis, side, runtime.periodicPvaDerivation);
-                return prior === undefined ? [] : [{ value: prior, inputEpoch: analysis.inputEpoch }];
+                return prior === undefined ? [] : [{ value: prior, inputEpoch: runtime.presentationAnalysisEpoch?.(analysis) ?? analysis.inputEpoch }];
               }),
             ...(runtime.state.analysisErrorByKey[key] === undefined
               ? {}
@@ -2251,7 +2251,6 @@ export function ArticleReaderControlV3({
     runtime.state.status === "idle" ||
     runtime.state.status === "starting" ||
     runtime.state.status === "applying-control" ||
-    runtime.state.status === "requesting-analysis" ||
     runtime.state.status === "failed" ||
     runtime.state.status === "disposed" ||
     targetIds.length === 0;

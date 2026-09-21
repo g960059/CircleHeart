@@ -1,11 +1,66 @@
 import React from "react";
 
 import {
+  incrementWorkbenchPerformanceCounterV3,
   recordWorkbenchPerformanceDurationV3,
   recordWorkbenchPerformanceEventIntervalV3,
   workbenchPerformanceDiagnosticsEnabledV3,
   workbenchPerformanceNowV3,
 } from "../runtime/WorkbenchPerformanceDiagnosticsV3";
+
+const CANVAS_OBJECT_IDS_V3 = new WeakMap<object, number>();
+let nextCanvasObjectIdV3 = 0;
+
+/** Immutable analysis objects can invalidate a visual layer without repeatedly
+ * serializing their full scientific payload on every animation frame. */
+export function workbenchCanvasObjectIdentityV3(value: object | null | undefined): number {
+  if (value == null) return 0;
+  const existing = CANVAS_OBJECT_IDS_V3.get(value);
+  if (existing !== undefined) return existing;
+  const id = ++nextCanvasObjectIdV3;
+  CANVAS_OBJECT_IDS_V3.set(value, id);
+  return id;
+}
+
+const STATIC_CANVAS_LAYERS_V3 = new WeakMap<CanvasRenderingContext2D, {
+  key: string;
+  canvas: HTMLCanvasElement;
+}>();
+
+/** One bounded, disposable bitmap per live canvas. Axes and unchanged analysis
+ * geometry are cached; live trajectories and current markers remain dynamic. */
+export function drawWorkbenchStaticCanvasLayerV3(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  identity: readonly unknown[],
+  draw: (layer: CanvasRenderingContext2D) => void,
+): void {
+  if (typeof document === "undefined" || typeof context.getTransform !== "function") {
+    draw(context);
+    return;
+  }
+  const transform = context.getTransform();
+  if (transform.b !== 0 || transform.c !== 0 || transform.e !== 0 || transform.f !== 0) {
+    draw(context);
+    return;
+  }
+  const key = JSON.stringify([width, height, transform.a, transform.d, document.fonts?.status, identity]);
+  let cached = STATIC_CANVAS_LAYERS_V3.get(context);
+  if (cached?.key !== key) {
+    const canvas = cached?.canvas ?? document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(width * transform.a));
+    canvas.height = Math.max(1, Math.round(height * transform.d));
+    const layer = canvas.getContext("2d");
+    if (!layer) { draw(context); return; }
+    layer.setTransform(transform.a, 0, 0, transform.d, 0, 0);
+    draw(layer);
+    cached = { key, canvas };
+    STATIC_CANVAS_LAYERS_V3.set(context, cached);
+    incrementWorkbenchPerformanceCounterV3("canvas.static-layer.paint");
+  } else incrementWorkbenchPerformanceCounterV3("canvas.static-layer.reuse");
+  context.drawImage(cached.canvas, 0, 0, width, height);
+}
 
 export const WORKBENCH_MAXIMUM_CANVAS_PIXEL_RATIO_V3 = 2;
 
