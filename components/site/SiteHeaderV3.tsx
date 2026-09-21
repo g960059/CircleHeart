@@ -51,6 +51,7 @@ export function SiteHeaderV3() {
   const { appTheme, setAppTheme } = useAppTheme();
   const accountSession = useSiteAccountSessionV3();
   const isHome = /^\/(ja|en)\/?$/.test(location.pathname);
+  const isArticle = /^\/(ja|en)\/articles(?:\/|$)/.test(location.pathname);
   const search = useHomeSearchV1();
 
   React.useEffect(() => {
@@ -61,7 +62,7 @@ export function SiteHeaderV3() {
 
   return (
     <header
-      className={`${isHome ? "home-site-header " : isContentManagementRouteV1(location.pathname) ? "management-site-header " : ""}site-header z-50 flex h-[62px] shrink-0 items-center gap-1 bg-wb-header/95 px-3 shadow-[inset_0_-1px_0_color-mix(in_srgb,var(--wb-border)_72%,transparent)] backdrop-blur-xl sm:gap-4 sm:px-5`}
+      className={`${isHome ? "home-site-header " : isContentManagementRouteV1(location.pathname) ? "management-site-header " : isArticle ? "article-site-header " : ""}site-header z-50 flex h-[62px] shrink-0 items-center gap-1 bg-wb-header/95 px-3 shadow-[inset_0_-1px_0_color-mix(in_srgb,var(--wb-border)_72%,transparent)] backdrop-blur-xl sm:gap-4 sm:px-5`}
       data-testid="site-header-v3"
     >
       <Link

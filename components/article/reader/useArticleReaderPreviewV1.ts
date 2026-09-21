@@ -65,7 +65,7 @@ export function articleReaderSampledPresentationV1(
   };
 }
 
-/** Keep the live subscriptions and use sealed values only while unavailable. */
+/** Keep live subscriptions; a Scenario's live frame owns all its readouts. */
 export function useArticleReaderPreviewV1(
   live: UseArticleReaderLiveRuntimeResultV3, snapshot: ExperimentSnapshotV2,
   preview: ExperimentReaderPreviewV1 | null, cyclePhaseOutputId: string | undefined,
@@ -88,9 +88,12 @@ export function useArticleReaderPreviewV1(
         ? actual : display.presentationTrace(id) ?? actual;
     },
     presentationOutput: (id, outputId) => {
+      const trace = live.presentationTrace?.(id);
       const actual = live.presentationOutput?.(id, outputId)
-        ?? live.presentationTrace?.(id)?.frame.outputs[outputId];
-      return actual?.availability === "available" ? actual : display.presentationOutput(id, outputId) ?? actual;
+        ?? trace?.frame.outputs[outputId];
+      // Once a real frame exists, an unavailable derived value stays unavailable;
+      // do not mix its old sealed value with this Scenario's current readouts.
+      return trace !== undefined || actual !== undefined ? actual : display.presentationOutput(id, outputId);
     },
   };
 }

@@ -515,8 +515,9 @@ function publicStaticSiteHeaderHtmlV1(
   const simulationLabel = siteHeaderCopy.startSimulation;
   const loginLabel = siteHeaderCopy.login;
   const isHome = /^\/(ja|en)\/?$/.test(canonical.pathname);
+  const isArticle = /^\/(ja|en)\/articles(?:\/|$)/.test(canonical.pathname);
   return [
-    `<header class="public-static-site-header${isHome ? ' home-site-header' : ''}">`,
+    `<header class="public-static-site-header${isHome ? ' home-site-header' : isArticle ? ' article-site-header' : ''}">`,
     `<a class="site-brand-link" href="/${locale}" aria-label="${homeLabel}"><span class="circleheart-wordmark" aria-hidden="true">${circleHeartWordmark}</span></a>`,
     `<span class="public-static-site-header-spacer"></span>`,
     ...(isHome ? [`<button class="home-header-search" type="button" disabled aria-label="${locale === 'ja' ? 'コンテンツを検索' : 'Search content'}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="7.5"/><path d="m16 16 5 5"/></svg><span>${locale === 'ja' ? '検索' : 'Search'}</span><kbd>⌘K</kbd></button>`] : []),

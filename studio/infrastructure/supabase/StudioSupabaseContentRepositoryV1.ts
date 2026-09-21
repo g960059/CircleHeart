@@ -230,7 +230,8 @@ export class StudioSupabaseContentRepositoryV1 {
         p_model_id: candidate.content.modelId,
         p_content: candidate.content,
         p_surface_release_id: candidate.surfaceReleaseId,
-        p_reader_preview: candidate.readerPreview ?? null,
+        // Keep the previous canonical retry key when there is no cache.
+        ...(candidate.readerPreview === undefined ? {} : { p_reader_preview: candidate.readerPreview }),
         p_source_experiment_id: input.sourceExperiment?.experimentId ?? null,
         p_expected_experiment_version:
           input.sourceExperiment?.expectedVersion ?? null,

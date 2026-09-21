@@ -176,6 +176,10 @@ describe("Opening Snapshot figure to live drawing", () => {
     const sealedTrace = opening.presentationTrace!("scenario/baseline")!;
     const startingTrace = { ...sealedTrace, frame: { ...sealedTrace.frame, runtimeSessionId: "live" } };
     expect(render({ ...live, presentationTrace: () => startingTrace }).presentationTrace?.("scenario/baseline")?.frame.runtimeSessionId).toBe("reader-preview");
+    const unavailable = { ...actual, value: null, availability: "not-evaluated-at-accepted-state" as const };
+    const waitingTrace = { ...startingTrace, frame: { ...startingTrace.frame, outputs: { pressure: unavailable } } };
+    expect(render({ ...live, presentationTrace: () => waitingTrace }).presentationOutput?.("scenario/baseline", "pressure")).toBe(unavailable);
+    expect(render({ ...live, presentationTrace: () => ({ ...startingTrace, frame: { ...startingTrace.frame, outputs: {} } }) }).presentationOutput?.("scenario/baseline", "pressure")).toBeUndefined();
     const liveAnalysis: StudioSimulationAnalysisV2 = { ...startingTrace.frame, analysisId: "ejection",
       sourceAcceptedRevision: startingTrace.frame.acceptedRevision, sourceAcceptedTimeSec: startingTrace.frame.acceptedTimeSec, payload: {} };
     const completeTrace = { ...startingTrace, analyses: [liveAnalysis] };

@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(42);
+select plan(47);
 
 insert into auth.users (
   id,
@@ -315,6 +315,22 @@ select ok(
   'Snapshot commit acknowledgement does not duplicate the display payload'
 );
 
+select ok(
+  not (select request from studio.operation_receipts where operation_id = '20000000-0000-0000-0000-000000000003') ? 'readerPreview',
+  'Snapshot retry receipt does not duplicate the optional display payload'
+);
+select matches(
+  (select request ->> 'readerPreviewSha256' from studio.operation_receipts where operation_id = '20000000-0000-0000-0000-000000000003'),
+  '^[0-9a-f]{64}$', 'Snapshot retry receipt keeps a compact preview fingerprint'
+);
+select is(
+  (select request ->> 'readerPreviewSha256' from studio.operation_receipts where operation_id = '20000000-0000-0000-0000-000000000003'),
+  encode(extensions.digest(convert_to((public.read_experiment_snapshot_v1(
+    ((select value->>'snapshotId' from rpc_state where key='snapshot'))::uuid
+  ) -> 'readerPreview')::text, 'UTF8'), 'sha256'), 'hex'),
+  'Preview receipt fingerprint is computed from the payload rather than trusting its claimed digest'
+);
+
 
 select ok(
   not (select value from rpc_state where key = 'snapshot') ? 'content',
@@ -596,6 +612,40 @@ select ok(
   ) ? 'experimentId',
   'Anonymous Save crosses the polymorphic storage-quota trigger'
 );
+
+-- Repeated optional previews must consume the existing 64 MiB budget too.
+-- Reuse content so this exercises preview storage independently of revisions.
+do $$
+declare source_id uuid;
+begin
+  select current_content_id into strict source_id from studio.experiments
+  where owner_id = '10000000-0000-0000-0000-000000000003';
+  for n in 1..22 loop
+    insert into studio.experiment_snapshots (snapshot_id, owner_id, content_id, surface_release_id, reader_preview)
+    values (gen_random_uuid(), '10000000-0000-0000-0000-000000000003', source_id, 'surface/integration-test-v1',
+      jsonb_build_object('schemaId', 'circleheart-experiment-reader-preview-v1',
+        'sourceSha256', repeat('a',64), 'previewSha256', repeat('b',64), 'payload', repeat('x',2990000)));
+  end loop;
+end;
+$$;
+
+select throws_ok($sql$
+  insert into studio.experiment_snapshots (snapshot_id, owner_id, content_id, surface_release_id, reader_preview)
+  select gen_random_uuid(), owner_id, current_content_id, 'surface/integration-test-v1',
+    jsonb_build_object('schemaId', 'circleheart-experiment-reader-preview-v1',
+      'sourceSha256', repeat('a',64), 'previewSha256', repeat('b',64), 'payload', repeat('x',2990000))
+  from studio.experiments where owner_id = '10000000-0000-0000-0000-000000000003'
+$sql$, '54000', 'Anonymous storage limit reached. Sign in to keep saving.',
+  'Incoming preview bytes cannot bypass the anonymous storage budget');
+
+select throws_ok($sql$
+  insert into studio.experiment_contents (model_id, surface_series_id, content, created_by)
+  select c.model_id, c.surface_series_id,
+    jsonb_set(c.content, '{scenarios,0,capture,fixture,quotaPadding}', to_jsonb(repeat('x',1500000))), e.owner_id
+  from studio.experiments e join studio.experiment_contents c on c.content_id = e.current_content_id
+  where e.owner_id = '10000000-0000-0000-0000-000000000003'
+$sql$, '54000', 'Anonymous storage limit reached. Sign in to keep saving.',
+  'Previously stored previews also count against later content writes');
 
 -- A publication's compared version belongs to its admitted source, not the
 -- mutable version used to authorize a later publication request.
