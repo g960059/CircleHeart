@@ -556,16 +556,18 @@ export class ArticleReaderLiveRuntimeV3 {
    * the expensive continuation to an isolated analysis Worker, so unrelated
    * and source live lanes keep animating while partial points arrive.
    */
-  requestAnalysis(input: Readonly<{
+  async requestAnalysis(input: Readonly<{
     analysisId: string;
     scenarioIds: readonly string[];
   }>): Promise<void> {
-    const runtime = this.#runtime;
     const analysisKeys = validatedArticleReaderAnalysisTargetsV3(
       this.#scenarioIds,
       input.analysisId,
       input.scenarioIds,
     );
+    if (this.#parkOperation) await this.#parkOperation;
+    if (this.#parked) await this.start();
+    const runtime = this.#runtime;
     if (
       runtime === null || this.#capturing
       || (this.#state.status !== "playing" && this.#state.status !== "paused")

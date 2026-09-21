@@ -287,7 +287,8 @@ async function workbench() {
     nodes.map((node) => ({ scenario: node.getAttribute("data-output-scenario"), label: node.querySelector(".workbench-output-label")?.textContent })));
   record("workbench-mobile-controls", { strip, overflow: await overflow(page) });
   const stripIds = () => page.locator("[data-testid='workbench-mobile-observation'] [data-output-id]").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-output-id")));
-  await page.locator('[data-workbench-output-expand]').click();
+  const expandOutputs = page.locator('[data-workbench-output-expand]');
+  if (await expandOutputs.count()) await expandOutputs.click();
   await page.getByRole("tab", { name: "出力" }).click();
   await page.screenshot({ path: join(outputDir, "workbench-mobile-outputs.png") });
   record("workbench-mobile-outputs", { readerPicker: await page.locator('.workbench-output-toggle').count(),

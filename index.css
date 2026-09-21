@@ -3444,6 +3444,14 @@ body[data-app-theme="light"] .public-static-theme-moon {
   .article-reader-embed[data-reader-layout="sheet"] .article-reader-observation { grid-column: 2; max-block-size: 45dvh; overflow-y: auto; }
   .article-reader-embed[data-reader-layout="sheet"] .article-reader-deck { grid-column: 2; min-block-size: 0; }
 }
+.workbench-output-scenario-swatch {
+  display: inline-block;
+  inline-size: 0.45rem;
+  block-size: 0.45rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+}
+
 /* One quiet update action for derived results; its word label stays visible on phones. */
 .article-reader-analysis-status {
   display: flex;

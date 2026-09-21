@@ -500,14 +500,6 @@ export class WorkbenchParallelScenarioRuntimeV3 {
         sourceAlreadyPaused?: boolean;
       }>,
   ): Promise<StudioSimulationAnalysisV2> {
-    this.#requireActive();
-    const lane = this.#requiredLane(input.scenarioId);
-    const executionPlan = input.analysisPartition === undefined
-      ? this.#resolveAnalysisExecutionPlan(input.analysisId)
-      : null;
-    const partitions = executionPlan === null
-      ? Object.freeze([input.analysisPartition])
-      : validatedAnalysisPartitionsV3(executionPlan.partitions);
     let sourcePauseLeaseOwned = false;
     try {
       if (input.sourceAlreadyPaused === true) {
@@ -517,7 +509,16 @@ export class WorkbenchParallelScenarioRuntimeV3 {
           );
         }
         sourcePauseLeaseOwned = true;
-      } else {
+      }
+      this.#requireActive();
+      const lane = this.#requiredLane(input.scenarioId);
+      const executionPlan = input.analysisPartition === undefined
+        ? this.#resolveAnalysisExecutionPlan(input.analysisId)
+        : null;
+      const partitions = executionPlan === null
+        ? Object.freeze([input.analysisPartition])
+        : validatedAnalysisPartitionsV3(executionPlan.partitions);
+      if (!sourcePauseLeaseOwned) {
         await this.pauseScenario(input.scenarioId);
         sourcePauseLeaseOwned = true;
       }

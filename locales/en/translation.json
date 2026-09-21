@@ -816,11 +816,9 @@
       "retry": "Answer again"
     },
     "open": "Open",
-    "openDetails": "Explore",
     "openBeside": "View beside the article",
     "moreActions": "More actions",
     "handoffFailed": "Could not transfer the current state. Please try again.",
-    "displayedInPanel": "Shown in panel",
     "returnInline": "Return to article",
     "openMobile": "Expand experiment",
     "restartSavedState": "Restart from saved conditions",

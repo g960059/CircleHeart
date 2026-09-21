@@ -740,6 +740,37 @@ describe("ArticleReaderLiveRuntimeV3", () => {
     await controller.dispose();
   });
 
+  it.each([false, true])("restores an explicit analysis request while parked (capture pending: %s)", async (capturePending) => {
+    const snapshot = snapshotV3();
+    const captureGate = deferredV3<void>();
+    const harnesses: ReturnType<typeof runtimeHarnessV3>[] = [];
+    const controller = new ArticleReaderLiveRuntimeV3(snapshot, { createRuntime: input => {
+      const harness = runtimeHarnessV3(snapshot, { captureGate });
+      harnesses.push(harness);
+      return harness.createRuntime(input);
+    } });
+    await controller.start();
+    await controller.applyControl({ controlInstanceId: "test", controlId: "preload", scenarioIds: ["scenario/one"], value: 42 });
+    await controller.setPresentationVisible(false);
+    const parking = controller.parkIfHidden();
+    if (!capturePending) {
+      captureGate.resolve();
+      expect(await parking).toBe(true);
+    }
+    const measured = controller.requestAnalysis({ analysisId: "analysis/return", scenarioIds: ["scenario/one"] });
+    captureGate.resolve();
+    await Promise.all([parking, measured]);
+    expect(harnesses).toHaveLength(2);
+    expect(harnesses[1]!.initializeInput?.scenarios[0]?.fixture).toMatchObject({ preload: 42 });
+    expect(harnesses[1]!.requestAnalysis).toHaveBeenCalledOnce();
+    const key = articleReaderAnalysisKeyV3("scenario/one", "analysis/return");
+    expect(controller.getSnapshot().analysisByKey[key]).toBeDefined();
+    expect(controller.getSnapshot().pendingAnalysisKeys).toEqual([]);
+    // An explicit measurement must not start playback outside the reading slot.
+    expect(controller.getSnapshot().status).toBe("paused");
+    await controller.dispose();
+  });
+
   it("does not sacrifice running measurements for parking, and a capture failure keeps the reader usable", async () => {
     const snapshot = snapshotV3();
     const gate = deferredV3<void>();

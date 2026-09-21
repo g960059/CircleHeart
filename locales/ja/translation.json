@@ -816,11 +816,9 @@
       "retry": "もう一度回答する"
     },
     "open": "開く",
-    "openDetails": "詳しく見る",
     "openBeside": "本文と並べて表示",
     "moreActions": "その他の操作",
     "handoffFailed": "現在の状態を引き継げませんでした。もう一度お試しください。",
-    "displayedInPanel": "パネルに表示中",
     "returnInline": "本文内に戻す",
     "openMobile": "実験を広げる",
     "restartSavedState": "保存された条件からやり直す",

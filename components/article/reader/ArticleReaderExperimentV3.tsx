@@ -13,7 +13,6 @@ import {
   CircleAlert,
   Maximize2,
   Minimize2,
-  RotateCw,
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
