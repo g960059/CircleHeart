@@ -1,5 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
+import { articleBriefingPresentationV3 } from "@/studio/application/authoring/StudioArticleBriefingPresentationV3";
+import { ArticleReaderPendingExperimentV1 } from "./ArticleReaderPendingExperimentV1";
 import type { ExperimentSnapshotV2 } from "@/studio/contracts/v2/content";
 import type { StudioClientCompositionV2 } from "@/studio/composition/StudioDefaultCompositionV2";
 import type { ArticleReaderExperimentV3Props } from "./ArticleReaderExperimentV3";
@@ -64,18 +66,18 @@ export function ArticleReaderDeferredExperimentV1({ loadSnapshot, ...props }: Pr
       contract={prepared.composition.modelSurface.contract} contractAvailability="ready"
       runtimeComposition={prepared.composition} /> :
       <section id={`placement-${placement.placementId}`} className="article-reader-placement min-w-0 scroll-mt-24"
-        data-reader-placement-id={placement.placementId} data-reader-model-loading={error ? undefined : "true"}>
-        <p className="text-sm font-semibold text-wb-text">{title}</p>
+        data-reader-placement-id={placement.placementId}>
         {error ? <div className="mt-3 text-sm text-wb-muted">
+          <p className="reader-experiment-title mb-2">{title}</p>
           <p role="alert">{t(error === "code" ? "articleReader.unavailableReader" : "articleReader.unavailableSnapshot")}</p>
           <button className="mt-2 rounded text-wb-accent focus-visible:outline focus-visible:outline-2"
             onClick={() => error === "code" ? window.location.reload() : setAttempt(value => value + 1)}>{t(error === "code" ? "articleReader.reloadPage" : "articleReader.retryLoading")}</button>
-        </div> : <div className="mt-4" role="status" aria-label={t("articleReader.preparingSimulation")}>
-          <div className="article-loading-skeleton space-y-3" aria-hidden="true">
-            <div className="article-skeleton-bar h-2 w-36" />
-            <div className="article-skeleton-bar h-2 w-24" />
-          </div>
-        </div>}
+        </div> : <ArticleReaderPendingExperimentV1 title={title} preparing={near} onShow={() => {
+          setNear(true);
+          const presentation = props.forceInline ? "inflow" : articleBriefingPresentationV3(placement.briefing);
+          if (presentation === "inflow") props.onActivate();
+          else props.onExpand(presentation);
+        }} />}
         {placement.caption && <p className="article-experiment-caption">{placement.caption}</p>}
       </section>}
   </div>;

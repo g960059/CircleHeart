@@ -1,5 +1,6 @@
 import React from "react";
 import { ArticleReaderOutputDisclosureV3, type ArticleReaderOutputViewV3 } from "./ArticleReaderOutputDisclosureV3";
+import { ArticleReaderPendingExperimentV1 } from "./ArticleReaderPendingExperimentV1";
 import { articleBriefingInflowContentV3 } from "@/studio/application/authoring/StudioArticleBriefingPresentationV3";
 import type { ArticleReaderPlaybackPreferenceV3 } from "./ArticleReaderLiveRuntimeV3";
 import { selectPresentationAnalysisIdsV1, workbenchModelCyclePhaseOutputIdV3 } from "@/components/workbench/presentation/WorkbenchPresentationOutputSelectionV3";
@@ -342,11 +343,8 @@ export function ArticleReaderExperimentV3({
         </ArticleReaderObservationMemoryContextV3.Provider>
       ) : (
         <ArticleReaderStaticExperimentV3
-          briefing={briefing}
           availability={contractAvailability}
-          contract={contract}
           presentation={presentation}
-          snapshot={snapshot}
           title={title}
           onActivate={onActivate}
           onOpen={() => {
@@ -366,153 +364,34 @@ export function ArticleReaderExperimentV3({
 }
 
 function ArticleReaderStaticExperimentV3({
-  briefing,
   availability,
-  contract,
   presentation,
-  snapshot,
   title,
   onActivate,
   onOpen,
 }: Readonly<{
-  briefing: ExperimentPlacementBriefingV2;
   availability: "loading" | "ready" | "unavailable";
-  contract: ModelContractV2 | null;
   presentation: ArticleReaderPresentationV3;
-  snapshot: ExperimentSnapshotV2;
   title: string;
   onActivate(): void;
   onOpen(): void;
 }>) {
-  const { i18n, t } = useTranslation();
-  const locale = i18n.language.startsWith("ja") ? "ja" : "en";
-  const { appTheme } = useAppTheme();
-  const readingBriefing = presentation === "inflow" ? articleBriefingInflowContentV3(briefing) : briefing;
-  const graphs = [...readingBriefing.graphs].sort(compareOrderV3);
+  const { t } = useTranslation();
   if (availability === "loading") {
-    return (
-      <div className="py-5" data-reader-model-loading="true" aria-live="polite">
-        <p className="text-sm font-semibold tracking-tight text-wb-text">
-          {title}
-        </p>
-        <div className="mt-3 h-1.5 w-36 overflow-hidden rounded-full bg-wb-soft">
-          <span className="block h-full w-1/2 animate-pulse rounded-full bg-wb-accent/55 motion-reduce:animate-none" />
-        </div>
-        <p className="mt-2 text-xs leading-5 text-wb-subtle">
-          {t("articleReader.preparingSimulation")}
-        </p>
-      </div>
-    );
+    return <ArticleReaderPendingExperimentV1 title={title} preparing />;
   }
   if (availability === "unavailable") {
     return (
       <div className="py-5" data-reader-model-unavailable="true">
-        <p className="text-sm font-semibold tracking-tight text-wb-text">
-          {title}
-        </p>
-        <p className="mt-2 text-xs leading-5 text-wb-subtle">
-          {t("articleReader.unavailableModel")}
-        </p>
+        <p className="text-sm font-semibold tracking-tight text-wb-text">{title}</p>
+        <p className="mt-2 text-xs leading-5 text-wb-subtle">{t("articleReader.unavailableModel")}</p>
       </div>
     );
   }
   if (presentation !== "inflow") {
-    return (
-      <ArticleReaderPeekAnchorV3
-        presentation={presentation}
-        title={title}
-        status={t("articleReader.noLiveData")}
-        onOpen={onOpen}
-      />
-    );
+    return <ArticleReaderPeekAnchorV3 presentation={presentation} title={title} onOpen={onOpen} />;
   }
-  return (
-    <button
-      type="button"
-      onClick={onActivate}
-      aria-label={t("articleReader.openExperiment")}
-      className="block w-full rounded-xl bg-wb-canvas p-3 text-left transition-[background-color,transform] duration-150 hover:bg-wb-hover/40 active:scale-[0.995] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wb-accent"
-    >
-      {graphs.length === 0 ? (
-        <span className="block py-8 text-sm text-wb-subtle">
-          {t("articleReader.noGraphs")}
-        </span>
-      ) : (
-        <span
-          className={`grid gap-7 ${graphs.length > 1 ? "md:grid-cols-2" : ""}`}
-        >
-          {graphs.slice(0, 4).map((graph) => {
-            const resolved = resolveArticleReaderGraphPresentationV3(
-              snapshot,
-              graph,
-            );
-            if (resolved === null) return null;
-            const { pane } = resolved;
-            return (
-              <span
-                key={graph.paneId}
-                className={
-                  graph.emphasis === "primary" && graphs.length > 2
-                    ? "md:col-span-2"
-                    : ""
-                }
-              >
-                <span className="block text-sm font-semibold tracking-tight text-wb-text">
-                  {resolved.label}
-                </span>
-                <span className="mt-4 flex min-h-32 items-center justify-center bg-[linear-gradient(to_bottom,transparent_31%,var(--wb-grid)_32%,transparent_33%,transparent_65%,var(--wb-grid)_66%,transparent_67%)] px-4">
-                  <span className="flex flex-wrap justify-center gap-x-4 gap-y-2">
-                    {resolved.series.map((series) => {
-                      const scenarioId =
-                        briefing.scenarioScope.initialFocusScenarioId;
-                      const source = pane.traceColors?.find(
-                        (trace) =>
-                          trace.scenarioId === scenarioId &&
-                          trace.seriesId === series.seriesId,
-                      );
-                      const customColor =
-                        articleBriefingTraceColorV3(
-                          graph,
-                          scenarioId,
-                          series.seriesId,
-                        ) ?? source?.customColorHex;
-                      const color =
-                        customColor ??
-                        resolveWorkbenchAutomaticGraphColorV3({
-                          colorHex: source?.automaticColorHex ?? "#64748b",
-                          appTheme,
-                        });
-                      return (
-                        <span
-                          key={series.seriesId}
-                          className="inline-flex items-center gap-1.5 text-[11px] text-wb-muted"
-                        >
-                          <span
-                            className="h-0.5 w-5 rounded-full"
-                            style={{ backgroundColor: color }}
-                            aria-hidden="true"
-                          />
-                          {resolveArticleReaderStaticGraphSeriesLabelV3({
-                            contract,
-                            locale,
-                            pane,
-                            series,
-                          })}
-                        </span>
-                      );
-                    })}
-                  </span>
-                </span>
-              </span>
-            );
-          })}
-        </span>
-      )}
-      <span className="mt-2 block text-[11px] text-wb-subtle">
-        {t("articleReader.noLiveData")}
-      </span>
-    </button>
-  );
+  return <ArticleReaderPendingExperimentV1 title={title} preparing={false} onShow={onActivate} />;
 }
 
 function ArticleReaderLiveOwnerV3({
@@ -725,7 +604,6 @@ function ArticleReaderPeekAnchorV3({ active = false, title, onOpen }: Readonly<{
   active?: boolean;
   presentation: ArticleReaderPresentationV3;
   title: string;
-  status?: string;
   onOpen(): void;
 }>) {
   const { t } = useTranslation();
@@ -882,7 +760,6 @@ export function ArticleReaderEmbedSurfaceV3({
     ? [...collapsedPaneIds].filter((candidate) => candidate !== paneId)
     : [...collapsedPaneIds, paneId]);
   const singlePv = graphs.length === 1 && contract.graphCatalog.find(graph => graph.graphId === snapshot.content.surface.graphPanes.find(pane => pane.paneId === graphs[0]?.paneId)?.graphId)?.renderer === "pressure-volume";
-  const lightInstrument = inline && singlePv && primaryControls.length === 0;
   const controlProps = { briefing, contract, runtime, scenarioColor, snapshot } as const;
   useArticleReaderOutputAnalysisRequestsV3(briefing, runtime);
   const observation = observedKeys.length > 0 ? (
@@ -946,7 +823,9 @@ export function ArticleReaderEmbedSurfaceV3({
     return (
       <div {...rootProps}>
         {header}
-        <div className={lightInstrument ? "article-reader-inline-instrument" : undefined}>
+        {/* Graph above, values beneath, controls last, at every width: one
+            column reads the same on a phone and in a wide article. */}
+        <div className="article-reader-inline-figure" data-reader-single-graph={singlePv ? "pressure-volume" : undefined}>
           {stage}
           <div className="article-reader-deck">{observation}{controls}{openToOperate}</div>
         </div>
@@ -2477,34 +2356,6 @@ export type ArticleReaderResolvedGraphPresentationV3 = Readonly<{
   historyDepth: number;
   pvTrailBeats: number | undefined;
 }>;
-
-export function resolveArticleReaderStaticGraphSeriesLabelV3(
-  input: Readonly<{
-    contract: ModelContractV2 | null;
-    locale: "en" | "ja";
-    pane: ExperimentSurfaceGraphPaneV2;
-    series: ExperimentPlacementBriefingGraphSeriesV2;
-  }>,
-): string {
-  const graph = input.contract?.graphCatalog.find(
-    ({ graphId }) => graphId === input.pane.graphId,
-  );
-  if (graph?.renderer !== "sweep") return input.series.label;
-  const binding = graph.seriesCatalog.find(
-    ({ seriesId }) => seriesId === input.series.seriesId,
-  );
-  if (binding === undefined) return input.series.label;
-  const definition = input.contract?.outputCatalog.find(
-    ({ outputId }) => outputId === binding.outputId,
-  );
-  return resolveWorkbenchGraphSeriesPresentationV3({
-    definition,
-    locale: input.locale,
-    outputId: binding.outputId,
-    seriesId: input.series.seriesId,
-    storedLabel: input.series.label,
-  }).label;
-}
 
 /**
  * Materializes the single graph contract consumed by inflow, Peek, and

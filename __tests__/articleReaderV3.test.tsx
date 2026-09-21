@@ -50,7 +50,6 @@ import {
   ArticleReaderStructuralReturnGraphV3,
   articleReaderAnalysisScenarioIdsV3,
   articleReaderPeriodicPvaEnabledV3,
-  resolveArticleReaderStaticGraphSeriesLabelV3,
   articleReaderBoundedHistoryV3,
   commonGraphUnitV3,
   resolveArticleReaderGraphPresentationV3,
@@ -499,75 +498,6 @@ describe("Article Reader V3 experiment anchor", () => {
     ).toEqual([]);
   });
 
-  it("migrates historical systemic-arterial labels in the static inflow preview", () => {
-    const outputId = "hemodynamics.pressure.absolute.SA";
-    const contract: ModelContractV2 = {
-      ...contractV3(),
-      outputCatalog: [
-        {
-          outputId,
-          kind: "signal",
-          unit: "mmHg",
-          shape: "scalar",
-          sampling: "accepted-step",
-        },
-      ],
-      graphCatalog: [
-        {
-          graphId: "graph/pressure",
-          renderer: "sweep",
-          defaultSeriesIds: ["SAP"],
-          seriesCatalog: [
-            {
-              kind: "scalar",
-              seriesId: "SAP",
-              outputId,
-            },
-          ],
-        },
-      ],
-    };
-    const pane: ExperimentSnapshotV2["content"]["surface"]["graphPanes"][number] = {
-      paneId: "pane/pressure",
-      role: "graph",
-      label: "Pressure",
-      order: 0,
-      priority: 10,
-      graphId: "graph/pressure",
-      scenarioScope: { mode: "visible-scenarios" },
-      excludedTraces: [],
-      historyDepth: 1,
-      series: [
-        {
-          seriesId: "SAP",
-          label: "Systemic arterial pressure",
-          order: 0,
-        },
-      ],
-    };
-
-    expect(
-      resolveArticleReaderStaticGraphSeriesLabelV3({
-        contract,
-        locale: "ja",
-        pane,
-        series: pane.series[0]!,
-      }),
-    ).toBe("SAP");
-    expect(
-      resolveArticleReaderStaticGraphSeriesLabelV3({
-        contract,
-        locale: "ja",
-        pane,
-        series: {
-          seriesId: "SAP",
-          label: "My arterial trace",
-          order: 0,
-        },
-      }),
-    ).toBe("My arterial trace");
-  });
-
   it("selects only graph and output-card histories for one Placement", () => {
     const snapshot = snapshotV3();
     const selectedSnapshot: ExperimentSnapshotV2 = {
@@ -784,6 +714,17 @@ describe("Article Reader V3 experiment anchor", () => {
     expect(articleReaderPlacementInReadingAreaV3([{ id: "a", top: 950, bottom: 1300 }], viewport, "a")).toBeNull();
   });
 
+  it("does not let a larger running plot starve a compact entry at the reading position", () => {
+    const viewport = { top: 60, bottom: 900 };
+    expect(articleReaderPlacementInReadingAreaV3([
+      { id: "waiting", top: 180, bottom: 244 }, { id: "running", top: 400, bottom: 950 },
+    ], viewport, "running")).toBe("waiting");
+    // Once opened, the same placement stays selected through its height change.
+    expect(articleReaderPlacementInReadingAreaV3([
+      { id: "waiting", top: 180, bottom: 760 }, { id: "running", top: 920, bottom: 1470 },
+    ], viewport, "waiting")).toBe("waiting");
+  });
+
   it("treats history depth zero as no previous structural states", () => {
     const history = ["oldest", "older", "newest"];
     expect(articleReaderBoundedHistoryV3(history, 0)).toEqual([]);
@@ -861,7 +802,7 @@ describe("Article Reader V3 experiment anchor", () => {
     expect(html).toMatch(/<button type="button"[^>]+aria-label="[^"]+"/);
     expect(html.match(/<button type="button"/g)?.length).toBe(1);
     const inflowButton = html.match(
-      /<button type="button"[^>]*class="block w-full[^>]*>.*?<\/button>/s,
+      /<button type="button"[^>]*data-reader-pending="true"[^>]*>.*?<\/button>/s,
     )?.[0];
     expect(inflowButton).toBeDefined();
     expect(inflowButton).not.toMatch(/<(?:div|p)(?:\s|>)/);
