@@ -698,6 +698,48 @@ describe("ArticleReaderLiveRuntimeV3", () => {
     await controller.dispose();
   });
 
+  it("retains completed-beat presentation through repeated paused parks until the inputs change", async () => {
+    const snapshot = snapshotV3();
+    const sourceFrame = frameV3("scenario/one", 1, 10);
+    const measured: StudioSimulationAnalysisV2 = {
+      modelId: sourceFrame.modelId, runtimeSessionId: sourceFrame.runtimeSessionId,
+      scenarioId: sourceFrame.scenarioId, inputEpoch: sourceFrame.inputEpoch,
+      sourceAcceptedRevision: sourceFrame.acceptedRevision,
+      sourceAcceptedTimeSec: sourceFrame.acceptedTimeSec,
+      analysisId: "analysis/completed-beat", payload: { status: "available" },
+    };
+    let generations = 0;
+    const controller = new ArticleReaderLiveRuntimeV3(snapshot, {
+      createRuntime: input => {
+        const runtime = runtimeHarnessV3(snapshot).createRuntime(input);
+        const original = generations++ === 0;
+        return { ...runtime, presentationAnalyses: scenarioId =>
+          original && scenarioId === measured.scenarioId ? [measured] : [] };
+      },
+    });
+    await controller.start();
+    await controller.pause();
+    const original = controller.presentationTrace("scenario/one")!;
+    expect(original.analyses).toEqual([measured]);
+    for (let revisit = 0; revisit < 3; revisit++) {
+      await controller.setPresentationVisible(false);
+      expect(await controller.parkIfHidden()).toBe(true);
+      expect(controller.presentationTrace("scenario/one")?.analyses).toEqual([measured]);
+      await controller.setPresentationVisible(true);
+      expect(controller.getSnapshot().status).toBe("paused");
+      expect(controller.presentationTrace("scenario/one")).toMatchObject(original);
+    }
+    // The retained beat belongs only to the restored condition. A new input
+    // epoch must not reuse it, even through another offscreen round trip.
+    await controller.applyControl({ controlInstanceId: "test", controlId: "preload", scenarioIds: ["scenario/one"], value: 42 });
+    expect(controller.presentationTrace("scenario/one")?.analyses).toEqual([]);
+    await controller.setPresentationVisible(false);
+    expect(await controller.parkIfHidden()).toBe(true);
+    await controller.setPresentationVisible(true);
+    expect(controller.presentationTrace("scenario/one")?.analyses).toEqual([]);
+    await controller.dispose();
+  });
+
   it("does not sacrifice running measurements for parking, and a capture failure keeps the reader usable", async () => {
     const snapshot = snapshotV3();
     const gate = deferredV3<void>();

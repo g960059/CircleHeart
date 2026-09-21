@@ -474,9 +474,13 @@ export class ArticleReaderLiveRuntimeV3 {
     const operation = (async () => {
       const continuation = await this.captureContinuation(false);
       if (runtime !== this.#runtime) return false;
-      for (const scenarioId of this.#scenarioIds) this.#parkedPresentation.set(scenarioId, {
-        frame: runtime.latestFrame(scenarioId), analyses: runtime.presentationAnalyses?.(scenarioId) ?? [],
-      });
+      for (const scenarioId of this.#scenarioIds) {
+        // A paused restored Worker has not produced a new complete beat yet.
+        // Preserve the visible trace, including its retained measured result,
+        // across repeated parks. presentationTrace also rejects old inputs.
+        const trace = this.presentationTrace(scenarioId);
+        if (trace) this.#parkedPresentation.set(scenarioId, { frame: trace.frame, analyses: trace.analyses });
+      }
       this.#parked = continuation;
       this.#runtime = null;
       await runtime.dispose();
