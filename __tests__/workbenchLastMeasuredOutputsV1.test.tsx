@@ -5,7 +5,7 @@ import { WorkbenchLastMeasuredOutputsV1 } from "@/components/workbench/presentat
 import { ExperimentOutputGridV3, type ExperimentOutputPresentationItemV3 as Item } from "@/components/workbench/ExperimentPanePresentationV3";
 import {
   projectWorkbenchObservationV3,
-  resolveWorkbenchObservedKeysV3,
+  workbenchMobileOutputKeysV3,
   workbenchMeasurementScopeKeyV3,
   workbenchObservedOutputKeyV3,
   type WorkbenchOutputPaneReadingV3,
@@ -118,7 +118,7 @@ describe("phone Workbench observation over pane readings", () => {
     expect(workbenchObservedOutputKeyV3("pane/a", "b")).not.toBe(workbenchObservedOutputKeyV3("pane/ab", ""));
   });
 
-  it("hides a heading on screen only when one group, one Scenario and a title that only repeats the target", () => {
+  it("hides lone pane headings and repeated sole-target labels without losing multi-Scenario distinctions", () => {
     const memory = new WorkbenchLastMeasuredOutputsV1();
     const single = (title: string, extra: Partial<WorkbenchOutputPaneReadingV3> = {}): WorkbenchOutputPaneReadingV3 => ({
       ...reading([current], memory), title, scenarioLabel: "基準", scenario: undefined, ...extra,
@@ -131,21 +131,26 @@ describe("phone Workbench observation over pane readings", () => {
     expect(projectWorkbenchObservationV3([single("Outputs")], [key])[0]).toMatchObject({ headingHidden: true });
     expect(projectWorkbenchObservationV3([single(" outputs ")], [key])[0]).toMatchObject({ headingHidden: true });
     expect(projectWorkbenchObservationV3([single("  ")], [key], options)[0]).toMatchObject({ headingHidden: true });
-    // A semantic title stays visible even alone.
-    expect(projectWorkbenchObservationV3([single("弁関連")], [key], options)[0]?.headingHidden).toBeUndefined();
-    // Several open Scenarios: the pane's Scenario identifies the values, so the heading stays.
-    expect(projectWorkbenchObservationV3([single("基準", { scenario: { label: "基準", colorHex: "#000" } })], [key], options)[0]?.headingHidden).toBeUndefined();
-    // Two groups: both headings stay even when titles only name the Scenario.
+    // A lone pane needs no label column, including a subject title.
+    expect(projectWorkbenchObservationV3([single("弁関連")], [key], options)[0]?.headingHidden).toBe(true);
+    // Several graph Scenarios do not force a heading for one output pane.
+    expect(projectWorkbenchObservationV3([single("基準", { scenario: { label: "基準", colorHex: "#000" } })], [key], options)[0]?.headingHidden).toBe(true);
+    // Repeating the same sole target across two panes adds no distinction.
     const second: WorkbenchOutputPaneReadingV3 = { ...single("基準"), paneId: "pane/b" };
     const two = projectWorkbenchObservationV3([single("基準"), second], [key, workbenchObservedOutputKeyV3("pane/b", "co")], options);
-    expect(two.map((group) => group.headingHidden)).toEqual([undefined, undefined]);
+    expect(two.map((group) => group.headingHidden)).toEqual([true, true]);
+    const compared = projectWorkbenchObservationV3([single("基準", { scenario: { label: "基準", colorHex: "#000" } }),
+      { ...second, title: "負荷", scenario: { label: "負荷", colorHex: "#fff" } }], [key, workbenchObservedOutputKeyV3("pane/b", "co")], options);
+    expect(compared.map(group => group.headingHidden)).toEqual([undefined, undefined]);
   });
 
-  it("resolves the Session selection against the panes that exist and keeps an explicit empty choice", () => {
-    const readings = [reading([current, { ...current, itemId: "sv", outputId: "sv" }], new WorkbenchLastMeasuredOutputsV1())];
-    expect(resolveWorkbenchObservedKeysV3(null, readings)).toEqual([key, workbenchObservedOutputKeyV3("pane/a", "sv")]);
-    expect(resolveWorkbenchObservedKeysV3([workbenchObservedOutputKeyV3("pane/gone", "co"), workbenchObservedOutputKeyV3("pane/a", "sv")], readings))
-      .toEqual([workbenchObservedOutputKeyV3("pane/a", "sv")]);
-    expect(resolveWorkbenchObservedKeysV3([], readings)).toEqual([]);
+  it("derives compact and expanded views from the currently configured pane items", () => {
+    const items = Array.from({ length: 12 }, (_, index) => ({ ...current, itemId: `item/${index}` }));
+    const readings = [reading(items, new WorkbenchLastMeasuredOutputsV1())];
+    expect(workbenchMobileOutputKeysV3(readings, false)).toHaveLength(6);
+    expect(workbenchMobileOutputKeysV3(readings, true)).toEqual(items.map(item => workbenchObservedOutputKeyV3("pane/a", item.itemId)));
+    const edited = [{ ...readings[0]!, measured: items.slice(3, 5) }];
+    expect(workbenchMobileOutputKeysV3(edited, false)).toEqual(workbenchMobileOutputKeysV3(edited, true));
+    expect(workbenchMobileOutputKeysV3([], true)).toEqual([]);
   });
 });

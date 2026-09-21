@@ -40,7 +40,6 @@ export type ArticleReaderLiveRuntimeStateV3 = Readonly<{
     | "starting"
     | "playing"
     | "paused"
-    | "requesting-analysis"
     | "applying-control"
     | "failed"
     | "disposed";
@@ -150,14 +149,23 @@ export class ArticleReaderLiveRuntimeV3 {
   readonly #listeners = new Set<() => void>();
   readonly #structuralHistoryDepthByAnalysisId: ReadonlyMap<string, number>;
   readonly #presentationOutputIds: ReadonlySet<string> | undefined;
+  readonly #presentationEpochOffsets = new Map<string, number>();
+  readonly #analysisPresentationEpochs = new WeakMap<StudioSimulationAnalysisV2, number>();
   #state: ArticleReaderLiveRuntimeStateV3;
   #runtime: ArticleReaderParallelRuntimeV3 | null = null;
   #startPromise: Promise<void> | null = null;
   #playIntent = true;
   #documentVisible = true;
   #presentationVisible = true;
-  #analysisOperation: Promise<void> | null = null;
+  readonly #analysisOperations = new Map<string, { token: symbol; promise: Promise<void> }>();
   #controlOperation: Promise<void> | null = null;
+  #parked: StudioReaderContinuationV3 | null = null;
+  #parkOperation: Promise<boolean> | null = null;
+  readonly #parkedPresentation = new Map<string, {
+    frame: StudioSimulationFrameV2;
+    analyses: readonly StudioSimulationAnalysisV2[];
+    restoredEpoch?: number;
+  }>();
   #capturing = false;
   #retiring = false;
   #captureOperation: Promise<StudioReaderContinuationV3> | null = null;
@@ -250,19 +258,31 @@ export class ArticleReaderLiveRuntimeV3 {
   readonly getSnapshot = (): ArticleReaderLiveRuntimeStateV3 => this.#state;
 
   presentationTrace(scenarioId: string) {
+    if (!this.#scenarioIds.includes(scenarioId) || !this.#acceptsFrames()) return undefined;
+    const saved = this.#parkedPresentation.get(scenarioId);
     const runtime = this.#runtime;
-    if (!runtime || !this.#scenarioIds.includes(scenarioId) || this.#state.status === "starting" || !this.#acceptsFrames()) return undefined;
-    return { analyses: runtime.presentationAnalyses?.(scenarioId) ?? [], frame: runtime.latestFrame(scenarioId) };
+    if (!runtime || this.#state.status === "starting") return saved;
+    const frame = runtime.latestFrame(scenarioId);
+    const analyses = runtime.presentationAnalyses?.(scenarioId) ?? [];
+    if (saved && frame.inputEpoch === saved.restoredEpoch && analyses.length === 0) return saved;
+    return { analyses, frame };
   }
 
   presentationOutput(scenarioId: string, outputId: string) {
-    const runtime = this.#runtime;
-    const frame = runtime !== null && this.#scenarioIds.includes(scenarioId)
-      && this.#state.status !== "starting" && this.#acceptsFrames() ? runtime.latestFrame(scenarioId) : null;
-    const analyses = runtime?.presentationAnalyses?.(scenarioId);
-    return mainWireCardiacCycleOutputValueV1(analyses, frame, outputId)
-      ?? mainWireFillingFlowOutputValueV1(analyses, frame, outputId)
-      ?? mainWireAorticJetOutputValueV1(analyses, frame, outputId);
+    const trace = this.presentationTrace(scenarioId);
+    return mainWireCardiacCycleOutputValueV1(trace?.analyses, trace?.frame ?? null, outputId)
+      ?? mainWireFillingFlowOutputValueV1(trace?.analyses, trace?.frame ?? null, outputId)
+      ?? mainWireAorticJetOutputValueV1(trace?.analyses, trace?.frame ?? null, outputId);
+  }
+
+  presentationAnalysisEpoch(analysis: StudioSimulationAnalysisV2): number {
+    return this.#analysisPresentationEpochs.get(analysis) ?? analysis.inputEpoch;
+  }
+
+  #publishAnalysis(key: string, analysis: StudioSimulationAnalysisV2): void {
+    this.#analysisPresentationEpochs.set(analysis,
+      analysis.inputEpoch + (this.#presentationEpochOffsets.get(analysis.scenarioId) ?? 0));
+    this.#publish({ analysisByKey: Object.freeze({ ...this.#state.analysisByKey, [key]: analysis }) });
   }
 
   readonly subscribe = (listener: () => void): (() => void) => {
@@ -273,7 +293,8 @@ export class ArticleReaderLiveRuntimeV3 {
   start(): Promise<void> {
     if (this.#startPromise !== null) return this.#startPromise;
     if (this.#state.status === "disposed") return Promise.resolve();
-    if (this.#state.status !== "idle") return Promise.resolve();
+    if (this.#state.status !== "idle" && this.#parked === null) return Promise.resolve();
+    const restored = this.#parked;
 
     this.#publish({ status: "starting", error: null });
     let runtime: ArticleReaderParallelRuntimeV3;
@@ -287,6 +308,7 @@ export class ArticleReaderLiveRuntimeV3 {
               frames,
               this.sampleStore,
               this.#presentationOutputIds,
+              this.#presentationEpochOffsets,
             );
           } catch (error) {
             this.#fail(errorAsErrorV3(error), runtime);
@@ -306,7 +328,7 @@ export class ArticleReaderLiveRuntimeV3 {
     this.#runtime = runtime;
     const visibleScenarioIds = new Set(this.#scenarioIds);
     const scenarios: readonly WorkbenchParallelScenarioSeedV3[] =
-      this.#snapshot.content.scenarios
+      (restored?.content ?? this.#snapshot.content).scenarios
         .filter(({ scenarioId }) => visibleScenarioIds.has(scenarioId))
         .map((scenario) => Object.freeze({
           scenarioId: scenario.scenarioId,
@@ -321,12 +343,37 @@ export class ArticleReaderLiveRuntimeV3 {
     })).then(() => {
       if (this.#runtime !== runtime || this.#state.status !== "starting") return;
       runtime.selectScenario(this.#state.activeScenarioId);
+      if (restored) {
+        const analysisByKey = { ...this.#state.analysisByKey };
+        for (const scenarioId of this.#scenarioIds) {
+          const frame = runtime.latestFrame(scenarioId);
+          const saved = this.#parkedPresentation.get(scenarioId);
+          // Exact input epochs restart with a Worker. Visual history keeps its
+          // monotonic sequence so distinct prior conditions cannot alias.
+          const visualEpoch = this.sampleStore.getScenarioSnapshot(scenarioId).at(-1)?.inputEpoch
+            ?? (saved?.frame.inputEpoch ?? frame.inputEpoch) + (this.#presentationEpochOffsets.get(scenarioId) ?? 0);
+          this.#presentationEpochOffsets.set(scenarioId, visualEpoch - frame.inputEpoch);
+          if (saved) saved.restoredEpoch = frame.inputEpoch;
+          for (const [key, analysis] of Object.entries(analysisByKey)) {
+            if (analysis.scenarioId !== scenarioId) continue;
+            // These results belong to the checkpoint just restored. Keep the
+            // measured source clock and payload; only the runtime binding moves.
+            const rebound = Object.freeze({ ...analysis,
+              runtimeSessionId: frame.runtimeSessionId, inputEpoch: frame.inputEpoch });
+            this.#analysisPresentationEpochs.set(rebound, this.presentationAnalysisEpoch(analysis));
+            analysisByKey[key] = rebound;
+          }
+        }
+        this.#parked = null;
+        this.#publish({ analysisByKey: Object.freeze(analysisByKey) });
+      }
       // Article playback has an explicit reading pace, independent of calibration defaults.
       this.#publish({ playbackRate: runtime.setPlaybackRate(this.#state.playbackRate.playbackRate) });
       appendArticleReaderFramesV3(
         scenarios.map(({ scenarioId }) => runtime.latestFrame(scenarioId)),
         this.sampleStore,
         this.#presentationOutputIds,
+        this.#presentationEpochOffsets,
       );
       if (this.#shouldPlayV3()) {
         runtime.playAll();
@@ -410,14 +457,57 @@ export class ArticleReaderLiveRuntimeV3 {
   /** A collapsed Peek is not a visible simulation, even when its anchor is on screen. */
   async setPresentationVisible(visible: boolean): Promise<void> {
     this.#presentationVisible = visible;
+    if (visible) {
+      await this.#parkOperation;
+      if (this.#presentationVisible && this.#parked && this.#state.status !== "disposed") await this.start();
+    }
     await this.#reconcileVisibilityV3();
+  }
+
+  /** Release idle exact Workers after a reading grace period, never interrupt
+   * an explicit measurement just to save memory. Completed results stay here. */
+  parkIfHidden(): Promise<boolean> {
+    if (this.#parkOperation) return this.#parkOperation;
+    const runtime = this.#runtime;
+    if (!runtime || this.#presentationVisible || this.#capturing
+      || this.#state.status !== "paused" || this.#analysisOperations.size > 0) return Promise.resolve(false);
+    const operation = (async () => {
+      const continuation = await this.captureContinuation(false);
+      if (runtime !== this.#runtime) return false;
+      for (const scenarioId of this.#scenarioIds) {
+        // A paused restored Worker has not produced a new complete beat yet.
+        // Preserve the visible trace, including its retained measured result,
+        // across repeated parks. presentationTrace also rejects old inputs.
+        const trace = this.presentationTrace(scenarioId);
+        if (trace) this.#parkedPresentation.set(scenarioId, { frame: trace.frame, analyses: trace.analyses });
+      }
+      this.#parked = continuation;
+      this.#runtime = null;
+      await runtime.dispose();
+      if (this.#state.status !== "disposed") {
+        this.#retiring = false;
+        this.#capturing = false;
+      }
+      return true;
+    })().catch(async () => {
+      // Parking is optional. A failed capture leaves the current authority
+      // intact, so restore its visibility policy instead of losing the reader.
+      if (runtime === this.#runtime) {
+        this.#retiring = false;
+        this.#capturing = false;
+        await this.#reconcileVisibilityV3();
+      }
+      return false;
+    }).finally(() => { if (this.#parkOperation === operation) this.#parkOperation = null; });
+    this.#parkOperation = operation;
+    return operation;
   }
 
   async #reconcileVisibilityV3(): Promise<void> {
     const runtime = this.#runtime;
     if (runtime === null) return;
     if (this.#shouldPlayV3()) {
-      if (this.#state.status === "paused" || this.#state.status === "requesting-analysis") {
+      if (this.#state.status === "paused") {
         runtime.playAll();
         if (this.#runtime === runtime && this.#state.status === "paused") {
           this.#publish({ status: "playing", error: null });
@@ -425,7 +515,7 @@ export class ArticleReaderLiveRuntimeV3 {
       }
       return;
     }
-    if (this.#state.status !== "playing" && this.#state.status !== "requesting-analysis") return;
+    if (this.#state.status !== "playing") return;
     try {
       await runtime.pauseAll();
       if (this.#runtime !== runtime) return;
@@ -447,7 +537,7 @@ export class ArticleReaderLiveRuntimeV3 {
       throw new Error("Article Reader selected an unknown Scenario");
     }
     const runtime = this.#runtime;
-    if (this.#state.status === "idle" || this.#state.status === "starting") {
+    if (this.#state.status === "idle" || this.#state.status === "starting" || this.#parked !== null) {
       this.#publish({ activeScenarioId: scenarioId });
       return;
     }
@@ -466,153 +556,101 @@ export class ArticleReaderLiveRuntimeV3 {
    * the expensive continuation to an isolated analysis Worker, so unrelated
    * and source live lanes keep animating while partial points arrive.
    */
-  requestAnalysis(input: Readonly<{
+  async requestAnalysis(input: Readonly<{
     analysisId: string;
     scenarioIds: readonly string[];
   }>): Promise<void> {
-    const runtime = this.#runtime;
     const analysisKeys = validatedArticleReaderAnalysisTargetsV3(
       this.#scenarioIds,
       input.analysisId,
       input.scenarioIds,
     );
+    if (this.#parkOperation) await this.#parkOperation;
+    if (this.#parked) await this.start();
+    const runtime = this.#runtime;
     if (
-      this.#state.status === "requesting-analysis"
-      && analysisKeys.every((key) => this.#state.pendingAnalysisKeys.includes(key))
-      && this.#analysisOperation !== null
-    ) {
-      return this.#analysisOperation;
-    }
-    if (
-      runtime === null
+      runtime === null || this.#capturing
       || (this.#state.status !== "playing" && this.#state.status !== "paused")
     ) {
-      return Promise.reject(
-        new Error("Article Reader analysis requires an active live runtime"),
-      );
+      return Promise.reject(new Error("Article Reader analysis requires an active live runtime"));
     }
-    this.#publish({
-      status: "requesting-analysis",
-      pendingAnalysisKeys: analysisKeys,
-      analysisErrorByKey: withoutArticleReaderRecordKeysV3(
-        this.#state.analysisErrorByKey,
-        analysisKeys,
-      ),
-      error: null,
-    });
-    const operation = (async () => {
-      try {
-        await runtime.waitForControlPresentation();
-        const results = await Promise.all(input.scenarioIds.map(async (
-          scenarioId,
-        ) => {
-          const key = articleReaderAnalysisKeyV3(
+    const operations = input.scenarioIds.map((scenarioId, index) => {
+      const key = analysisKeys[index]!;
+      const existing = this.#analysisOperations.get(key);
+      if (existing) return existing.promise;
+      const token = Symbol(key);
+      const inputEpoch = runtime.latestFrame(scenarioId).inputEpoch;
+      const current = () => this.#runtime === runtime
+        && this.#analysisOperations.get(key)?.token === token
+        && runtime.latestFrame(scenarioId).inputEpoch === inputEpoch;
+      // Install the operation before publishing pending state. Different panes
+      // may request the same result in the same commit; they join this promise.
+      const promise = Promise.resolve().then(async () => {
+        let frame: StudioSimulationFrameV2 | null = null;
+        let ownsPause = false;
+        try {
+          await runtime.waitForControlPresentation();
+          if (!current()) return;
+          frame = await runtime.pauseScenario(scenarioId);
+          ownsPause = true;
+          if (!current()) return;
+          // The runtime owns this lease from here and releases it after capture,
+          // including on failure. A second finally-release could steal another
+          // concurrent analysis's pause lease.
+          ownsPause = false;
+          const analysis = await runtime.requestAnalysis({
             scenarioId,
-            input.analysisId,
-          );
-          let frame: StudioSimulationFrameV2 | null = null;
-          try {
-            // Briefly drain the shared comparison clock before reading this
-            // source boundary. The lease is transferred to requestAnalysis,
-            // which releases it immediately after the exact checkpoint fork;
-            // the potentially long analysis never owns live playback.
-            frame = await runtime.pauseScenario(scenarioId);
-            const analysis = await runtime.requestAnalysis({
-              scenarioId,
-              analysisId: input.analysisId,
-              expectedInputEpoch: frame.inputEpoch,
-              expectedAcceptedRevision: frame.acceptedRevision,
-              expectedAcceptedTimeSec: frame.acceptedTimeSec,
-              sourceAlreadyPaused: true,
-              onProgress: (analysis) => {
-                if (
-                  this.#runtime !== runtime
-                  || !articleReaderAnalysisMatchesInputTargetV3(
-                    analysis,
-                    frame,
-                    input.analysisId,
-                  )
-                ) return;
-                this.#publish({
-                  analysisByKey: Object.freeze({
-                    ...this.#state.analysisByKey,
-                    [key]: analysis,
-                  }),
-                  analysisErrorByKey: withoutArticleReaderRecordKeysV3(
-                    this.#state.analysisErrorByKey,
-                    [key],
-                  ),
-                });
-              },
-            });
-            if (!articleReaderAnalysisMatchesInputTargetV3(
-              analysis,
-              frame,
-              input.analysisId,
-            )) {
-              throw new Error(
-                "Article Reader analysis did not match the requested input target",
-              );
-            }
-            return Object.freeze({ key, analysis, error: null });
-          } catch (error) {
-            return Object.freeze({
-              key,
-              analysis: null,
-              error: errorAsErrorV3(error),
-            });
-          } finally {
-            if (frame !== null) runtime.resumeScenario(scenarioId);
+            analysisId: input.analysisId,
+            expectedInputEpoch: frame.inputEpoch,
+            expectedAcceptedRevision: frame.acceptedRevision,
+            expectedAcceptedTimeSec: frame.acceptedTimeSec,
+            sourceAlreadyPaused: true,
+            onProgress: (progress) => {
+              if (!current() || !articleReaderAnalysisMatchesInputTargetV3(progress, frame, input.analysisId)) return;
+              this.#publishAnalysis(key, progress);
+            },
+          });
+          if (!current()) return;
+          if (!articleReaderAnalysisMatchesInputTargetV3(analysis, frame, input.analysisId)) {
+            throw new Error("Article Reader analysis did not match the requested input target");
           }
-        }));
-        if (this.#runtime !== runtime) return;
-        const analysisByKey: Record<string, StudioSimulationAnalysisV2> = {
-          ...this.#state.analysisByKey,
-        };
-        const analysisErrorByKey: Record<string, string> = {
-          ...this.#state.analysisErrorByKey,
-        };
-        for (const result of results) {
-          if (result.analysis === null) {
-            analysisErrorByKey[result.key] = result.error?.message
-              ?? "Analysis is unavailable";
-          } else {
-            analysisByKey[result.key] = result.analysis;
-            delete analysisErrorByKey[result.key];
+          this.#publishAnalysis(key, analysis);
+        } catch (error) {
+          // A changed input revokes this result, including late errors. Other
+          // Scenarios' jobs remain independently useful and continue normally.
+          if (current()) this.#publish({ analysisErrorByKey: Object.freeze({
+            ...this.#state.analysisErrorByKey, [key]: errorAsErrorV3(error).message,
+          }) });
+        } finally {
+          if (ownsPause) runtime.resumeScenario(scenarioId);
+          if (this.#analysisOperations.get(key)?.token === token) {
+            this.#analysisOperations.delete(key);
+            if (this.#runtime === runtime) this.#publish({
+              pendingAnalysisKeys: Object.freeze([...this.#analysisOperations.keys()]),
+            });
           }
         }
-        this.#resumeAfterExclusiveOperationV3(runtime, {
-          analysisByKey: Object.freeze(analysisByKey),
-          analysisErrorByKey: Object.freeze(analysisErrorByKey),
-          pendingAnalysisKeys: EMPTY_ARTICLE_READER_ANALYSIS_KEYS_V3,
-        });
-      } catch (error) {
-        if (this.#runtime !== runtime) return;
-        const message = errorAsErrorV3(error).message;
-        this.#resumeAfterExclusiveOperationV3(runtime, {
-          analysisErrorByKey: Object.freeze({
-            ...this.#state.analysisErrorByKey,
-            ...Object.fromEntries(analysisKeys.map((key) => [key, message])),
-          }),
-          pendingAnalysisKeys: EMPTY_ARTICLE_READER_ANALYSIS_KEYS_V3,
-        });
-      } finally {
-        if (this.#analysisOperation === operation) {
-          this.#analysisOperation = null;
-        }
-      }
-    })();
-    this.#analysisOperation = operation;
-    return operation;
+      });
+      this.#analysisOperations.set(key, { token, promise });
+      return promise;
+    });
+    this.#publish({
+      pendingAnalysisKeys: Object.freeze([...this.#analysisOperations.keys()]),
+      analysisErrorByKey: withoutArticleReaderRecordKeysV3(this.#state.analysisErrorByKey, analysisKeys),
+    });
+    return Promise.all(operations).then(() => undefined);
   }
 
-  applyControl(input: Readonly<{
+  async applyControl(input: Readonly<{
     controlInstanceId: string;
     controlId: string;
     scenarioIds: readonly string[];
     value: number;
   }>): Promise<void> {
-    if (this.#capturing) return Promise.reject(new Error("Reader is capturing its state"));
+    if (this.#parkOperation) await this.#parkOperation;
+    if (this.#parked) await this.start();
+    if (this.#capturing) throw new Error("Reader is capturing its state");
+    if (this.#controlOperation) throw new Error("Reader is applying another control");
     const operation = this.#applyControl(input).finally(() => {
       if (this.#controlOperation === operation) this.#controlOperation = null;
     });
@@ -686,6 +724,7 @@ export class ArticleReaderLiveRuntimeV3 {
         frames,
         this.sampleStore,
         this.#presentationOutputIds,
+        this.#presentationEpochOffsets,
       );
       const fixtureByScenario = Object.freeze({
         ...this.#state.fixtureByScenario,
@@ -702,12 +741,17 @@ export class ArticleReaderLiveRuntimeV3 {
         ),
         historicalAnalyses,
         this.#structuralHistoryDepthByAnalysisId,
+        analysis => this.presentationAnalysisEpoch(analysis),
       );
-      const clearedAnalysisKeys = input.scenarioIds.flatMap((scenarioId) =>
-        [...this.#structuralHistoryDepthByAnalysisId.keys()].map((analysisId) =>
-          articleReaderAnalysisKeyV3(scenarioId, analysisId)));
+      const targets = new Set(input.scenarioIds);
+      const clearedAnalysisKeys = [...new Set([
+        ...Object.keys(this.#state.analysisByKey), ...Object.keys(this.#state.analysisErrorByKey),
+        ...this.#analysisOperations.keys(),
+      ])].filter(key => targets.has((JSON.parse(key) as [string, string])[0]));
+      for (const key of clearedAnalysisKeys) this.#analysisOperations.delete(key);
       this.#resumeAfterExclusiveOperationV3(runtime, {
         pendingControlInstanceId: null,
+        pendingAnalysisKeys: Object.freeze([...this.#analysisOperations.keys()]),
         fixtureByScenario,
         changedScenarioIds: Object.freeze([...new Set([
           ...this.#state.changedScenarioIds, ...input.scenarioIds,
@@ -758,7 +802,8 @@ export class ArticleReaderLiveRuntimeV3 {
     this.#playIntent = false;
     const runtime = this.#runtime;
     this.#runtime = null;
-    this.#publish({ status: "disposed", error: null });
+    this.#analysisOperations.clear();
+    this.#publish({ status: "disposed", pendingAnalysisKeys: EMPTY_ARTICLE_READER_ANALYSIS_KEYS_V3, error: null });
     if (runtime !== null) {
       try {
         await runtime.dispose();
@@ -773,6 +818,9 @@ export class ArticleReaderLiveRuntimeV3 {
 
   /** Capture visible lanes at a drained boundary; retain saved hidden scenarios. */
   captureContinuation(resume = true): Promise<StudioReaderContinuationV3> {
+    if (this.#parked) return Promise.resolve({ ...this.#parked,
+      activeScenarioId: this.#state.activeScenarioId, playing: this.#playIntent,
+      playbackRate: this.#state.playbackRate.playbackRate });
     this.#retiring ||= !resume;
     if (this.#captureOperation) return this.#captureOperation;
     this.#capturing = true;
@@ -815,7 +863,6 @@ export class ArticleReaderLiveRuntimeV3 {
     return this.#state.status === "starting"
       || this.#state.status === "playing"
       || this.#state.status === "paused"
-      || this.#state.status === "requesting-analysis"
       || this.#state.status === "applying-control";
   }
 
@@ -909,6 +956,7 @@ export function archiveArticleReaderAnalysesV3(
   current: Readonly<Record<string, readonly StudioSimulationAnalysisV2[]>>,
   analyses: readonly StudioSimulationAnalysisV2[],
   historyDepthByAnalysisId: ReadonlyMap<string, number>,
+  presentationEpoch: (analysis: StudioSimulationAnalysisV2) => number = analysis => analysis.inputEpoch,
 ): Readonly<Record<string, readonly StudioSimulationAnalysisV2[]>> {
   if (analyses.length === 0) return current;
   const next: Record<string, readonly StudioSimulationAnalysisV2[]> = {
@@ -929,7 +977,7 @@ export function archiveArticleReaderAnalysesV3(
       continue;
     }
     const withoutSameEpoch = (next[key] ?? []).filter((candidate) =>
-      candidate.inputEpoch !== analysis.inputEpoch);
+      presentationEpoch(candidate) !== presentationEpoch(analysis));
     next[key] = Object.freeze(
       [...withoutSameEpoch, analysis].slice(-historyDepth),
     );
@@ -1048,6 +1096,7 @@ export function appendArticleReaderFramesV3(
   frames: readonly StudioSimulationFrameV2[],
   sampleStore: WorkbenchScenarioPresentationSampleStoreV3,
   selectedOutputIds?: ReadonlySet<string>,
+  presentationEpochOffsets?: ReadonlyMap<string, number>,
 ): void {
   if (selectedOutputIds?.size === 0) return;
   const diagnosticsEnabled = workbenchPerformanceDiagnosticsEnabledV3();
@@ -1064,7 +1113,7 @@ export function appendArticleReaderFramesV3(
   ]) => ({
     scenarioId,
     samples: scenarioFrames.map((frame) => Object.freeze({
-      inputEpoch: frame.inputEpoch,
+      inputEpoch: frame.inputEpoch + (presentationEpochOffsets?.get(scenarioId) ?? 0),
       acceptedRevision: frame.acceptedRevision,
       acceptedTimeSec: frame.acceptedTimeSec,
       values: Object.freeze(Object.fromEntries(

@@ -198,16 +198,9 @@ test("@desktop @mobile @pane-picker scopes settings to the pane body and keeps t
     await page.keyboard.press("Escape");
     if (mobile) {
       const group = page.locator(`[data-mobile-pane-group-role="${area}"]`).first();
-      const toggle = group.locator(".workbench-mobile-pane-group-toggle");
-      await toggle.click();
-      await expect(group).toHaveAttribute("data-expanded", "false");
-      await expect(group.getByTestId("pane-settings-button-v3")).toHaveCount(1);
-      await group.getByTestId("pane-settings-button-v3").click();
-      await expect(picker.getByTestId("pane-selected-items-v3")).toBeVisible();
-      await page.keyboard.press("Escape");
-      await expect(group.getByTestId("pane-settings-button-v3")).toBeFocused();
-      await toggle.click();
-      await expect(group).toHaveAttribute("data-expanded", "true");
+      // The sole pane in a one-Scenario session needs no redundant heading;
+      // its binding/items editor remains available in the pane body.
+      await expect(group.locator(".workbench-mobile-pane-group-toggle")).toHaveCount(0);
       await expect(group.getByTestId("pane-settings-button-v3")).toHaveCount(1);
     }
   }

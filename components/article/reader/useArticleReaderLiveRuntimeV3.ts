@@ -1,4 +1,9 @@
 import React from "react";
+import { useArticleReaderWorkerResourcesV1 } from "./ArticleReaderWorkerResourcesV1";
+import {
+  WorkbenchBackgroundWorkerPoolV3,
+  resolveWorkbenchBackgroundWorkerBudgetV3,
+} from "@/components/workbench/runtime/WorkbenchBackgroundWorkerPoolV3";
 import type { StudioReaderContinuationV3 } from "@/studio/infrastructure/browser/StudioExperimentSessionHandoffV3";
 
 export type ArticleReaderSessionMemoryV3 = {
@@ -13,6 +18,7 @@ import type {
 } from "@/studio/contracts/v2/release";
 import type {
   StudioSimulationAnalysisExecutionPlanResolverV2,
+  StudioSimulationAnalysisV2,
 } from "@/studio/contracts/v2/simulation";
 import type {
   MainWirePeriodicPvaDerivationV1,
@@ -38,6 +44,7 @@ export type UseArticleReaderLiveRuntimeResultV3 = Readonly<{
   periodicPvaDerivation: MainWirePeriodicPvaDerivationV1 | null;
   presentationOutput?: ArticleReaderLiveRuntimeV3["presentationOutput"];
   presentationTrace?: ArticleReaderLiveRuntimeV3["presentationTrace"];
+  presentationAnalysisEpoch?: ArticleReaderLiveRuntimeV3["presentationAnalysisEpoch"];
   captureContinuation(): Promise<StudioReaderContinuationV3>;
   play(): void;
   pause(): Promise<void>;
@@ -80,6 +87,7 @@ export function useArticleReaderLiveRuntimeV3(
   cyclePhaseOutputId?: string,
   sweepWindowSec = 6,
 ): UseArticleReaderLiveRuntimeResultV3 {
+  const workerResources = useArticleReaderWorkerResourcesV1();
   const requestedScopeKey = JSON.stringify(visibleScenarioIds ?? null);
   const validatedVisibleScenarioIds = React.useMemo(
     () => validatedArticleReaderVisibleScenarioIdsV3(
@@ -125,27 +133,37 @@ export function useArticleReaderLiveRuntimeV3(
       // Epochs belong to a runtime session. A restored checkpoint starts a new
       // authority and must not archive the prior session as a changed condition.
       sampleStore.reset();
-      const controller = new ArticleReaderLiveRuntimeV3(snapshot, {
-        ...(continuation ? { continuation } : {}),
-        initialPlaybackPreference: playbackPreference?.current,
-        ...(initialActiveScenarioId === undefined
-          ? {}
-          : { initialActiveScenarioId }),
-        visibleScenarioIds: validatedVisibleScenarioIds,
-        structuralAnalyses,
-        presentationAnalysisIds,
-        ...(presentationOutputIds === undefined
-          ? {}
-          : { presentationOutputIds }),
-        sampleStore,
-        releaseTicket: exactModel.releaseTicket,
-        ...(exactModel?.resolveAnalysisExecutionPlan === undefined
-          ? {}
-          : {
-              resolveAnalysisExecutionPlan:
-                exactModel.resolveAnalysisExecutionPlan,
-            }),
-      });
+      const resourceLease = workerResources?.acquire(() => new WorkbenchBackgroundWorkerPoolV3({
+        ...resolveWorkbenchBackgroundWorkerBudgetV3(), warmSize: 0,
+      }));
+      let controller: ArticleReaderLiveRuntimeV3;
+      try {
+        controller = new ArticleReaderLiveRuntimeV3(snapshot, {
+          ...(resourceLease ? { backgroundWorkerPool: resourceLease } : {}),
+          ...(continuation ? { continuation } : {}),
+          initialPlaybackPreference: playbackPreference?.current,
+          ...(initialActiveScenarioId === undefined
+            ? {}
+            : { initialActiveScenarioId }),
+          visibleScenarioIds: validatedVisibleScenarioIds,
+          structuralAnalyses,
+          presentationAnalysisIds,
+          ...(presentationOutputIds === undefined
+            ? {}
+            : { presentationOutputIds }),
+          sampleStore,
+          releaseTicket: exactModel.releaseTicket,
+          ...(exactModel?.resolveAnalysisExecutionPlan === undefined
+            ? {}
+            : {
+                resolveAnalysisExecutionPlan:
+                  exactModel.resolveAnalysisExecutionPlan,
+              }),
+        });
+      } catch (error) {
+        resourceLease?.release();
+        throw error;
+      }
       controllerRef.current = controller;
       setState(controller.getSnapshot());
       const unsubscribe = controller.subscribe(() => {
@@ -173,8 +191,8 @@ export function useArticleReaderLiveRuntimeV3(
         if (sessionMemory) {
           sessionMemory.pending = controller.captureContinuation(false)
             .catch(error => { sessionMemory.error = error instanceof Error ? error : new Error(String(error)); return null; })
-            .finally(() => controller.dispose());
-        } else void controller.dispose();
+            .finally(() => controller.dispose()).finally(() => resourceLease?.release());
+        } else void controller.dispose().finally(() => resourceLease?.release());
       };
     };
     void initialize().catch(error => {
@@ -183,6 +201,7 @@ export function useArticleReaderLiveRuntimeV3(
     return () => { cancelled = true; cleanup?.(); };
   }, [
     initialActiveScenarioId,
+    workerResources,
     sampleStore,
     snapshot,
     structuralAnalysisKey,
@@ -198,6 +217,20 @@ export function useArticleReaderLiveRuntimeV3(
   React.useEffect(() => {
     void controllerRef.current?.setPresentationVisible(presentationVisible);
   }, [presentationVisible]);
+
+  React.useEffect(() => {
+    if (presentationVisible || state.status !== "paused" || state.pendingAnalysisKeys.length > 0) return;
+    const controller = controllerRef.current;
+    // Keep quick back-and-forth reading warm; a long article must not retain
+    // one numerical Worker for every Scenario ever visited.
+    const timer = setTimeout(() => {
+      void controller?.parkIfHidden().catch(error => {
+        if (controllerRef.current === controller) setState(previous => ({ ...previous,
+          status: "failed", error: error instanceof Error ? error : new Error(String(error)) }));
+      });
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [presentationVisible, state.status, state.pendingAnalysisKeys.length]);
 
   const captureContinuation = React.useCallback(async () => {
     const controller = controllerRef.current;
@@ -240,6 +273,8 @@ export function useArticleReaderLiveRuntimeV3(
   const presentationOutput = React.useCallback((scenarioId: string, outputId: string) =>
     controllerRef.current?.presentationOutput(scenarioId, outputId), []);
   const presentationTrace = React.useCallback((scenarioId: string) => controllerRef.current?.presentationTrace(scenarioId), []);
+  const presentationAnalysisEpoch = React.useCallback((analysis: StudioSimulationAnalysisV2) =>
+    controllerRef.current?.presentationAnalysisEpoch(analysis) ?? analysis.inputEpoch, []);
   return React.useMemo(() => Object.freeze({
     state,
     sampleStore,
@@ -247,6 +282,7 @@ export function useArticleReaderLiveRuntimeV3(
     periodicPvaDerivation: exactModel.periodicPvaDerivation,
     presentationOutput,
     presentationTrace,
+    presentationAnalysisEpoch,
     applyControl,
     captureContinuation,
     play,
@@ -261,6 +297,7 @@ export function useArticleReaderLiveRuntimeV3(
     exactModel.periodicPvaDerivation,
     presentationOutput,
     presentationTrace,
+    presentationAnalysisEpoch,
     pause,
     play,
     requestAnalysis,

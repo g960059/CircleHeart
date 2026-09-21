@@ -709,6 +709,29 @@ describe("WorkbenchParallelScenarioRuntimeV3", () => {
     expect(harness.conductor.running).toBe(true);
   });
 
+  it("releases the transferred pause lease if resolving the analysis plan fails", async () => {
+    const harness = harnessV3(vi.fn(), undefined, {
+      resolveAnalysisExecutionPlan: () => { throw new Error("invalid analysis plan"); },
+    });
+    await harness.runtime.initialize({
+      scenarios: [seedV3("scenario/baseline", "Baseline", 0)],
+      activeScenarioId: "scenario/baseline",
+    });
+    harness.runtime.playAll();
+    await harness.runtime.pauseScenario("scenario/baseline");
+    await harness.runtime.pauseScenario("scenario/baseline");
+    await expect(harness.runtime.requestAnalysis({
+      scenarioId: "scenario/baseline", analysisId: "analysis/guyton-starling",
+      expectedInputEpoch: 0, expectedAcceptedRevision: 0, expectedAcceptedTimeSec: 0,
+      sourceAlreadyPaused: true,
+    })).rejects.toThrow("invalid analysis plan");
+    // Only the transferred lease is released; another concurrent owner remains.
+    expect(harness.conductor.running).toBe(false);
+    harness.runtime.resumeScenario("scenario/baseline");
+    expect(harness.conductor.running).toBe(true);
+    await harness.runtime.dispose();
+  });
+
   it("cancels obsolete Scenario analysis before applying a new control input", async () => {
     const cancelled = vi.fn();
     const scheduled = vi.fn();

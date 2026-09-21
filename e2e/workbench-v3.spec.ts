@@ -1768,16 +1768,8 @@ test("@mobile 390px Workbench uses a live Stage and one-scroll task deck", async
   const controlGroupToggle = controlGroup.locator(
     ".workbench-mobile-pane-group-toggle",
   );
-  await expect(controlGroupToggle).toHaveAttribute("aria-expanded", "true");
-  await expect(
-    page.getByRole("slider", { name: "HR" }),
-  ).toBeVisible();
-  await controlGroupToggle.click();
-  await expect(controlGroupToggle).toHaveAttribute("aria-expanded", "false");
-  await expect(
-    page.getByRole("slider", { name: "HR" }),
-  ).toBeHidden();
-  await controlGroupToggle.click();
+  await expect(controlGroupToggle).toHaveCount(0);
+  await expect(page.getByRole("slider", { name: "HR" })).toBeVisible();
   await taskDeck.getByRole("tab", { name: "出力" }).click();
   const outputGroup = taskDeck.locator(
     '[data-mobile-pane-group-role="output"]',
@@ -1785,13 +1777,9 @@ test("@mobile 390px Workbench uses a live Stage and one-scroll task deck", async
   const outputGroupToggle = outputGroup.locator(
     ".workbench-mobile-pane-group-toggle",
   );
-  await expect(outputGroupToggle).toHaveAttribute("aria-expanded", "true");
-  await expect(outputGroup.getByText("AoP", { exact: true }))
-    .toBeVisible();
-  await outputGroupToggle.click();
-  await expect(outputGroup.getByText("AoP", { exact: true }))
-    .toBeHidden();
-  await outputGroupToggle.click();
+  await expect(outputGroupToggle).toHaveCount(0);
+  await expect(page.getByTestId("workbench-mobile-observation")).toHaveCount(0);
+  await expect(outputGroup.getByText("AoP", { exact: true })).toBeVisible();
   await taskDeck.getByRole("tab", { name: "Scenario" }).click();
   await expect(
     taskDeck.getByTestId("workbench-scenario-manager-v3"),

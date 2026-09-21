@@ -31,6 +31,8 @@ import {
   positiveModuloV3,
 } from "./SweepingWaveformCanvasV3";
 import {
+  drawWorkbenchStaticCanvasLayerV3,
+  workbenchCanvasObjectIdentityV3,
   scaleLinearV3,
   readWorkbenchCanvasThemeVariablesV3,
   useResponsiveCanvasFrameV3,
@@ -661,15 +663,6 @@ export function PressureVolumeLoopCanvasV3(
       canvasRef.current.dataset.volumeMaximumMl = String(volumeDomain[1]);
       canvasRef.current.dataset.pressureMaximumMmhg = String(pressureDomain[1]);
     }
-    drawPvAxesV3(
-      context,
-      plot,
-      volumeDomain,
-      pressureDomain,
-      pressureAxisLines,
-      theme,
-      domainPoints.length > 0,
-    );
     const x = (value: number) => scaleLinearV3(
       value,
       volumeDomain[0],
@@ -685,36 +678,47 @@ export function PressureVolumeLoopCanvasV3(
       plot.top,
     );
 
-    context.save();
-    context.beginPath();
-    context.rect(
-      plot.left,
-      plot.top,
-      plot.right - plot.left,
-      plot.bottom - plot.top,
-    );
-    context.clip();
-    // Focus the whole trajectory, including its completed beats and prior inputs.
     const drawingOrder = [...visibleRenderedTraces].sort((a, b) =>
       workbenchLegendTraceAlphaV3(legendSelection, pvLegendDescriptorV3(a.trace))
       - workbenchLegendTraceAlphaV3(legendSelection, pvLegendDescriptorV3(b.trace)));
-    // All auxiliary lines go behind all loop geometry.
-    for (const { periodicPvaHistoryDrawings, trace } of drawingOrder) {
-      if (!periodicPvaSupported) continue;
-      for (const { drawing, alpha } of periodicPvaHistoryDrawings) drawPeriodicPvaV1(
-        context, drawing, x, y, trace.chamberColor,
-        alpha * workbenchLegendTraceAlphaV3(legendSelection, pvLegendDescriptorV3(trace)),
-        showPressureEnvelope, theme.canvas,
-      );
-    }
-    for (const { periodicPvaDrawing, trace } of drawingOrder) {
-      if (periodicPvaSupported && periodicPvaDrawing !== null) drawPeriodicPvaV1(
-        context, periodicPvaDrawing, x, y, trace.chamberColor,
-        0.92 * workbenchLegendTraceAlphaV3(legendSelection, pvLegendDescriptorV3(trace)),
-        showPressureEnvelope,
-        theme.canvas,
-      );
-    }
+    const analysisIdentity = drawingOrder.map(({ trace }) => [
+      trace.scenarioId, trace.chamberId, trace.chamberColor,
+      workbenchLegendTraceAlphaV3(legendSelection, pvLegendDescriptorV3(trace)),
+      workbenchCanvasObjectIdentityV3(trace.periodicPva),
+      (trace.periodicPvaHistory ?? []).map(({ value, inputEpoch }) => [workbenchCanvasObjectIdentityV3(value), inputEpoch]),
+      (trace.historyEpochs ?? []).map(previous => previous.inputEpoch),
+    ]);
+    drawWorkbenchStaticCanvasLayerV3(context, width, height,
+      [plot, volumeDomain, pressureDomain, pressureAxisLines, theme, domainPoints.length > 0,
+        periodicPvaSupported, showPvaBoundary, showPressureEnvelope, analysisIdentity], layer => {
+      drawPvAxesV3(layer, plot, volumeDomain, pressureDomain, pressureAxisLines, theme, domainPoints.length > 0);
+      layer.save();
+      layer.beginPath();
+      layer.rect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top);
+      layer.clip();
+      // These are unchanged measured curves, not predictions of the live loop.
+      // New partial results, domains, themes and legend focus invalidate the layer.
+      for (const { periodicPvaHistoryDrawings, trace } of drawingOrder) {
+        if (!periodicPvaSupported) continue;
+        for (const { drawing, alpha } of periodicPvaHistoryDrawings) drawPeriodicPvaV1(
+          layer, drawing, x, y, trace.chamberColor,
+          alpha * workbenchLegendTraceAlphaV3(legendSelection, pvLegendDescriptorV3(trace)),
+          showPressureEnvelope, theme.canvas,
+        );
+      }
+      for (const { periodicPvaDrawing, trace } of drawingOrder) {
+        if (periodicPvaSupported && periodicPvaDrawing !== null) drawPeriodicPvaV1(
+          layer, periodicPvaDrawing, x, y, trace.chamberColor,
+          0.92 * workbenchLegendTraceAlphaV3(legendSelection, pvLegendDescriptorV3(trace)),
+          showPressureEnvelope, theme.canvas,
+        );
+      }
+      layer.restore();
+    });
+    context.save();
+    context.beginPath();
+    context.rect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top);
+    context.clip();
     for (const {
       history,
       recentBeats,

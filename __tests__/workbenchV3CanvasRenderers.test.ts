@@ -85,6 +85,30 @@ const sampleV3 = (
   });
 
 describe("V3-neutral Workbench Canvas helpers", () => {
+  it("reuses axes while data animates and invalidates the bitmap for theme, bounds, font readiness and density", () => {
+    const layer = { setTransform: vi.fn() };
+    const create = vi.fn(() => ({ width: 0, height: 0, getContext: () => layer }));
+    const fonts = { status: "loaded" };
+    vi.stubGlobal("document", { createElement: create, fonts });
+    const transform = { a: 2, b: 0, c: 0, d: 2, e: 0, f: 0 };
+    const context = { getTransform: () => transform, drawImage: vi.fn() } as unknown as CanvasRenderingContext2D;
+    const paint = vi.fn();
+    try {
+      for (let frame = 0; frame < 60; frame++) canvasRuntime.drawWorkbenchStaticCanvasLayerV3(context, 400, 300, ["light", [0, 200]], paint);
+      expect(paint).toHaveBeenCalledOnce();
+      expect(context.drawImage).toHaveBeenCalledTimes(60);
+      canvasRuntime.drawWorkbenchStaticCanvasLayerV3(context, 400, 300, ["dark", [0, 200]], paint);
+      canvasRuntime.drawWorkbenchStaticCanvasLayerV3(context, 400, 300, ["dark", [0, 250]], paint);
+      canvasRuntime.drawWorkbenchStaticCanvasLayerV3(context, 450, 300, ["dark", [0, 250]], paint);
+      transform.a = transform.d = 1;
+      canvasRuntime.drawWorkbenchStaticCanvasLayerV3(context, 450, 300, ["dark", [0, 250]], paint);
+      fonts.status = "loading";
+      canvasRuntime.drawWorkbenchStaticCanvasLayerV3(context, 450, 300, ["dark", [0, 250]], paint);
+      expect(paint).toHaveBeenCalledTimes(6);
+      expect(create).toHaveBeenCalledOnce();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it.each([0.2, 0.6])("draws every focused PV layer last when the other scenario is at phase %s", otherPhase => {
     const store = new WorkbenchScenarioPresentationSampleStoreV3();
     store.setCyclePhaseOutputId(TEST_CYCLE_PHASE_OUTPUT_ID_V3);

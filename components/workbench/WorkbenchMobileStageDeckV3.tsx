@@ -11,15 +11,11 @@ import type {
   WorkbenchPaneAddRequestV3,
   WorkbenchPaneDefinitionV3,
 } from "@/components/workbench/WorkbenchDockview";
-import {
-  ExperimentObservationV3,
-  type ExperimentOutputSelectionV3,
-} from "@/components/workbench/ExperimentPanePresentationV3";
+import { ExperimentObservationV3 } from "@/components/workbench/ExperimentPanePresentationV3";
 import {
   projectWorkbenchObservationV3,
-  resolveWorkbenchObservedKeysV3,
+  workbenchMobileOutputKeysV3,
   useWorkbenchRememberedReadingsV3,
-  workbenchObservedOutputKeyV3,
   type WorkbenchOutputPaneReadingV3,
 } from "@/components/workbench/presentation/WorkbenchObservationV3";
 
@@ -33,12 +29,13 @@ type WorkbenchMobileStageDeckPropsV3 = Readonly<{
   scenarioContent: React.ReactNode;
   scenarioError?: React.ReactNode;
   renderGraphPane: (pane: WorkbenchPaneDefinitionV3) => React.ReactNode;
-  renderOutputPane: (pane: WorkbenchPaneDefinitionV3, selection?: ExperimentOutputSelectionV3) => React.ReactNode;
+  renderOutputPane: (pane: WorkbenchPaneDefinitionV3) => React.ReactNode;
   /** Live reading of one output pane, for the observation beneath the graph. */
   readOutputPane?: (pane: WorkbenchPaneDefinitionV3) => WorkbenchOutputPaneReadingV3 | null;
-  /** Session-owned observation: `null` until the user changes the initial choice. */
-  observedSelection?: readonly string[] | null;
-  onObservedSelectionChange?: (selection: readonly string[]) => void;
+  /** View state only: output composition belongs to the pane editor. */
+  outputsExpanded?: boolean;
+  onOutputsExpandedChange?: (expanded: boolean) => void;
+  singleScenarioLabel?: string;
   renderControlPane: (pane: WorkbenchPaneDefinitionV3) => React.ReactNode;
   onOpenPaneSettings: (paneId: string, section?: "items" | "binding", intent?: "add" | "manage", anchor?: HTMLElement) => void;
   onAddGraphPane: WorkbenchPaneAddRequestV3;
@@ -100,8 +97,8 @@ function useCollapsedPanesV3(
 
 /**
  * Smartphone Workbench shell: graph tabs above the plot, the observation
- * (measurements the user keeps in view) directly beneath it, then one deck
- * that switches between the controllers, every output pane, and Scenarios.
+ * directly beneath it, then a deck for controls, output composition and
+ * Scenarios. Outputs are read once; expanding never changes their membership.
  * It owns no numerical or durable Experiment state: it projects the same
  * panes and callbacks the desktop Workbench uses. Editing, adding panes and
  * Scenario management stay reachable from the deck.
@@ -116,8 +113,9 @@ export function WorkbenchMobileStageDeckV3({
   renderGraphPane,
   renderOutputPane,
   readOutputPane,
-  observedSelection = null,
-  onObservedSelectionChange,
+  outputsExpanded = false,
+  onOutputsExpandedChange,
+  singleScenarioLabel,
   renderControlPane,
   onOpenPaneSettings,
   onAddGraphPane,
@@ -127,39 +125,26 @@ export function WorkbenchMobileStageDeckV3({
   const { t } = useTranslation();
   const [activeTask, setActiveTask] = React.useState<WorkbenchMobileTaskV3>("control");
   const [graphPaneId, setGraphPaneId] = useReconciledPaneSelectionV3(graphPanes);
-  // The first controller pane opens; the rest wait one tap away. Output panes
-  // open so every measurement is a toggle for the observation.
+  // The first controller pane opens; the rest wait one tap away.
   const [collapsedControlPaneIds, toggleControlPane, openControlPane] =
     useCollapsedPanesV3(controlPanes, (_pane, index) => index > 0);
   const [collapsedOutputPaneIds, toggleOutputPane, openOutputPane] =
     useCollapsedPanesV3(outputPanes, () => false);
   const activeGraphPane = graphPanes.find(({ paneId }) => paneId === graphPaneId) ?? null;
   const tabId = React.useId();
-  // The observation reads every output pane, remembers valid measurements
-  // after commit (pane bodies are unmounted behind the control task), and
-  // shows the Session's observed tiles grouped by pane.
+  // One live reading surface, grouped by pane and its resolved Scenario.
   const readings = React.useMemo(
     () => outputPanes.flatMap((pane) => { const reading = readOutputPane?.(pane); return reading == null ? [] : [reading]; }),
     [outputPanes, readOutputPane],
   );
   useWorkbenchRememberedReadingsV3(readings);
-  const observedKeys = resolveWorkbenchObservedKeysV3(observedSelection, readings);
-  const observedSet = new Set(observedKeys);
+  const observedKeys = workbenchMobileOutputKeysV3(readings, outputsExpanded);
   const observedGroups = projectWorkbenchObservationV3(readings, observedKeys, {
     genericTitles: [t("workbench.live.mobilePaneAreas.output"), t("workbench.live.outputArea")],
   });
   const observedCount = observedGroups.reduce((total, group) => total + group.items.length, 0);
-  const outputSelectionFor = (pane: WorkbenchPaneDefinitionV3): ExperimentOutputSelectionV3 | undefined =>
-    readOutputPane === undefined || onObservedSelectionChange === undefined ? undefined : {
-      selectedItemIds: new Set(readings.find((reading) => reading.paneId === pane.paneId)?.measured
-        .map((item) => item.itemId)
-        .filter((itemId) => observedSet.has(workbenchObservedOutputKeyV3(pane.paneId, itemId)))),
-      onToggle: (itemId) => {
-        const key = workbenchObservedOutputKeyV3(pane.paneId, itemId);
-        onObservedSelectionChange(observedSet.has(key) ? observedKeys.filter((candidate) => candidate !== key) : [...observedKeys, key]);
-      },
-      toggleLabel: (label, selected) => t(selected ? "workbench.live.unobserveOutput" : "workbench.live.observeOutput", { label }),
-    };
+  const outputCount = readings.reduce((count, reading) => count + reading.measured.length, 0);
+  const compactCount = workbenchMobileOutputKeysV3(readings, false).length;
 
   const addPane = (area: "control" | "output", anchor: HTMLElement) => {
     const request = area === "control" ? onAddControlPane : onAddOutputPane;
@@ -196,15 +181,23 @@ export function WorkbenchMobileStageDeckV3({
         </div>
       </section>
 
-      {observedCount > 0 && (
-        <ExperimentObservationV3
-          className="workbench-mobile-observation"
-          groups={observedGroups}
-          label={t("workbench.live.observation")}
-          followingLabel={t("workbench.live.paneBindingModeActive")}
+      {observedCount > 0 && activeTask !== "output" && (
+        <section className="workbench-mobile-measurements"
           data-testid="workbench-mobile-observation"
           data-observed-count={observedCount}
-        />
+          data-expanded={outputsExpanded} aria-label={t("workbench.live.observation")}>
+          {outputCount > compactCount && <div className="workbench-mobile-output-actions">
+            <button type="button" aria-expanded={outputsExpanded} aria-controls={`${tabId}-measurements`}
+              onClick={() => onOutputsExpandedChange?.(!outputsExpanded)} data-workbench-output-expand>
+              {t(outputsExpanded ? "workbench.live.foldOutputs" : "workbench.live.allOutputs", { count: outputCount })}
+              <ChevronDown className={`h-3.5 w-3.5 ${outputsExpanded ? "rotate-180" : ""}`} aria-hidden="true" />
+            </button>
+          </div>}
+          <div id={`${tabId}-measurements`} className="workbench-mobile-measurement-scroll">
+            <ExperimentObservationV3 className="workbench-mobile-observation" groups={observedGroups}
+              label={t("workbench.live.observation")} followingLabel={t("workbench.live.paneBindingModeActive")} />
+          </div>
+        </section>
       )}
 
       <section
@@ -245,17 +238,13 @@ export function WorkbenchMobileStageDeckV3({
               onTogglePane={toggleControlPane}
               onOpenPaneSettings={onOpenPaneSettings}
               onAddPane={(anchor) => addPane("control", anchor)}
+              singleScenarioLabel={singleScenarioLabel}
             />
           ) : activeTask === "output" ? (
-            <MobilePaneListV3
-              area="output"
-              panes={outputPanes}
-              collapsedPaneIds={collapsedOutputPaneIds}
-              renderPane={(pane) => renderOutputPane(pane, outputSelectionFor(pane))}
-              onTogglePane={toggleOutputPane}
-              onOpenPaneSettings={onOpenPaneSettings}
-              onAddPane={(anchor) => addPane("output", anchor)}
-            />
+            <MobilePaneListV3 area="output" panes={outputPanes}
+              collapsedPaneIds={collapsedOutputPaneIds} renderPane={renderOutputPane}
+              onTogglePane={toggleOutputPane} onOpenPaneSettings={onOpenPaneSettings}
+              onAddPane={(anchor) => addPane("output", anchor)} singleScenarioLabel={singleScenarioLabel} />
           ) : (
             <div className="min-h-full">
               {scenarioError}
@@ -362,6 +351,7 @@ function MobilePaneListV3({
   onTogglePane,
   onOpenPaneSettings,
   onAddPane,
+  singleScenarioLabel,
 }: Readonly<{
   area: "control" | "output";
   panes: readonly WorkbenchPaneDefinitionV3[];
@@ -370,6 +360,7 @@ function MobilePaneListV3({
   onTogglePane: (paneId: string) => void;
   onOpenPaneSettings: (paneId: string, section?: "items" | "binding", intent?: "add" | "manage", anchor?: HTMLElement) => void;
   onAddPane: (anchor: HTMLElement) => void;
+  singleScenarioLabel?: string;
 }>) {
   const { t } = useTranslation();
   return (
@@ -381,7 +372,12 @@ function MobilePaneListV3({
     >
       {panes.length === 0 && <MobileEmptyPaneV3 message={t("workbench.editor.emptyPaneArea")} />}
       {panes.map((pane) => {
-        const expanded = !collapsedPaneIds.has(pane.paneId);
+        const hideHeading = panes.length === 1 && singleScenarioLabel !== undefined
+          && [singleScenarioLabel, ...(area === "control"
+            ? ["Parameters", "Controls", t("workbench.live.mobilePaneAreas.control"), t("workbench.live.controlArea")]
+            : ["Outputs", t("workbench.live.mobilePaneAreas.output"), t("workbench.live.outputArea")])]
+            .some(label => label.trim().toLowerCase() === pane.title.trim().toLowerCase());
+        const expanded = hideHeading || !collapsedPaneIds.has(pane.paneId);
         const headingId = `mobile-pane-${pane.paneId}-heading`;
         const bodyId = `mobile-pane-${pane.paneId}-body`;
         return (
@@ -390,9 +386,10 @@ function MobilePaneListV3({
             className="workbench-mobile-pane-group"
             data-mobile-pane-group-role={area}
             data-expanded={expanded ? "true" : "false"}
-            aria-labelledby={headingId}
+            aria-labelledby={hideHeading ? undefined : headingId}
+            aria-label={hideHeading ? pane.title : undefined}
           >
-            <header className="workbench-mobile-pane-group-header">
+            {!hideHeading && <header className="workbench-mobile-pane-group-header">
               <button
                 id={headingId}
                 type="button"
@@ -405,7 +402,7 @@ function MobilePaneListV3({
                 <ChevronDown className="workbench-mobile-pane-group-chevron h-4 w-4" aria-hidden="true" />
               </button>
               {!expanded && <WorkbenchPaneSettingsButtonV3 title={pane.title} onOpen={(anchor) => onOpenPaneSettings(pane.paneId, "items", "manage", anchor)} />}
-            </header>
+            </header>}
             <div id={bodyId} className="workbench-mobile-pane-group-body" hidden={!expanded}>
               {expanded && renderPane(pane)}
             </div>

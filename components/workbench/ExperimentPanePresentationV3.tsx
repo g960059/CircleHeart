@@ -1,5 +1,5 @@
 import React from "react";
-import { Check, Plus, Undo2 } from "lucide-react";
+import { Plus, Undo2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { studioNumericControlValueIssueV2 } from "@/studio/contracts/v2/control";
@@ -44,23 +44,11 @@ export type ExperimentObservationGroupV3 = Readonly<{
   scenario?: Readonly<{ label: string; colorHex: string }>;
   following?: boolean;
   /**
-   * The heading adds nothing on screen (one group, one Scenario, a title
-   * that only repeats it): it is kept for assistive technology only.
+   * The heading is redundant in the current reading layout and is kept
+   * for assistive technology without consuming a visible label column.
    */
   headingHidden?: boolean;
   items: readonly ExperimentOutputPresentationItemV3[];
-}>;
-
-/**
- * Ephemeral observation selection shared by Article Reader and Workbench:
- * a measurement tile toggles its membership in the observation kept beside
- * the graph. Selection is presentation state only; it never changes the
- * sealed pane, the Scenario binding, or the value.
- */
-export type ExperimentOutputSelectionV3 = Readonly<{
-  selectedItemIds: ReadonlySet<string>;
-  onToggle: (itemId: string) => void;
-  toggleLabel: (label: string, selected: boolean) => string;
 }>;
 
 export type ExperimentPaneAddItemActionV3 = Readonly<{
@@ -115,7 +103,6 @@ export function ExperimentOutputGridV3({
   emptyMessage,
   items,
   scrollMode = "contained",
-  selection,
   variant,
 }: Readonly<{
   addItemAction?: ExperimentPaneAddItemActionV3;
@@ -123,8 +110,6 @@ export function ExperimentOutputGridV3({
   emptyMessage?: string;
   items: readonly ExperimentOutputPresentationItemV3[];
   scrollMode?: "contained" | "parent";
-  /** When present every tile is a toggle for the observation. */
-  selection?: ExperimentOutputSelectionV3;
   variant: "pane" | "article";
 }>) {
   const { i18n } = useTranslation();
@@ -140,7 +125,6 @@ export function ExperimentOutputGridV3({
     <div
       className={`workbench-output-grid grid ${layoutClassName} ${className}`.trim()}
       data-experiment-output-presentation={variant}
-      data-output-selection={selection === undefined ? undefined : "true"}
     >
       {items.length === 0 && emptyMessage !== undefined && (
         <p className="col-span-full p-4 text-xs text-wb-subtle">
@@ -149,7 +133,6 @@ export function ExperimentOutputGridV3({
       )}
       {items.map((item) => {
         const display = resolveExperimentOutputDisplayV3(item);
-        const selected = selection?.selectedItemIds.has(item.itemId);
         return (
           <ExperimentOutputTileV3
             key={item.itemId}
@@ -162,9 +145,6 @@ export function ExperimentOutputGridV3({
             methodLabel={item.outputId ? methodLabels.get(item.outputId) : undefined}
             contextLabel={item.staleNotice ? (japanese ? "前回値" : "Previous")
               : item.outputId && studioOutputReadingV1(item.outputId) === "waveform" ? (japanese ? "現在値" : "Current") : undefined}
-            selected={selected}
-            toggleLabel={selection === undefined ? undefined : selection.toggleLabel(item.label, selected === true)}
-            onToggle={selection?.onToggle}
           />
         );
       })}
@@ -184,24 +164,18 @@ export function ExperimentOutputGridV3({
 const ExperimentOutputTileV3 = React.memo(function ExperimentOutputTileV3({
   itemId, label, value, unit, availability, quality,
   description, descriptionAriaLabel, qualityNotice, staleNotice, contextLabel, methodLabel,
-  selected, toggleLabel, onToggle,
 }: Readonly<{
   itemId: string; label: string; value: string; unit: string;
   availability: string; quality: string; description?: string;
   descriptionAriaLabel?: string; qualityNotice?: string; staleNotice?: string;
   contextLabel?: string;
   methodLabel?: string;
-  selected?: boolean;
-  toggleLabel?: string;
-  onToggle?: (itemId: string) => void;
 }>) {
   incrementWorkbenchPerformanceCounterV3("react.output-tile.render");
   const disclosure = [staleNotice ?? qualityNotice, description].filter(Boolean).join("\n\n");
-  const selectable = onToggle !== undefined && toggleLabel !== undefined;
   return <div className="workbench-output-item min-w-0"
     data-output-id={itemId} data-output-availability={availability}
-    data-output-quality={quality} data-output-stale={staleNotice !== undefined ? "true" : "false"}
-    data-output-selected={selectable ? (selected ? "true" : "false") : undefined}>
+    data-output-quality={quality} data-output-stale={staleNotice !== undefined ? "true" : "false"}>
     <div className="flex min-w-0 items-center gap-1">
       {disclosure ? <WorkbenchItemDescriptionPopoverV3
         ariaLabel={descriptionAriaLabel ?? label} description={disclosure}>
@@ -209,14 +183,7 @@ const ExperimentOutputTileV3 = React.memo(function ExperimentOutputTileV3({
       </WorkbenchItemDescriptionPopoverV3>
         : <p className="workbench-output-label min-w-0 truncate">{label}</p>}
       {contextLabel && <span data-testid="output-value-context-v3" className="shrink-0 text-[10px] text-wb-subtle">{contextLabel}</span>}
-      {selectable && (
-        // The tile itself is the target: the button stretches over the tile
-        // while the description trigger stays above it.
-        <button type="button" className="workbench-output-toggle" aria-pressed={selected === true}
-          aria-label={toggleLabel} title={toggleLabel} onClick={() => onToggle(itemId)}>
-          <Check className="h-2.5 w-2.5" aria-hidden="true" strokeWidth={3} />
-        </button>
-      )}
+
     </div>
     {methodLabel && <p data-testid="output-method-context-v3" className="text-[10px] leading-tight text-wb-subtle">{methodLabel}</p>}
     <p className="workbench-output-value mt-0.5 tabular-nums"

@@ -23,12 +23,10 @@ export function isGenericOutputPaneLabelV3(label: string, localeRoleWords: reado
  * The phone Workbench observation: a few measurement tiles kept between the
  * graph and the task deck while a control is used.
  *
- * Observed keys name a source pane and one of its presentation items. The
- * pane keeps its own Scenario binding (fixed or active slot), so an observed
- * item follows the pane, never a Scenario of its own. The selection is
- * Session presentation state: it survives breakpoint changes, reconciles
- * removed panes and items, and keeps an explicit empty choice empty. It is
- * never durable Experiment content.
+ * Keys name a source pane and one of its presentation items. Values follow
+ * the pane's fixed or active-slot binding. The compact view takes the first
+ * items of each configured pane; expansion shows all, without another
+ * membership selection. Composition is edited in the pane itself.
  */
 export function workbenchObservedOutputKeyV3(paneId: string, itemId: string): string {
   return `${paneId}\u001f${itemId}`;
@@ -56,19 +54,18 @@ export type WorkbenchOutputPaneReadingV3 = Readonly<{
   scenario?: Readonly<{ label: string; colorHex: string }>;
 }>;
 
-/** Selection resolved against the panes that exist now; `null` is the initial choice. */
-export function resolveWorkbenchObservedKeysV3(
-  selection: readonly string[] | null,
+/** Compact and expanded views always derive from current pane composition. */
+export function workbenchMobileOutputKeysV3(
   readings: readonly Pick<WorkbenchOutputPaneReadingV3, "paneId" | "measured">[],
+  expanded: boolean,
 ): readonly string[] {
   const available = readings.flatMap((reading) => reading.measured.map((item) => workbenchObservedOutputKeyV3(reading.paneId, item.itemId)));
-  if (selection === null) {
+  if (!expanded) {
     return defaultObservedItemKeysV3(readings.map((reading) => ({
       keys: reading.measured.map((item) => workbenchObservedOutputKeyV3(reading.paneId, item.itemId)),
     })));
   }
-  const availableSet = new Set(available);
-  return Object.freeze(selection.filter((key) => availableSet.has(key)));
+  return Object.freeze(available);
 }
 
 /**
@@ -76,11 +73,9 @@ export function resolveWorkbenchObservedKeysV3(
  * memory, never written. One group per pane keeps the pane's title and its
  * resolved Scenario once; tiles carry a Session-unique identity.
  *
- * The heading is hidden on screen (kept for assistive technology) only when
- * it would add nothing: a single observed group, a single open Scenario, and
- * a title that merely repeats that Scenario or the generic role word. A
- * semantic title, a second group, or a pane scoped to one of several
- * Scenarios keeps its heading.
+ * A lone reading does not need a label column. With several groups, subject
+ * labels and distinct Scenarios remain visible; repeated sole-target titles
+ * remain accessible without consuming measurement space.
  */
 export function projectWorkbenchObservationV3(
   readings: readonly WorkbenchOutputPaneReadingV3[],
@@ -98,7 +93,7 @@ export function projectWorkbenchObservationV3(
     const title = reading.title.trim();
     const titleOnlyNamesTarget = isGenericOutputPaneLabelV3(title, options.genericTitles ?? [])
       || (reading.scenarioLabel !== undefined && title === reading.scenarioLabel.trim());
-    const headingHidden = groups.length === 1 && reading.scenario === undefined && titleOnlyNamesTarget;
+    const headingHidden = groups.length === 1 || (reading.scenario === undefined && titleOnlyNamesTarget);
     return {
       key: reading.paneId,
       title: reading.title,
