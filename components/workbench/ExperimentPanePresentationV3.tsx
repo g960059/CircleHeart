@@ -44,8 +44,8 @@ export type ExperimentObservationGroupV3 = Readonly<{
   scenario?: Readonly<{ label: string; colorHex: string }>;
   following?: boolean;
   /**
-   * The heading adds nothing on screen (one group, one Scenario, a title
-   * that only repeats it): it is kept for assistive technology only.
+   * The heading is redundant in the current reading layout and is kept
+   * for assistive technology without consuming a visible label column.
    */
   headingHidden?: boolean;
   items: readonly ExperimentOutputPresentationItemV3[];

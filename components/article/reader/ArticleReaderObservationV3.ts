@@ -23,12 +23,7 @@ export function articleReaderTitleNamesScenarioV3(title: string, scenario: strin
     || text.includes(`（${name}）`) || text.includes(`(${name})`);
 }
 
-/**
- * Groups observed items by source pane and Scenario. Headings appear only
- * where they distinguish: the Scenario whenever several are open, the pane
- * label whenever it differs from the Scenario name or several panes are
- * observed. A single pane read for a single Scenario shows tiles alone.
- */
+/** Group by source pane and Scenario; reserve visible headings for distinctions between groups. */
 export function articleReaderObservationGroupsV3(
   items: readonly ArticleReaderOutputItemV3[],
   naming: Readonly<{
@@ -52,13 +47,11 @@ export function articleReaderObservationGroupsV3(
     const paneLabel = naming.paneLabel(group.sourcePaneId);
     const scenarioLabel = naming.scenarioLabel(group.scenarioId);
     const distinguishes = (several || naming.multiScenario) && paneLabel !== scenarioLabel;
-    // One pane, one Scenario: the heading is visible only when the title
-    // says more than the target (a subject such as valves); a title that
-    // repeats the Scenario or merely names the role remains for assistive
-    // technology so the group is still named.
     const title = paneLabel !== undefined && (distinguishes || !naming.multiScenario) ? paneLabel : undefined;
-    const headingHidden = title !== undefined && !several && !naming.multiScenario
-      && (paneLabel === scenarioLabel || isGenericOutputPaneLabelV3(paneLabel ?? "", naming.genericTitles ?? []));
+    // A lone reading needs no label column, even when the graph compares other
+    // Scenarios. Multiple panes keep subject labels, but not a repeated sole target.
+    const headingHidden = !several || (!naming.multiScenario
+      && (paneLabel === scenarioLabel || isGenericOutputPaneLabelV3(paneLabel ?? "", naming.genericTitles ?? [])));
     return {
       key,
       ...(title === undefined ? {} : { title }),

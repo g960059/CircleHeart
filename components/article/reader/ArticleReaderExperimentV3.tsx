@@ -1215,11 +1215,7 @@ export function articleReaderAnalysisScenarioIdsV3(
   return Object.freeze(briefing.scenarioScope.visibleScenarioIds.filter((scenarioId) => scenarioIds.has(scenarioId)));
 }
 
-/**
- * Analysis state for the reader's decision: measuring (with point progress),
- * measured at the sealed conditions but not for the changed ones (re-measure
- * on request), or failed (retry). Silent when nothing needs attention.
- */
+/** An explicit update for derived results; live waveforms and ordinary outputs keep running. */
 export function ArticleReaderAnalysisStatusV3({
   analysisAutoScenarioIds,
   briefing,
@@ -1234,6 +1230,7 @@ export function ArticleReaderAnalysisStatusV3({
   snapshot: ExperimentSnapshotV2;
 }>) {
   const { t } = useTranslation();
+  const descriptionId = React.useId();
   const analysisId = mainWireFormalPvAnalysisIdV1(runtime.periodicPvaDerivation);
   const scenarioIds = articleReaderAnalysisScenarioIdsV3(briefing, snapshot, contract, runtime.periodicPvaDerivation !== null);
   if (scenarioIds.length === 0) return null;
@@ -1262,26 +1259,25 @@ export function ArticleReaderAnalysisStatusV3({
     // without adding another visible row or pushing the observations down.
     return <span className="sr-only" data-reader-analysis-state="pending" role="status">{t("articleReader.analysisRunning")}</span>;
   }
-  if (failed.length > 0) {
+  const targets = failed.length > 0 ? failed : stale;
+  if (targets.length > 0) {
+    const graphScenarioIds = articleReaderAnalysisScenarioIdsV3({ ...briefing, outputs: [] }, snapshot, contract, runtime.periodicPvaDerivation !== null);
+    const hasCurves = targets.some(({ scenarioId }) => graphScenarioIds.includes(scenarioId));
+    const hasValues = briefing.outputs.some(output => ARTICLE_READER_PERIODIC_PVA_OUTPUT_ID_SET_V3.has(output.outputId)
+      && targets.some(({ scenarioId }) => scenarioId === output.scenarioId));
+    const failedUpdate = failed.length > 0;
+    const actionLabel = t(failedUpdate ? "articleReader.retryAnalysis"
+      : hasCurves && hasValues ? "articleReader.refreshCurvesAndValues"
+      : hasCurves ? "articleReader.refreshCurves" : "articleReader.refreshAnalysisValues");
     return (
-      <div className="article-reader-analysis-status" data-reader-analysis-state="error">
-        <CircleAlert className="h-3.5 w-3.5 text-wb-danger" aria-hidden="true" />
-        <span title={failed[0]!.error}>{t("articleReader.analysisError")}</span>
-        <button type="button" disabled={!canRequest} onClick={() => request(failed.map(({ scenarioId }) => scenarioId))} aria-label={t("articleReader.recomputeAnalysis")}>
-          <RotateCw className="h-3.5 w-3.5" aria-hidden="true" />
-          <span className="article-reader-analysis-action-label">{t("articleReader.recomputeAnalysis")}</span>
+      <div className="article-reader-analysis-status" data-reader-analysis-state={failedUpdate ? "error" : "stale"}
+        data-reader-analysis-stale-scenarios={failedUpdate ? undefined : stale.map(({ scenarioId }) => scenarioId).join(" ")}>
+        <span>{t(failedUpdate ? "articleReader.analysisError" : "articleReader.analysisStale")}</span>
+        <button type="button" disabled={!canRequest} onClick={() => request(targets.map(({ scenarioId }) => scenarioId))}
+          data-reader-recompute-analysis aria-describedby={descriptionId} title={t("articleReader.analysisStaleHint")}>
+          {actionLabel}
         </button>
-      </div>
-    );
-  }
-  if (stale.length > 0) {
-    return (
-      <div className="article-reader-analysis-status" data-reader-analysis-state="stale" data-reader-analysis-stale-scenarios={stale.map(({ scenarioId }) => scenarioId).join(" ")}>
-        <span title={t("articleReader.analysisStaleHint")}>{t("articleReader.analysisStale")}</span>
-        <button type="button" disabled={!canRequest} onClick={() => request(stale.map(({ scenarioId }) => scenarioId))} data-reader-recompute-analysis aria-label={t("articleReader.recomputeAnalysis")}>
-          <RotateCw className="h-3.5 w-3.5" aria-hidden="true" />
-          <span className="article-reader-analysis-action-label">{t("articleReader.recomputeAnalysis")}</span>
-        </button>
+        <span id={descriptionId} className="sr-only">{t("articleReader.analysisStaleHint")}</span>
       </div>
     );
   }

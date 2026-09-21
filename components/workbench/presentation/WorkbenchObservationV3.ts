@@ -73,11 +73,9 @@ export function workbenchMobileOutputKeysV3(
  * memory, never written. One group per pane keeps the pane's title and its
  * resolved Scenario once; tiles carry a Session-unique identity.
  *
- * The heading is hidden on screen (kept for assistive technology) only when
- * it would add nothing: a single observed group, a single open Scenario, and
- * a title that merely repeats that Scenario or the generic role word. A
- * semantic title, a second group, or a pane scoped to one of several
- * Scenarios keeps its heading.
+ * A lone reading does not need a label column. With several groups, subject
+ * labels and distinct Scenarios remain visible; repeated sole-target titles
+ * remain accessible without consuming measurement space.
  */
 export function projectWorkbenchObservationV3(
   readings: readonly WorkbenchOutputPaneReadingV3[],
@@ -95,7 +93,7 @@ export function projectWorkbenchObservationV3(
     const title = reading.title.trim();
     const titleOnlyNamesTarget = isGenericOutputPaneLabelV3(title, options.genericTitles ?? [])
       || (reading.scenarioLabel !== undefined && title === reading.scenarioLabel.trim());
-    const headingHidden = groups.length === 1 && reading.scenario === undefined && titleOnlyNamesTarget;
+    const headingHidden = groups.length === 1 || (reading.scenario === undefined && titleOnlyNamesTarget);
     return {
       key: reading.paneId,
       title: reading.title,

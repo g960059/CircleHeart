@@ -118,7 +118,7 @@ describe("phone Workbench observation over pane readings", () => {
     expect(workbenchObservedOutputKeyV3("pane/a", "b")).not.toBe(workbenchObservedOutputKeyV3("pane/ab", ""));
   });
 
-  it("hides a heading on screen only when one group, one Scenario and a title that only repeats the target", () => {
+  it("hides lone pane headings and repeated sole-target labels without losing multi-Scenario distinctions", () => {
     const memory = new WorkbenchLastMeasuredOutputsV1();
     const single = (title: string, extra: Partial<WorkbenchOutputPaneReadingV3> = {}): WorkbenchOutputPaneReadingV3 => ({
       ...reading([current], memory), title, scenarioLabel: "基準", scenario: undefined, ...extra,
@@ -131,14 +131,17 @@ describe("phone Workbench observation over pane readings", () => {
     expect(projectWorkbenchObservationV3([single("Outputs")], [key])[0]).toMatchObject({ headingHidden: true });
     expect(projectWorkbenchObservationV3([single(" outputs ")], [key])[0]).toMatchObject({ headingHidden: true });
     expect(projectWorkbenchObservationV3([single("  ")], [key], options)[0]).toMatchObject({ headingHidden: true });
-    // A semantic title stays visible even alone.
-    expect(projectWorkbenchObservationV3([single("弁関連")], [key], options)[0]?.headingHidden).toBeUndefined();
-    // Several open Scenarios: the pane's Scenario identifies the values, so the heading stays.
-    expect(projectWorkbenchObservationV3([single("基準", { scenario: { label: "基準", colorHex: "#000" } })], [key], options)[0]?.headingHidden).toBeUndefined();
-    // Two groups: both headings stay even when titles only name the Scenario.
+    // A lone pane needs no label column, including a subject title.
+    expect(projectWorkbenchObservationV3([single("弁関連")], [key], options)[0]?.headingHidden).toBe(true);
+    // Several graph Scenarios do not force a heading for one output pane.
+    expect(projectWorkbenchObservationV3([single("基準", { scenario: { label: "基準", colorHex: "#000" } })], [key], options)[0]?.headingHidden).toBe(true);
+    // Repeating the same sole target across two panes adds no distinction.
     const second: WorkbenchOutputPaneReadingV3 = { ...single("基準"), paneId: "pane/b" };
     const two = projectWorkbenchObservationV3([single("基準"), second], [key, workbenchObservedOutputKeyV3("pane/b", "co")], options);
-    expect(two.map((group) => group.headingHidden)).toEqual([undefined, undefined]);
+    expect(two.map((group) => group.headingHidden)).toEqual([true, true]);
+    const compared = projectWorkbenchObservationV3([single("基準", { scenario: { label: "基準", colorHex: "#000" } }),
+      { ...second, title: "負荷", scenario: { label: "負荷", colorHex: "#fff" } }], [key, workbenchObservedOutputKeyV3("pane/b", "co")], options);
+    expect(compared.map(group => group.headingHidden)).toEqual([undefined, undefined]);
   });
 
   it("derives compact and expanded views from the currently configured pane items", () => {

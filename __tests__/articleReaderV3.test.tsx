@@ -1481,7 +1481,8 @@ describe("Article Reader V3 sealed-state analysis policy", () => {
       const key = articleReaderAnalysisKeyV3("scenario/comparison", MAIN_WIRE_INTEGRATED_MODEL_FORMAL_PRESSURE_VOLUME_RELATIONS_V3_ID);
       const failed = render(readerRuntimeStubV3({ analysisErrorByKey: { [key]: "measurement failed" } }));
       expect(failed).toContain('data-reader-analysis-state="error"');
-      expect(failed).toContain(`aria-label="${i18n.t("articleReader.recomputeAnalysis")}"`);
+      expect(failed).toContain(i18n.t("articleReader.retryAnalysis"));
+      expect(failed).toContain("data-reader-recompute-analysis");
     },
   );
 
@@ -1524,6 +1525,23 @@ describe("Article Reader V3 sealed-state analysis policy", () => {
     // A present result is fresh regardless of policy.
     expect(render(readerRuntimeStubV3({ changedScenarioIds: ["scenario/comparison"],
       analysisByKey: { [key]: structuralAnalysisV3("scenario/comparison") } }), [])).toBe("");
+  });
+
+  it("names the update target without describing live measurements as stale", () => {
+    const base = briefingV3();
+    const derived = { sourcePaneId: "pane/outputs", outputId: MAIN_WIRE_PERIODIC_PVA_OUTPUT_IDS_V1.pressureVolumeAreaMilliJoule,
+      scenarioId: "scenario/comparison", label: "PVA", order: 0 };
+    const render = (briefing: ExperimentPlacementBriefingV2) => renderToStaticMarkup(
+      <ArticleReaderAnalysisStatusV3 analysisAutoScenarioIds={new Set()} briefing={briefing} contract={contractV3()}
+        runtime={readerRuntimeStubV3({ changedScenarioIds: ["scenario/comparison"] })} snapshot={snapshotV3()} />,
+    );
+    expect(render({ ...base, outputs: [] })).toContain(i18n.t("articleReader.refreshCurves"));
+    expect(render({ ...base, graphs: [], outputs: [derived] })).toContain(i18n.t("articleReader.refreshAnalysisValues"));
+    const both = render({ ...base, outputs: [derived] });
+    expect(both).toContain(i18n.t("articleReader.refreshCurvesAndValues"));
+    expect(both).toContain('aria-describedby=');
+    expect(both).not.toContain('<svg');
+    expect(render({ ...base, graphs: [] })).toBe("");
   });
 
   it("titles output sections by their source pane and lays compared panes side by side", () => {
@@ -1822,7 +1840,7 @@ describe("Article Reader observation rendering", () => {
     expect(expanded).toContain('data-mobile-pane-groups="control"');
   });
 
-  it("names a lone single-Scenario group for assistive technology only, and shows semantic or distinguishing titles", () => {
+  it("omits a lone reading heading even among graph Scenarios, retaining distinctions between multiple groups", () => {
     const item = (sourcePaneId: string, scenarioId: string, outputId: string) => ({
       itemId: `${sourcePaneId}/${outputId}/${scenarioId}`, outputId, sourcePaneId, scenarioId, label: outputId, value: 1, unit: "mL",
     });
@@ -1836,17 +1854,19 @@ describe("Article Reader observation rendering", () => {
     // The stored default pane title names only the role: hidden like the Scenario name.
     expect(articleReaderObservationGroupsV3([item("pane/o", "s/a", "o1")], naming(false, { "pane/o": "Outputs" }))[0]).toMatchObject({ title: "Outputs", headingHidden: true });
     expect(articleReaderObservationGroupsV3([item("pane/o", "s/a", "o1")], { ...naming(false, { "pane/o": "出力" }), genericTitles: ["出力"] })[0]?.headingHidden).toBe(true);
-    // One pane, one Scenario, semantic title: visible heading.
+    // A lone pane needs no heading column, including a subject title.
     expect(articleReaderObservationGroupsV3([item("pane/v", "s/a", "o1")], naming(false, { "pane/v": "弁関連" }))[0]).toMatchObject({ title: "弁関連" });
-    expect(articleReaderObservationGroupsV3([item("pane/v", "s/a", "o1")], naming(false, { "pane/v": "弁関連" }))[0]?.headingHidden).toBeUndefined();
-    // Two panes, one Scenario: both titles visible.
+    expect(articleReaderObservationGroupsV3([item("pane/v", "s/a", "o1")], naming(false, { "pane/v": "弁関連" }))[0]?.headingHidden).toBe(true);
+    // Several panes retain useful subjects, not a repeated sole Scenario.
     const two = articleReaderObservationGroupsV3([item("pane/a", "s/a", "o1"), item("pane/v", "s/a", "o2")], naming(false, { "pane/a": "基準", "pane/v": "弁関連" }));
-    expect(two.map((group) => [group.title, group.headingHidden])).toEqual([["基準", undefined], ["弁関連", undefined]]);
-    // One observed group among several Scenarios: the Scenario names it; a title equal to it is dropped.
+    expect(two.map((group) => [group.title, group.headingHidden])).toEqual([["基準", true], ["弁関連", undefined]]);
+    // One observed group among several graph Scenarios: the target remains accessible without a label column.
     const amid = articleReaderObservationGroupsV3([item("pane/b", "s/b", "o1")], naming(true, { "pane/b": "TBV +500" }));
     expect(amid[0]).toMatchObject({ scenario: { label: "TBV +500" } });
     expect(amid[0]?.title).toBeUndefined();
-    expect(amid[0]?.headingHidden).toBeUndefined();
+    expect(amid[0]?.headingHidden).toBe(true);
+    const compared = articleReaderObservationGroupsV3([item("pane/a", "s/a", "o1"), item("pane/b", "s/b", "o2")], naming(true, { "pane/a": "基準", "pane/b": "TBV +500" }));
+    expect(compared.map(group => group.headingHidden)).toEqual([undefined, undefined]);
     const rendered = renderToStaticMarkup(<ExperimentObservationV3 groups={lone} label="obs" />);
     expect(rendered).toContain('data-observation-heading="hidden"');
     expect(rendered).toContain('<h4 class="sr-only">');

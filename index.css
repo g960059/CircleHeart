@@ -3382,17 +3382,6 @@ body[data-app-theme="light"] .public-static-theme-moon {
 @media (max-height: 600px) {
   .article-reader-embed[data-reader-layout="sheet"] { --reader-stage-height: clamp(9rem, 30dvh, 12rem); }
   .article-reader-embed[data-reader-layout="sheet"] .article-reader-observation { max-block-size: 5.75rem; }
-  .article-reader-embed[data-reader-layout="peek"] .article-reader-analysis-status,
-  .article-reader-embed[data-reader-layout="sheet"] .article-reader-analysis-status { flex-wrap: nowrap; }
-  .article-reader-embed[data-reader-layout="peek"] .article-reader-analysis-status > span,
-  .article-reader-embed[data-reader-layout="sheet"] .article-reader-analysis-status > span { min-inline-size: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .article-reader-embed[data-reader-layout="peek"] .article-reader-analysis-status button,
-  .article-reader-embed[data-reader-layout="sheet"] .article-reader-analysis-status button { flex: 0 0 auto; }
-}
-@container article-embed (max-width: 26rem) {
-  /* Narrow sheets keep the re-measure action as its icon; the label stays for assistive tech. */
-  .article-reader-analysis-status button { padding-inline: 0.55rem; }
-  .article-reader-analysis-action-label { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
 /* A short desktop split must keep an operable task panel instead of clipping
    it after the graph. Scroll the instrument when those minimums cannot fit. */
@@ -3414,38 +3403,40 @@ body[data-app-theme="light"] .public-static-theme-moon {
   .article-reader-embed[data-reader-layout="sheet"] .article-reader-observation { grid-column: 2; max-block-size: 45dvh; overflow-y: auto; }
   .article-reader-embed[data-reader-layout="sheet"] .article-reader-deck { grid-column: 2; min-block-size: 0; }
 }
-/* A single inline graph and its readings form one centred vertical instrument. */
+/* A figure-like stack follows the text column; keep PV plots proportionate. */
 .article-reader-inline-instrument { display: flex; flex-direction: column; gap: 0.5rem; }
-.article-reader-inline-instrument .article-reader-deck { inline-size: 100%; max-inline-size: 38rem; margin-inline: auto; }
+.article-reader-inflow .article-reader-stage-slot [data-reader-graph-renderer="pressure-volume"] { justify-self: start; }
+.article-reader-inline-instrument .article-reader-deck { inline-size: 100%; }
 
-
-/* Analysis state strip: only present when the reader must decide or wait. */
+/* One quiet update action for derived results; its word label stays visible on phones. */
 .article-reader-analysis-status {
   display: flex;
   min-block-size: 2rem;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.35rem 0.75rem;
-  padding: 0.25rem 0.5rem;
+  gap: 0.125rem 0.5rem;
+  padding-inline: 0.5rem;
   color: var(--wb-text-muted);
   font-size: 0.75rem;
   line-height: 1.5;
 }
 .article-reader-analysis-status button {
   display: inline-flex;
-  min-block-size: 1.9rem;
+  min-block-size: 2rem;
   align-items: center;
-  gap: 0.35rem;
-  border: 1px solid var(--wb-border-strong);
-  border-radius: 999px;
-  padding-inline: 0.7rem;
-  color: var(--wb-text);
-  font-weight: 600;
-  transition: background-color 120ms ease, color 120ms ease;
+  border: 0;
+  border-radius: 0.375rem;
+  padding-inline: 0.35rem;
+  color: var(--wb-accent);
+  font-weight: 500;
+  transition: background-color 120ms ease;
 }
 .article-reader-analysis-status button:hover:not(:disabled) { background: var(--wb-hover-bg); }
 .article-reader-analysis-status button:disabled { opacity: 0.5; }
-.article-reader-analysis-status button:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--wb-accent); }
+.article-reader-analysis-status button:focus-visible { outline: 2px solid var(--wb-accent); outline-offset: 1px; }
+@media (pointer: coarse) {
+  .article-reader-analysis-status button { min-block-size: 2.75rem; }
+}
 
 .article-reader-scenario-selector {
   display: flex;
