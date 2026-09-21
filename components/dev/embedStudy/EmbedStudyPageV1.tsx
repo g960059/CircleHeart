@@ -357,6 +357,9 @@ export function EmbedStudyPageV1() {
     return () => { current = false; };
   }, [enabled]);
   if (!enabled) return <Navigate to={homeHref(locale)} replace />;
+  if (state.kind === "ready" && searchParams.get("open") === "workbench") {
+    return <Navigate to={experimentSnapshotHref({ snapshotId: state.snapshot.snapshotId, locale })} replace />;
+  }
   if (state.kind === "ready" && searchParams.get("open") === "reader") {
     const placement = searchParams.get("placement");
     const fragment = STUDY_PLACEMENTS_V1.some(item => item.placementId === placement)

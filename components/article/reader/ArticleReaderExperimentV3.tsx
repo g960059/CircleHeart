@@ -635,15 +635,15 @@ function ArticleReaderLiveOwnerV3({
             <div className="article-reader-inflow-header">
               <p className="reader-experiment-title min-w-0 flex-1">{title}</p>
               {!forceInline && (
-                <button type="button" className="article-reader-open-link"
-                  aria-label={`${title}：${t("articleReader.openDetails")}`}
+                <button type="button" className="article-reader-open"
+                  aria-label={`${title}：${t("articleReader.open")}`}
                   title={t(narrow ? "articleReader.openMobile" : "articleReader.openBeside")}
                   onClick={() => onExpand("peek")}
                   data-reader-return-focus
                   data-reader-open-details
                 >
-                  {t("articleReader.openDetails")}
-                  <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+                  {t("articleReader.open")}
+                  <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
               )}
             </div>
@@ -731,15 +731,15 @@ function ArticleReaderPeekAnchorV3({ active = false, title, onOpen }: Readonly<{
   const { t } = useTranslation();
   const narrow = useReaderNarrowScreenV3();
   return <button type="button" onClick={onOpen}
-    className="article-reader-peek-anchor flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wb-accent"
+    className="article-reader-peek-anchor flex w-full items-center gap-3 rounded-xl border border-wb-line px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wb-accent"
     data-reader-peek-active={active} data-reader-return-focus
     aria-expanded={active} aria-controls={active ? "article-reader-experiment-companion-v3" : undefined}
     title={t(active ? "articleReader.returnInline" : narrow ? "articleReader.openMobile" : "articleReader.openBeside")}
-    aria-label={`${title}：${t(active ? "common.close" : "articleReader.openDetails")}`}>
+    aria-label={`${title}：${t(active ? "common.close" : "articleReader.open")}`}>
     <span className="reader-experiment-title min-w-0 flex-1">{title}</span>
-    <span className="article-reader-open-link" aria-hidden="true">
-      {t(active ? "common.close" : "articleReader.openDetails")}
-      {active ? <X className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+    <span className="article-reader-peek-action" aria-hidden="true">
+      {t(active ? "common.close" : "articleReader.open")}
+      {active ? <X className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
     </span>
   </button>;
 }

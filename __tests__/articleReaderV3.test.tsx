@@ -1780,8 +1780,7 @@ describe("Article Reader observation rendering", () => {
       scenarioId: `scenario/${prefix}`, measured: items(prefix, count), memory: new WorkbenchLastMeasuredOutputsV1(),
       previousValueNotice: "old", scenario: { label: prefix === "a" ? "基準" : "TBV +1000", colorHex: "#123456" },
     });
-    let pressed = 0;
-    const render = (observedSelection: readonly string[] | null) => renderToStaticMarkup(
+    const render = (expanded: boolean) => renderToStaticMarkup(
       <WorkbenchMobileStageDeckV3
         graphPanes={[]}
         outputPanes={[pane("pane/a", "基準"), pane("pane/b", "弁")]}
@@ -1789,10 +1788,10 @@ describe("Article Reader observation rendering", () => {
         graphAddOptions={[]}
         scenarioContent={null}
         renderGraphPane={() => null}
-        renderOutputPane={(_pane, selection) => { pressed += selection?.selectedItemIds.size ?? 0; return null; }}
         readOutputPane={(candidate) => candidate.paneId === "pane/a" ? reading("pane/a", "a", 12, "基準") : reading("pane/b", "b", 8, "弁")}
-        observedSelection={observedSelection}
-        onObservedSelectionChange={() => undefined}
+        renderOutputPane={() => null}
+        outputsExpanded={expanded}
+        onOutputsExpandedChange={() => undefined}
         renderControlPane={() => null}
         onOpenPaneSettings={() => undefined}
         onAddGraphPane={() => undefined}
@@ -1800,7 +1799,7 @@ describe("Article Reader observation rendering", () => {
         onAddControlPane={() => undefined}
       />,
     );
-    const html = render(null);
+    const html = render(false);
     expect(html).toContain('data-testid="workbench-mobile-observation"');
     expect(html).toContain('data-observed-count="6"');
     // One heading per pane: the following pane says so beside its Scenario; the fixed pane just names it.
@@ -1811,12 +1810,16 @@ describe("Article Reader observation rendering", () => {
     // The graph tabs read above the graph; the control tab is active by default and the strip stays outside the tabs.
     expect(html.indexOf('data-testid="workbench-mobile-graph-view-rail"')).toBeLessThan(html.indexOf("-graph-panel"));
     expect(html).toContain('data-mobile-pane-groups="control"');
-    expect(pressed).toBe(0);
-    // A Session selection names pane and item; removed items drop out and an explicit empty choice stays empty.
-    const selected = render([workbenchObservedOutputKeyV3("pane/b", "b8"), workbenchObservedOutputKeyV3("pane/gone", "x1"), workbenchObservedOutputKeyV3("pane/a", "a12")]);
-    expect(selected).toContain('data-observed-count="2"');
-    expect(selected).toContain(`data-output-id="${workbenchObservedOutputKeyV3("pane/b", "b8")}"`);
-    expect(render([])).not.toContain('data-testid="workbench-mobile-observation"');
+    expect(html).not.toContain("data-output-selection");
+    expect(html).not.toContain("workbench-output-toggle");
+    expect(html).toContain('data-workbench-output-expand="true"');
+    // Expanded values replace the compact reading; pane composition stays the source of truth.
+    const expanded = render(true);
+    expect(expanded).toContain('data-observed-count="20"');
+    expect(expanded.match(/data-output-id=/g)).toHaveLength(20);
+    expect(expanded).toContain(`data-output-id="${workbenchObservedOutputKeyV3("pane/b", "b8")}"`);
+    expect(expanded).not.toContain("data-output-selection");
+    expect(expanded).toContain('data-mobile-pane-groups="control"');
   });
 
   it("names a lone single-Scenario group for assistive technology only, and shows semantic or distinguishing titles", () => {

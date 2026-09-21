@@ -23,12 +23,10 @@ export function isGenericOutputPaneLabelV3(label: string, localeRoleWords: reado
  * The phone Workbench observation: a few measurement tiles kept between the
  * graph and the task deck while a control is used.
  *
- * Observed keys name a source pane and one of its presentation items. The
- * pane keeps its own Scenario binding (fixed or active slot), so an observed
- * item follows the pane, never a Scenario of its own. The selection is
- * Session presentation state: it survives breakpoint changes, reconciles
- * removed panes and items, and keeps an explicit empty choice empty. It is
- * never durable Experiment content.
+ * Keys name a source pane and one of its presentation items. Values follow
+ * the pane's fixed or active-slot binding. The compact view takes the first
+ * items of each configured pane; expansion shows all, without another
+ * membership selection. Composition is edited in the pane itself.
  */
 export function workbenchObservedOutputKeyV3(paneId: string, itemId: string): string {
   return `${paneId}\u001f${itemId}`;
@@ -56,19 +54,18 @@ export type WorkbenchOutputPaneReadingV3 = Readonly<{
   scenario?: Readonly<{ label: string; colorHex: string }>;
 }>;
 
-/** Selection resolved against the panes that exist now; `null` is the initial choice. */
-export function resolveWorkbenchObservedKeysV3(
-  selection: readonly string[] | null,
+/** Compact and expanded views always derive from current pane composition. */
+export function workbenchMobileOutputKeysV3(
   readings: readonly Pick<WorkbenchOutputPaneReadingV3, "paneId" | "measured">[],
+  expanded: boolean,
 ): readonly string[] {
   const available = readings.flatMap((reading) => reading.measured.map((item) => workbenchObservedOutputKeyV3(reading.paneId, item.itemId)));
-  if (selection === null) {
+  if (!expanded) {
     return defaultObservedItemKeysV3(readings.map((reading) => ({
       keys: reading.measured.map((item) => workbenchObservedOutputKeyV3(reading.paneId, item.itemId)),
     })));
   }
-  const availableSet = new Set(available);
-  return Object.freeze(selection.filter((key) => availableSet.has(key)));
+  return Object.freeze(available);
 }
 
 /**

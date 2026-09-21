@@ -287,17 +287,14 @@ async function workbench() {
     nodes.map((node) => ({ scenario: node.getAttribute("data-output-scenario"), label: node.querySelector(".workbench-output-label")?.textContent })));
   record("workbench-mobile-controls", { strip, overflow: await overflow(page) });
   const stripIds = () => page.locator("[data-testid='workbench-mobile-observation'] [data-output-id]").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-output-id")));
+  await page.locator('[data-workbench-output-expand]').click();
   await page.getByRole("tab", { name: "出力" }).click();
-  await page.waitForTimeout(800);
-  const toggles = page.locator("[data-mobile-pane-groups='output'] .workbench-output-toggle");
-  await toggles.first().click();
-  await toggles.nth(5).click();
-  await page.waitForTimeout(600);
   await page.screenshot({ path: join(outputDir, "workbench-mobile-outputs.png") });
+  record("workbench-mobile-outputs", { readerPicker: await page.locator('.workbench-output-toggle').count(),
+    paneItems: await page.locator('[data-mobile-pane-groups="output"] [data-output-id]').count(), strip: await page.getByTestId('workbench-mobile-observation').count() });
+  await page.getByRole("tab", { name: "コントロール" }).click();
   const selected = await stripIds();
-  record("workbench-mobile-outputs", { toggles: await toggles.count(), pressed: await page.locator("[data-mobile-pane-groups='output'] .workbench-output-toggle[aria-pressed='true']").count(),
-    strip: selected.length });
-  // The observation is Session state: it survives the desktop breakpoint and back.
+  // Expansion is Session view state; composition stays in the panes across breakpoints.
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.waitForTimeout(600);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -346,7 +343,7 @@ async function workbench() {
 
 /**
  * A touch phone rotated portrait → landscape → portrait keeps the phone shell,
- * its graph choice, observed selection, control values and targets, with no
+ * its graph choice, output expansion, control values and targets, with no
  * analysis requested merely by rotating.
  */
 async function rotation() {
@@ -389,12 +386,9 @@ async function rotation() {
       analysisRequests: await analysisRequests(), overflow: await overflow(page),
     };
   };
-  // Choose the second graph, adjust the observation, and move the first control.
+  // Choose the second graph, reveal all outputs, and move the first control.
   await page.getByTestId("workbench-mobile-stage").locator("[role='tab']").nth(1).click();
-  await page.getByRole("tab", { name: "出力" }).click();
-  await page.waitForTimeout(500);
-  await page.locator("[data-mobile-pane-groups='output'] .workbench-output-toggle").first().click();
-  await page.getByRole("tab", { name: "コントロール" }).click();
+  await page.locator('[data-workbench-output-expand]').click();
   await page.waitForTimeout(500);
   await page.locator("[data-reader-runtime-status], [data-playback]").first().waitFor().catch(() => {});
   const slider = page.getByRole("slider").first();

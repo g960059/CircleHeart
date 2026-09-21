@@ -8,7 +8,6 @@ import {
   ExperimentNumericControlV3,
   ExperimentOutputGridV3,
   ExperimentPaneAddItemButtonV3,
-  type ExperimentOutputSelectionV3,
 } from "@/components/workbench/ExperimentPanePresentationV3";
 import { WorkbenchPaneBindingButtonV3, WorkbenchPaneContextRowV3 } from "@/components/workbench/WorkbenchPaneBindingV3";
 import {
@@ -71,7 +70,6 @@ export function OutputPaneBodyV3({
   presentationAnalyses,
   periodicPvaAnalysisError,
   scrollMode = "contained",
-  selection,
   showBinding,
   settingsAction,
   scenarioLabel,
@@ -87,8 +85,6 @@ export function OutputPaneBodyV3({
   presentationAnalyses?: readonly StudioSimulationAnalysisV2[];
   periodicPvaAnalysisError?: string;
   scrollMode?: "contained" | "parent" | "section";
-  /** Phone shell only: tiles toggle their place in the observation strip. */
-  selection?: ExperimentOutputSelectionV3;
   showBinding: boolean;
   settingsAction?: React.ReactNode;
   scenarioLabel: string;
@@ -144,7 +140,6 @@ export function OutputPaneBodyV3({
         scrollMode={scrollMode === "contained" ? "contained" : "parent"}
         emptyMessage={t("workbench.live.noSelectedOutputs")}
         items={displayed}
-        selection={selection}
       />
     </div>
   );

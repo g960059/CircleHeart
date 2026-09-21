@@ -203,8 +203,6 @@
         "scenarios": "Scenarios"
       },
       "observation": "Observed outputs",
-      "observeOutput": "Observe {{label}}",
-      "unobserveOutput": "Stop observing {{label}}",
       "resizeInspectorArea": "Resize scenario and controller area",
       "resizeOutputArea": "Resize graph and output areas",
       "outputArea": "Output area",
@@ -243,7 +241,9 @@
       "coronaryFlow": "Coronary flow",
       "acceptedReadback": "Accepted readback",
       "firstAcceptedStep": "Waiting for calculation results…",
-      "contentBoundary": "Durable content boundary"
+      "contentBoundary": "Durable content boundary",
+      "allOutputs": "All outputs {{count}}",
+      "foldOutputs": "Show less"
     },
     "editor": {
       "experimentTitle": "Untitled simulation",
@@ -813,6 +813,7 @@
       "incorrect": "Not quite—try once more",
       "retry": "Answer again"
     },
+    "open": "Open",
     "openDetails": "Explore",
     "openBeside": "View beside the article",
     "moreActions": "More actions",

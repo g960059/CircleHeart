@@ -9,7 +9,6 @@ import { workbenchScenarioColorSeedV3 } from "./presentation/WorkbenchGraphColor
 import { resolveWorkbenchAutomaticGraphColorV3 } from "@/components/workbench/presentation";
 import { materializeWorkbenchOutputPresentationItemsV3 } from "@/components/workbench/WorkbenchItemPresentation";
 import { workbenchPreviousMeasurementNoticeV3 } from "@/components/workbench/WorkbenchPaneBodiesV3";
-import type { ExperimentOutputSelectionV3 } from "@/components/workbench/ExperimentPanePresentationV3";
 import { workbenchMeasurementScopeKeyV3, type WorkbenchOutputPaneReadingV3 } from "@/components/workbench/presentation/WorkbenchObservationV3";
 import { registeredCurrentBaselinePresentationV1 } from "@/studio/presentation/CurrentBaselinePresentationV1";
 import { REGISTERED_CURRENT_MODEL_BASELINE_V1 } from "@/studio/registry/RegisteredCurrentModelBaselineV1";
@@ -447,7 +446,7 @@ export const WorkbenchSession = ({
   // Phone observation: which output-pane items stay beside the graph. It is
   // Session presentation state, kept across breakpoints; the mobile shell
   // reconciles it against the panes that exist.
-  const [observedOutputSelection, setObservedOutputSelection] = React.useState<readonly string[] | null>(null);
+  const [mobileOutputsExpanded, setMobileOutputsExpanded] = React.useState(false);
   const [, setControlValues] = React.useState<ExactModelControlValuesV1>(
     {},
   );
@@ -3132,7 +3131,6 @@ export const WorkbenchSession = ({
   const renderOutputPaneV3 = (
     paneDefinition: WorkbenchPaneDefinitionV3,
     scrollMode: "contained" | "parent" | "section" = "contained",
-    selection?: ExperimentOutputSelectionV3,
   ) => {
     const projected = projectOutputPaneV3(paneDefinition);
     if (projected === null) {
@@ -3153,7 +3151,6 @@ export const WorkbenchSession = ({
         periodicPva={projected.periodicPva}
         periodicPvaAnalysisError={projected.periodicPvaAnalysisError}
         scrollMode={scrollMode}
-        selection={selection}
         showBinding={scenarios.length > 1}
         scenarioLabel={
           scenarios.find((scenario) => scenario.scenarioId === scenarioId)
@@ -3607,10 +3604,11 @@ export const WorkbenchSession = ({
               scenarioContent={renderScenarioManagerV3("embedded-mobile")}
               scenarioError={scenarioErrorNotice}
               renderGraphPane={renderGraphPaneV3}
-              renderOutputPane={(pane, selection) => renderOutputPaneV3(pane, "section", selection)}
+              renderOutputPane={(pane) => renderOutputPaneV3(pane, "section")}
               readOutputPane={readOutputPaneV3}
-              observedSelection={observedOutputSelection}
-              onObservedSelectionChange={setObservedOutputSelection}
+              outputsExpanded={mobileOutputsExpanded}
+              onOutputsExpandedChange={setMobileOutputsExpanded}
+              singleScenarioLabel={scenarios.length === 1 ? scenarios[0]?.label : undefined}
               renderControlPane={(pane) => renderControlPaneV3(pane, "section")}
               onOpenPaneSettings={openPaneSettings}
               onAddGraphPane={(anchor, onCreated) =>
