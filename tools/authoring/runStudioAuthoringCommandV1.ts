@@ -30,7 +30,7 @@ import {
 } from "@/analysis/registry/RegisteredAnalysisMethodsV1";
 import {
   inspectModelAnalysisV1,
-} from "@/components/workbench/presentation/PreparedModelAnalysisV1";
+} from "@/studio/application/authoring/PreparedModelAnalysisV1";
 import {
   StudioSupabaseContentRepositoryV1,
 } from "@/studio/infrastructure/supabase/StudioSupabaseContentRepositoryV1";

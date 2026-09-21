@@ -3489,7 +3489,6 @@ body[data-app-theme="light"] .public-static-theme-moon {
   gap: 0.25rem;
   padding: 0.25rem 0.5rem 0.5rem;
 }
-.article-reader-scenario-selector-label { margin-inline-end: 0.25rem; color: var(--wb-text-subtle); font-size: 0.75rem; }
 .article-reader-scenario-chip {
   display: inline-flex;
   min-block-size: 1.9rem;

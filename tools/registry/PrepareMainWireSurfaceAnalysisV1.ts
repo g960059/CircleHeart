@@ -2,7 +2,7 @@ import type { ScenarioPresetV2 } from "@/studio/contracts/v2/content";
 import type { ModelSurfaceReleaseManifestV1 } from "@/studio/contracts/v2/modelSurface";
 import { resolveRegisteredAnalysisMethodsV1 as methods } from "@/analysis/registry/RegisteredAnalysisMethodsV1";
 import { REGISTERED_ANALYSIS_EXECUTOR_V1 as executor } from "@/analysis/runtime/RegisteredAnalysisExecutorV1";
-import { buildPreparedModelAnalysisV1 } from "@/components/workbench/presentation/PreparedModelAnalysisV1";
+import { buildPreparedModelAnalysisV1 } from "@/studio/application/authoring/PreparedModelAnalysisV1";
 import type { StudioSimulationAnalysisV2 } from "@/studio/contracts/v2/simulation";
 
 /** Keep expensive measured families even when a cheap derived check fails. */

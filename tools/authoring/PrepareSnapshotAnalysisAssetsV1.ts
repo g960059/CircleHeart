@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { ExperimentSnapshotV2 } from "@/studio/contracts/v2/content";
 import type { StudioModelWorkerReleaseTicketV2 } from "@/studio/contracts/v2/release";
 import type { analyzeStudioSnapshotV1 } from "@/studio/application/authoring/StudioSnapshotAnalysisV1";
-import { buildPreparedScenarioAnalysisV1 } from "@/components/workbench/presentation/PreparedModelAnalysisV1";
+import { buildPreparedScenarioAnalysisV1 } from "@/studio/application/authoring/PreparedModelAnalysisV1";
 import { writeFittingRunJsonV1 } from "../scientific/FittingRunFilesV1";
 
 /** Turns a read-only Authoring analysis into the same capture-addressed assets

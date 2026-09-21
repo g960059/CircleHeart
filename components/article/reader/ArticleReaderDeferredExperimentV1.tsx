@@ -5,6 +5,8 @@ import { ArticleReaderPendingExperimentV1 } from "./ArticleReaderPendingExperime
 import type { ExperimentSnapshotV2 } from "@/studio/contracts/v2/content";
 import type { StudioClientCompositionV2 } from "@/studio/composition/StudioDefaultCompositionV2";
 import type { ArticleReaderExperimentV3Props } from "./ArticleReaderExperimentV3";
+import { verifiedReaderPreviewV1 } from "@/studio/application/authoring/StudioReaderPreviewV1";
+import type { ExperimentReaderPreviewV1 } from "@/studio/contracts/v2/readerPreview";
 
 type Props = Omit<ArticleReaderExperimentV3Props, "snapshot" | "contract" | "contractAvailability" | "runtimeComposition"> & {
   loadSnapshot(snapshotId: string): Promise<ExperimentSnapshotV2 | null>;
@@ -13,6 +15,7 @@ type Prepared = {
   Component: React.ComponentType<ArticleReaderExperimentV3Props>;
   snapshot: ExperimentSnapshotV2;
   composition: StudioClientCompositionV2;
+  preview: ExperimentReaderPreviewV1 | null;
 };
 
 class ReaderCodeLoadErrorV1 extends Error {}
@@ -52,17 +55,27 @@ export function ArticleReaderDeferredExperimentV1({ loadSnapshot, ...props }: Pr
       ]);
       if (!current) return;
       if (!snapshot) throw new Error("Unavailable snapshot");
-      const composition = await compositionModule.loadStudioSnapshotClientCompositionV2(
-        snapshot.content.modelId, snapshot.content.surfaceSeriesId, snapshot.surfaceReleaseId,
-      );
-      if (current) setPrepared({ Component: module.ArticleReaderExperimentV3, snapshot, composition });
+      const [composition, preview] = await Promise.all([
+        compositionModule.loadStudioSnapshotClientCompositionV2(
+          snapshot.content.modelId, snapshot.content.surfaceSeriesId, snapshot.surfaceReleaseId),
+        verifiedReaderPreviewV1(snapshot),
+      ]);
+      if (current) setPrepared({ Component: module.ArticleReaderExperimentV3, snapshot, composition, preview });
     };
-    void prepare().catch(error => { if (current) setError(error instanceof ReaderCodeLoadErrorV1 ? "code" : "snapshot"); });
-    return () => { current = false; };
+    // Even a warm import / synchronous browser-store read must yield to the
+    // prose paint before validating captures and initializing graph code.
+    let task: ReturnType<typeof setTimeout> | undefined;
+    const frame = requestAnimationFrame(() => {
+      task = setTimeout(() => {
+        void prepare().catch(error => { if (current) setError(error instanceof ReaderCodeLoadErrorV1 ? "code" : "snapshot"); });
+      }, 0);
+    });
+    return () => { current = false; cancelAnimationFrame(frame); clearTimeout(task); };
   }, [near, attempt, placement.snapshotId, loadSnapshot]);
   const title = placement.titleOverride?.trim() || placement.briefing.defaultTitle;
   return <div ref={root}>
     {prepared ? <prepared.Component {...props} snapshot={prepared.snapshot}
+      readerPreview={prepared.preview}
       contract={prepared.composition.modelSurface.contract} contractAvailability="ready"
       runtimeComposition={prepared.composition} /> :
       <section id={`placement-${placement.placementId}`} className="article-reader-placement min-w-0 scroll-mt-24"

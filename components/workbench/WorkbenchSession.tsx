@@ -1035,7 +1035,7 @@ export const WorkbenchSession = ({
         loadPreparedAnalysis: async seed => {
           if (!seed.checkpoint) return null;
           return loadPreparedScenarioAnalysisV1(composition.exactModel.workerReleaseTicket,
-            { fixture: seed.fixture, checkpoint: seed.checkpoint });
+            { fixture: seed.fixture, checkpoint: seed.checkpoint }, backgroundWorkerPool);
         },
         presentationAnalysisIds: () => surfaceRef.current === null ? []
           : workbenchPresentationAnalysisSelectionV1(surfaceRef.current, composition.modelSurface.catalog,

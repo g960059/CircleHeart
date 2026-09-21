@@ -1,4 +1,5 @@
 import React from "react";
+import { studioCanonicalJsonStringify } from "@/domain/json/CanonicalJson";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 
 import { articlePreviewHref, experimentSnapshotHref, homeHref } from "@/homeLinks";
@@ -313,7 +314,14 @@ function seedBrowserContentV1(snapshot: ExperimentSnapshotV2, article: StudioArt
   } catch {
     // A corrupt envelope is replaced by the study content only.
   }
-  envelope.snapshots = [...envelope.snapshots.filter((s) => s.snapshotId !== snapshot.snapshotId), snapshot];
+  const previous = envelope.snapshots.find(s => s.snapshotId === snapshot.snapshotId);
+  // Reopening the reader never regenerates or discards an already prepared
+  // figure. Its integrity is verified lazily at the normal embed boundary.
+  const stored = !snapshot.readerPreview && previous?.readerPreview
+    && previous.surfaceReleaseId === snapshot.surfaceReleaseId
+    && studioCanonicalJsonStringify(previous.content) === studioCanonicalJsonStringify(snapshot.content)
+    ? { ...snapshot, readerPreview: previous.readerPreview } : snapshot;
+  envelope.snapshots = [...envelope.snapshots.filter((s) => s.snapshotId !== snapshot.snapshotId), stored];
   envelope.articles = [...envelope.articles.filter((a) => a.articleId !== article.articleId), article];
   window.localStorage.setItem(BROWSER_CONTENT_STORE_KEY, JSON.stringify(envelope));
 }
@@ -323,16 +331,36 @@ type StudyStateV1 =
   | { kind: "ready"; snapshot: ExperimentSnapshotV2; article: StudioArticleDraftV2; admission: string; generatedAt: string; beats: number; prepared: number; analysisWall: Readonly<Record<string, number>> }
   | { kind: "error"; message: string };
 
+let studyPreview: Promise<ExperimentSnapshotV2> | undefined;
+/** Opt-in local fixture generation through the real authoring Worker. */
+function prepareStudyPreviewV1(snapshot: ExperimentSnapshotV2): Promise<ExperimentSnapshotV2> {
+  return studyPreview ??= (async () => {
+    const [{ loadStudioSnapshotClientCompositionV2 }, { WorkbenchParallelAuthoringCoordinatorV3 }] = await Promise.all([
+      import("@/studio/composition/StudioDefaultCompositionV2"),
+      import("@/components/workbench/runtime/WorkbenchParallelAuthoringCoordinatorV3"),
+    ]);
+    const composition = await loadStudioSnapshotClientCompositionV2(snapshot.content.modelId, snapshot.content.surfaceSeriesId, snapshot.surfaceReleaseId);
+    const result = await new WorkbenchParallelAuthoringCoordinatorV3().createSnapshot({ ...snapshot.content,
+      activeScenarioId: snapshot.content.scenarios[0]!.scenarioId, experiment: null, experimentId: null,
+      runtimeSessionId: "preview-study", surfaceReleaseId: snapshot.surfaceReleaseId,
+      releaseTicket: composition.exactModel.workerReleaseTicket, snapshotSource: "session" });
+    if (!result.snapshot.readerPreview) throw new Error("表示プレビューを作成できませんでした");
+    return { ...result.snapshot, snapshotId: snapshot.snapshotId, createdAt: snapshot.createdAt };
+  })().catch(error => { studyPreview = undefined; throw error; });
+}
+
 export function EmbedStudyPageV1() {
   const { locale: rawLocale } = useParams();
   const [searchParams] = useSearchParams();
   const locale: Locale = isLocale(rawLocale) ? rawLocale : "ja";
   const enabled = studioDevSurfacesEnabledV1();
+  // Generation is a setup action, not a prerequisite for reading the article.
+  const preparePreview = searchParams.get("preparePreview") === "1" && searchParams.get("open") !== "reader";
   const [state, setState] = React.useState<StudyStateV1>({ kind: "loading" });
   React.useEffect(() => {
     if (!enabled) return undefined;
     let current = true;
-    void import("./embedStudySnapshotV1.json").then((module) => {
+    void import("./embedStudySnapshotV1.json").then(async (module) => {
       const record = module.default as {
         snapshot: unknown; admission: { status: string; reason?: string }; generatedAt: string; beatsAdvancedPerLane: number;
         preparedAnalyses: readonly { captureSha256: string }[]; analysisWallMsByScenario: Record<string, number>;
@@ -340,7 +368,8 @@ export function EmbedStudyPageV1() {
       const captured = validateExperimentSnapshotV2(record.snapshot);
       // Refine only the authored panes. Exact captures and prepared evidence
       // remain the measured fixture, so no new scientific sweep is implied.
-      const snapshot = validateExperimentSnapshotV2({ ...captured, content: { ...captured.content, surface: ARTICLE_EMBED_STUDY_SURFACE_V1 } });
+      let snapshot = validateExperimentSnapshotV2({ ...captured, content: { ...captured.content, surface: ARTICLE_EMBED_STUDY_SURFACE_V1 } });
+      if (preparePreview) snapshot = await prepareStudyPreviewV1(snapshot);
       const article = buildArticleEmbedStudyArticleV1(snapshot);
       seedBrowserContentV1(snapshot, article);
       new BrowserPreparedAnalysisStoreV1().writeAll(record.preparedAnalyses);
@@ -355,7 +384,7 @@ export function EmbedStudyPageV1() {
       if (current) setState({ kind: "error", message: error instanceof Error ? error.message : String(error) });
     });
     return () => { current = false; };
-  }, [enabled]);
+  }, [enabled, preparePreview]);
   if (!enabled) return <Navigate to={homeHref(locale)} replace />;
   if (state.kind === "ready" && searchParams.get("open") === "workbench") {
     return <Navigate to={experimentSnapshotHref({ snapshotId: state.snapshot.snapshotId, locale })} replace />;
@@ -375,7 +404,7 @@ export function EmbedStudyPageV1() {
           このページを開くと、実モデルで生成した3 Scenarioの学習用Snapshot、その封入時のESPVR/EDPVR・Starling測定、
           各読み方を封入した記事がこのブラウザにだけ保存されます。リモートの記事・Snapshot・DBには触れません。
         </p>
-        {state.kind === "loading" && <p className="mt-6 text-sm text-wb-subtle">fixtureを読み込んでいます…</p>}
+        {state.kind === "loading" && <p className="mt-6 text-sm text-wb-subtle">{preparePreview ? "図と数値の表示プレビューを作成しています…" : "fixtureを読み込んでいます…"}</p>}
         {state.kind === "error" && <p className="mt-6 text-sm text-wb-danger" role="alert">{state.message}</p>}
         {state.kind === "ready" && (
           <>

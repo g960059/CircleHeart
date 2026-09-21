@@ -7,6 +7,7 @@ import type {
   ScenarioIdV2,
 } from "./ids";
 import type { StudioJsonValueV2 } from "./json";
+import type { ExperimentReaderPreviewV1 } from "./readerPreview";
 
 export const STUDIO_EXPERIMENT_V2_SCHEMA_ID =
   "circleheart-studio-experiment-v2" as const;
@@ -319,6 +320,8 @@ export type ExperimentSnapshotV2 = Readonly<{
   content: ExperimentContentV2;
   createdAt: string;
   createdBy?: string;
+  /** Rebuildable display cache. Never used to restore or validate exact state. */
+  readerPreview?: ExperimentReaderPreviewV1;
 }>;
 
 export type ExperimentPlacementBriefingScenarioScopeV2 = Readonly<{

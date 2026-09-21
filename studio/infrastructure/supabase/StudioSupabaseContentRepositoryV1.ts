@@ -230,6 +230,7 @@ export class StudioSupabaseContentRepositoryV1 {
         p_model_id: candidate.content.modelId,
         p_content: candidate.content,
         p_surface_release_id: candidate.surfaceReleaseId,
+        p_reader_preview: candidate.readerPreview ?? null,
         p_source_experiment_id: input.sourceExperiment?.experimentId ?? null,
         p_expected_experiment_version:
           input.sourceExperiment?.expectedVersion ?? null,
@@ -248,6 +249,7 @@ export class StudioSupabaseContentRepositoryV1 {
           content: candidate.content,
           createdAt: isoTimestampV1(result.createdAt, "createdAt"),
           surfaceReleaseId: candidate.surfaceReleaseId,
+          ...(candidate.readerPreview === undefined ? {} : { readerPreview: candidate.readerPreview }),
         });
       },
     );

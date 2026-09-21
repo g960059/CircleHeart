@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(39);
+select plan(42);
 
 insert into auth.users (
   id,
@@ -298,8 +298,23 @@ select 'snapshot', public.commit_admitted_experiment_snapshot_v1(
   }'::jsonb,
   'surface/integration-test-v1',
   ((select value ->> 'experimentId' from rpc_state where key = 'save'))::uuid,
-  0
+  0,
+  '{"schemaId":"circleheart-experiment-reader-preview-v1","sourceSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","previewSha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","scenarios":[]}'::jsonb
 );
+
+select is(
+  public.read_experiment_snapshot_v1(((select value->>'snapshotId' from rpc_state where key='snapshot'))::uuid) #>> '{readerPreview,schemaId}',
+  'circleheart-experiment-reader-preview-v1', 'Owner reads the optional sealed display cache'
+);
+select ok(
+  not (public.read_experiment_snapshot_v1(((select value->>'snapshotId' from rpc_state where key='snapshot'))::uuid) -> 'content') ? 'readerPreview',
+  'Display cache does not enter exact model content'
+);
+select ok(
+  not (select value from rpc_state where key='snapshot') ? 'readerPreview',
+  'Snapshot commit acknowledgement does not duplicate the display payload'
+);
+
 
 select ok(
   not (select value from rpc_state where key = 'snapshot') ? 'content',

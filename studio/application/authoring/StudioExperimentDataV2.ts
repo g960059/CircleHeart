@@ -1,3 +1,4 @@
+import { validReaderPreviewShapeV1 } from "./StudioReaderPreviewV1";
 import {
   STUDIO_BRIEFING_PRIMARY_CONTROL_LIMIT_V2,
   STUDIO_BRIEFING_PRIMARY_OUTPUT_LIMIT_V2,
@@ -122,7 +123,7 @@ export function validateExperimentSnapshotV2(
   assertRequiredOptionalKeysV2(
     snapshot,
     ["schemaId", "snapshotId", "surfaceReleaseId", "content", "createdAt"],
-    ["createdBy"],
+    ["createdBy", "readerPreview"],
     "$.snapshot",
   );
   if (snapshot.schemaId !== STUDIO_EXPERIMENT_SNAPSHOT_V2_SCHEMA_ID) {
@@ -137,6 +138,10 @@ export function validateExperimentSnapshotV2(
   isoTimestampV2(snapshot.createdAt, "$.snapshot.createdAt");
   if (hasOwnV2(snapshot, "createdBy")) {
     requiredPortableIdV2(snapshot.createdBy, "$.snapshot.createdBy");
+  }
+  if (hasOwnV2(snapshot, "readerPreview") && !validReaderPreviewShapeV1(snapshot.readerPreview)) {
+    const { readerPreview: _discarded, ...withoutCache } = snapshot;
+    return Object.freeze(withoutCache);
   }
   return snapshot;
 }

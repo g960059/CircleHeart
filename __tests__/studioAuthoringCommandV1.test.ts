@@ -7,7 +7,7 @@ import publication from "@/data/model-releases/standard74/publication.json";
 import analysisSurface from "@/studio/integrations/mainWireIntegratedV3/MainWireIntegratedStudioStaticCaseSurfaceV5";
 import { resolveRegisteredAnalysisMethodsV1 } from "@/analysis/registry/RegisteredAnalysisMethodsV1";
 import { REGISTERED_ANALYSIS_EXECUTOR_V1 as analysisExecutor } from "@/analysis/runtime/RegisteredAnalysisExecutorV1";
-import { inspectModelAnalysisV1 } from "@/components/workbench/presentation/PreparedModelAnalysisV1";
+import { inspectModelAnalysisV1 } from "@/studio/application/authoring/PreparedModelAnalysisV1";
 import type { StudioSimulationAnalysisV2 } from "@/studio/contracts/v2/simulation";
 vi.mock("@/analysis/runtime/RegisteredAnalysisExecutorV1", () => ({ REGISTERED_ANALYSIS_EXECUTOR_V1: { execute: vi.fn() } }));
 

@@ -8,6 +8,7 @@ import type {
   ExperimentSurfaceV2,
   ExperimentV2,
   ScenarioCheckpointV2,
+  ScenarioCaptureV2,
   ScenarioPresetV2,
 } from "@/studio/contracts/v2/content";
 import {
@@ -50,6 +51,18 @@ import {
 export const STUDIO_SIMULATION_WORKER_PROTOCOL_V2 =
   "circleheart-studio-simulation-worker-protocol-v2" as const;
 export const STUDIO_SIMULATION_WORKER_MAX_ADVANCE_STEPS_V2 = 16;
+
+export type StudioPreparedAnalysisValidationV1 = Readonly<{
+  record: StudioJsonValueV2;
+  capture: ScenarioCaptureV2;
+  releaseTicket: StudioModelWorkerReleaseTicketV2;
+}>;
+export type StudioValidatedPreparedAnalysisV1 = Readonly<{
+  analysis: StudioSimulationAnalysisV2;
+  recordSha256: string;
+  captureSha256: string;
+  preparationSourceSha256: string;
+}>;
 
 export type StudioSimulationWorkerInitializationTimingV2 = Readonly<{
   exactRuntimeLoad: ExactModelRuntimeLoadTimingV2 | null;
@@ -190,6 +203,11 @@ export type StudioSimulationWorkerCreateSnapshotInputV2 =
   }>;
 
 export type StudioSimulationWorkerRequestV2 =
+  | (StudioPreparedAnalysisValidationV1 & Readonly<{
+      protocol: typeof STUDIO_SIMULATION_WORKER_PROTOCOL_V2;
+      requestId: number;
+      kind: "validate-prepared-analysis";
+    }>)
   | Readonly<{
       protocol: typeof STUDIO_SIMULATION_WORKER_PROTOCOL_V2;
       requestId: number;
@@ -351,6 +369,13 @@ export type StudioSimulationWorkerRequestV2 =
     }>;
 
 export type StudioSimulationWorkerResponseV2 =
+  | Readonly<{
+      protocol: typeof STUDIO_SIMULATION_WORKER_PROTOCOL_V2;
+      requestId: number;
+      status: "ok";
+      kind: "prepared-analysis-validated";
+      prepared: StudioValidatedPreparedAnalysisV1;
+    }>
   | Readonly<{
       protocol: typeof STUDIO_SIMULATION_WORKER_PROTOCOL_V2;
       requestId: number;
@@ -820,6 +845,14 @@ export function validateStudioSimulationWorkerRequestV2(
     "$.request.requestId",
   );
 
+  if (envelope.kind === "validate-prepared-analysis") {
+    const request = exactDataRecordV2(envelope, ["protocol", "requestId", "kind", "record", "capture", "releaseTicket"], [], "$.request");
+    return Object.freeze({ protocol: STUDIO_SIMULATION_WORKER_PROTOCOL_V2, requestId, kind: "validate-prepared-analysis",
+      record: validateAndOwnStudioSimulationPortableJsonV2(request.record, "$.request.record"),
+      capture: validateScenarioCaptureV2(request.capture),
+      releaseTicket: validateStudioModelWorkerReleaseTicketV2(request.releaseTicket),
+    });
+  }
   if (envelope.kind === "initialize") {
     const request = exactDataRecordV2(envelope, [
       "expectedModelId",
@@ -1425,6 +1458,19 @@ export function validateStudioSimulationWorkerResponseV2(
     throw protocolErrorV2("$.response.status", "has an invalid status");
   }
 
+  if (envelope.kind === "prepared-analysis-validated") {
+    const response = exactDataRecordV2(envelope, ["protocol", "requestId", "status", "kind", "prepared"], [], "$.response");
+    const prepared = exactDataRecordV2(response.prepared, ["analysis", "recordSha256", "captureSha256", "preparationSourceSha256"], [], "$.response.prepared");
+    const digest = (key: string) => {
+      const value = prepared[key];
+      if (typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value)) throw protocolErrorV2(`$.response.prepared.${key}`, "must be a SHA-256 digest");
+      return value;
+    };
+    return Object.freeze({ protocol: STUDIO_SIMULATION_WORKER_PROTOCOL_V2, requestId, status: "ok", kind: "prepared-analysis-validated",
+      prepared: Object.freeze({ analysis: validateStudioSimulationAnalysisV2(prepared.analysis), recordSha256: digest("recordSha256"),
+        captureSha256: digest("captureSha256"), preparationSourceSha256: digest("preparationSourceSha256") }),
+    });
+  }
   if (envelope.kind === "initialized") {
     const response = exactDataRecordV2(envelope, [
       "frame",

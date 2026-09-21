@@ -1,18 +1,18 @@
-import { sha256CanonicalJsonHex as hash } from "@/engine/integrity";
+import { sha256StudioCanonicalJsonHex as hash } from "@/domain/json/CanonicalJsonSha256";
 import type { ScenarioCaptureV2 } from "@/studio/contracts/v2/content";
 import type { ModelSurfaceReleaseManifestV1 } from "@/studio/contracts/v2/modelSurface";
 import { validateStudioSimulationAnalysisV2, type StudioSimulationAnalysisV2 } from "@/studio/contracts/v2/simulation";
 import { resolveRegisteredAnalysisMethodsV1 as methods } from "@/analysis/registry/RegisteredAnalysisMethodsV1";
-import { structuralReturnOrientationFromPayloadV3 as decode } from "@/components/workbench/presentation/GuytonStarlingOrientationCanvasV3";
+import { structuralReturnOrientationFromPayloadV3 as decode } from "@/analysis/methods/mainWire/MainWireStructuralReturnPayloadV3";
 import type {
   StudioSnapshotAnalysisAssessmentV1,
   StudioSnapshotAnalysisSideAssessmentV1,
 } from "@/studio/application/authoring/StudioSnapshotAnalysisV1";
 
-/** The application's assessment port owns this shape; the Workbench implements it. */
+/** The application's assessment port owns this shape; all presentation and authoring hosts share it. */
 export type ModelAnalysisSideAssessmentV1 = StudioSnapshotAnalysisSideAssessmentV1;
 
-/** Workbench boundary: use the display's decoder and pinned derivation. Measured load
+/** Analysis assessment: use the shared payload decoder and pinned derivation. Measured load
  * curves may be complete while PE/PVA rejects its extrapolation. These are separate
  * diagnostics, not additional healthy/disease physiology thresholds. Also serves as
  * the read-only Snapshot analysis `assessAnalysis` port for headless authoring hosts. */

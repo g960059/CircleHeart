@@ -826,7 +826,6 @@
     "viewPair": "{{first}} + {{second}}",
     "controlTarget": "対象: {{scenarios}}",
     "scenarioFocus": "操作するScenario",
-    "analysisStale": "条件変更あり",
     "analysisStaleHint": "ESPVR/EDPVR・Starling曲線などの解析結果を現在の条件で計算します。波形や通常の指標は操作に合わせて更新されています。解析には時間がかかることがあります。",
     "refreshCurves": "解析曲線を更新",
     "refreshAnalysisValues": "解析値を更新",

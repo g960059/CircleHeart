@@ -40,6 +40,8 @@ import {
 export type UseArticleReaderLiveRuntimeResultV3 = Readonly<{
   state: ArticleReaderLiveRuntimeStateV3;
   sampleStore: WorkbenchScenarioPresentationSampleStoreV3;
+  /** Read-only opening figure; never ingested into the live runtime. */
+  previewSampleStore?: WorkbenchScenarioPresentationSampleStoreV3;
   fixtureProjection: ExactModelFixtureProjectionV1;
   periodicPvaDerivation: MainWirePeriodicPvaDerivationV1 | null;
   presentationOutput?: ArticleReaderLiveRuntimeV3["presentationOutput"];
@@ -86,6 +88,7 @@ export function useArticleReaderLiveRuntimeV3(
   sessionMemory?: ArticleReaderSessionMemoryV3,
   cyclePhaseOutputId?: string,
   sweepWindowSec = 6,
+  enabled = true,
 ): UseArticleReaderLiveRuntimeResultV3 {
   const workerResources = useArticleReaderWorkerResourcesV1();
   const requestedScopeKey = JSON.stringify(visibleScenarioIds ?? null);
@@ -124,6 +127,7 @@ export function useArticleReaderLiveRuntimeV3(
     ));
 
   React.useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     let cleanup: (() => void) | undefined;
     const initialize = async () => {
@@ -200,6 +204,7 @@ export function useArticleReaderLiveRuntimeV3(
     });
     return () => { cancelled = true; cleanup?.(); };
   }, [
+    enabled,
     initialActiveScenarioId,
     workerResources,
     sampleStore,

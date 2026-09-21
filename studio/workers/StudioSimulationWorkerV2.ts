@@ -30,6 +30,15 @@ const workerRuntime = new StudioSimulationWorkerRuntimeV2({
   port: workerPort,
   analysisExecutor: REGISTERED_ANALYSIS_EXECUTOR_V1,
   resolvePresentationAnalysisMethods: resolveRegisteredPresentationAnalysisMethodsV1,
+  readerPreviewEnabled: true,
+  async validatePreparedAnalysis({ record, releaseTicket, capture }) {
+    const { readPreparedScenarioAnalysisV1 } = await import("@/studio/application/authoring/PreparedModelAnalysisV1");
+    const { analysis, recordSha256, captureSha256, preparationSourceSha256 } = await readPreparedScenarioAnalysisV1(record, {
+      modelId: releaseTicket.modelId, artifactRevisionId: releaseTicket.artifactRevisionId,
+      surface: releaseTicket.surfaceRelease, capture,
+    });
+    return { analysis, recordSha256, captureSha256, preparationSourceSha256 };
+  },
   async loadExactRuntime(input) {
     if (input.releaseTicket.modelId !== input.expectedModelId) {
       throw new Error("Worker release ticket does not match the requested model");

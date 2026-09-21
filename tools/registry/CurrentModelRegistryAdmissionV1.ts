@@ -9,7 +9,7 @@ import { composeStandardModelContractV1 } from "@/studio/contracts/v2/modelSurfa
 import { resolveRegisteredAnalysisMethodsV1 } from "@/analysis/registry/RegisteredAnalysisMethodsV1";
 import type lockShape from "@/data/model-releases/standard74/publication.json";
 import { validateScenarioPresetV2 } from "@/studio/application/authoring/StudioExperimentDataV2";
-import { readPreparedModelAnalysisV1 } from "@/components/workbench/presentation/PreparedModelAnalysisV1";
+import { readPreparedModelAnalysisV1 } from "@/studio/application/authoring/PreparedModelAnalysisV1";
 
 export const CURRENT_MODEL_PUBLICATION_FILES_V1 = {
   artifact: "data/model-releases/standard74/artifact.mjs.txt",
