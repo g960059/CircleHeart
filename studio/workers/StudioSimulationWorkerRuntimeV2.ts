@@ -1,3 +1,5 @@
+import { buildReaderPreviewV1 } from "./StudioReaderPreviewBuilderV1";
+import type { StudioPreparedAnalysisValidationV1, StudioValidatedPreparedAnalysisV1 } from "./StudioSimulationWorkerProtocolV2";
 import {
   assertExperimentCapturesMatchModelV2,
   assertExperimentDesiredFixturesMatchModelV2,
@@ -123,6 +125,8 @@ export type StudioSimulationWorkerRuntimeDependenciesV2 = Readonly<{
   ): ExactModelRuntimeLoadTimingV2 | undefined;
   analysisExecutor?: AnalysisExecutorV1;
   resolvePresentationAnalysisMethods?: ResolvePresentationAnalysisMethodsV1;
+  readerPreviewEnabled?: boolean;
+  validatePreparedAnalysis?(input: StudioPreparedAnalysisValidationV1): Promise<StudioValidatedPreparedAnalysisV1>;
   port: StudioSimulationWorkerPortV2;
   queueCapacity?: number;
   snapshotIds?: ExperimentSnapshotIdFactoryPortV2;
@@ -149,6 +153,8 @@ export class StudioSimulationWorkerRuntimeV2 {
   ];
   readonly #analysisExecutor: AnalysisExecutorV1;
   readonly #resolvePresentationAnalysisMethods: ResolvePresentationAnalysisMethodsV1 | undefined;
+  readonly #readerPreviewEnabled: boolean;
+  readonly #validatePreparedAnalysis: StudioSimulationWorkerRuntimeDependenciesV2["validatePreparedAnalysis"];
   readonly #presentationMethods = new Map<string, PresentationAnalysisMethodV1>();
   readonly #presentationCollectors = new Map<string, Map<string, PresentationAnalysisCollectorV1>>();
   readonly #port: StudioSimulationWorkerPortV2;
@@ -236,6 +242,8 @@ export class StudioSimulationWorkerRuntimeV2 {
     this.#analysisExecutor = dependencies.analysisExecutor
       ?? LEGACY_EXACT_ANALYSIS_EXECUTOR_V1;
     this.#resolvePresentationAnalysisMethods = dependencies.resolvePresentationAnalysisMethods;
+    this.#readerPreviewEnabled = dependencies.readerPreviewEnabled === true;
+    this.#validatePreparedAnalysis = dependencies.validatePreparedAnalysis;
     this.#port = dependencies.port;
     this.#queueCapacity = queueCapacity;
     this.#snapshotIds = dependencies.snapshotIds
@@ -331,6 +339,13 @@ export class StudioSimulationWorkerRuntimeV2 {
 
   async #handleRequest(request: StudioSimulationWorkerRequestV2): Promise<void> {
     switch (request.kind) {
+      case "validate-prepared-analysis": {
+        if (!this.#validatePreparedAnalysis) throw new Error("Prepared analysis validation is unavailable");
+        const prepared = await this.#validatePreparedAnalysis(request);
+        this.#postResponse({ protocol: STUDIO_SIMULATION_WORKER_PROTOCOL_V2, requestId: request.requestId,
+          kind: "prepared-analysis-validated", status: "ok", prepared });
+        return;
+      }
       case "initialize":
         await this.#initialize(request);
         return;
@@ -1462,6 +1477,23 @@ export class StudioSimulationWorkerRuntimeV2 {
       );
     }
 
+    if (this.#readerPreviewEnabled) {
+      try {
+        const readerPreview = await buildReaderPreviewV1({
+          snapshot, contract: context.runtime.contract, adapter: context.runtime.simulationAdapter,
+          methods: [...this.#presentationMethods.values()],
+          createSession: (runtimeSessionId, scenario) => context.runtime.executionPlan.createSession({
+            runtimeSessionId,
+            scenarios: [{ scenarioId: scenario.scenarioId, ...scenario.capture }],
+            boundExecutionPlans: bindScenarioExecutionPlansV1(context.runtime, [scenario.scenarioId]),
+          }),
+        });
+        if (readerPreview) snapshot = validateExperimentSnapshotV2({ ...snapshot, readerPreview });
+      } catch {
+        // A failed disposable display cache cannot undo a successful admission.
+      }
+      this.#assertAcceptedFrameUnchanged(context.frame, "Reader preview creation");
+    }
     this.#postResponse({
       protocol: STUDIO_SIMULATION_WORKER_PROTOCOL_V2,
       requestId: request.requestId,

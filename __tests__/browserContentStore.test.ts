@@ -511,5 +511,23 @@ describe("browser content store", () => {
     const store = new BrowserContentStore(storage);
 
     expect(() => store.listSnapshots()).toThrow(/schema is invalid/);
+    expect(() => store.readArticle("article/browser-store")).toThrow(/schema is invalid/);
+  });
+
+  it("reads prose independently of an unavailable embed but still rejects corrupt snapshots and writes", async () => {
+    const storage = new MemoryStorageV3();
+    const store = new BrowserContentStore(storage);
+    const experiment = experimentV3();
+    const snapshot = store.saveSnapshotCommit(await admittedCommitV3(experiment, { snapshotId: "snapshot/reader" }), experiment.content).snapshot;
+    const article = store.saveArticle(articleV3(snapshot));
+    const envelope = JSON.parse(storage.getItem(BROWSER_CONTENT_STORE_KEY)!);
+    envelope.snapshots[0].content.scenarios[0].capture.checkpoint = { invalid: true };
+    storage.setItem(BROWSER_CONTENT_STORE_KEY, JSON.stringify(envelope));
+    expect(store.readArticle(article.articleId)).toEqual(article);
+    expect(() => store.readSnapshot(snapshot.snapshotId)).toThrow();
+    expect(() => store.saveArticle(article)).toThrow();
+    envelope.articles.push(article);
+    storage.setItem(BROWSER_CONTENT_STORE_KEY, JSON.stringify(envelope));
+    expect(() => store.readArticle(article.articleId)).toThrow(/duplicate articleId/);
   });
 });

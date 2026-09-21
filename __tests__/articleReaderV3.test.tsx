@@ -2,6 +2,8 @@ import { articleReaderShowAllOutputsV3 } from "@/components/article/reader/Artic
 import { articleReaderNeedsScenarioLabelsV3, articleReaderTitleNamesScenarioV3, articleReaderObservationGroupsV3 } from "@/components/article/reader/ArticleReaderObservationV3";
 import { articleReaderPlacementAfterViewportExitV3, articleReaderPlacementInReadingAreaV3 } from "@/components/article/reader/ArticleReaderPlacementV3";
 import React from "react";
+import { articleReaderSampledPresentationV1, createArticleReaderPreviewPresentationV1, useArticleReaderPreviewV1 } from "@/components/article/reader/useArticleReaderPreviewV1";
+import type { ExperimentReaderPreviewV1 } from "@/studio/contracts/v2/readerPreview";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { periodicPvaFromAnalysisV3 } from "@/components/workbench/presentation/WorkbenchPeriodicPvaProjectionV3";
@@ -95,6 +97,97 @@ import algebraicPulmonaryRootStandard70SurfaceV1 from
   "@/studio/integrations/mainWireIntegratedV3/MainWireIntegratedStudioAlgebraicPulmonaryRootSurfaceV1";
 
 const NOOP = () => {};
+
+describe("Opening Snapshot figure to live drawing", () => {
+  const rows = (phases: readonly number[], inputEpoch = 0) => phases.map((phase, index) => ({
+    inputEpoch, acceptedRevision: index + 1, acceptedTimeSec: (index + 1) / 10,
+    values: { phase, volume: 140 - index * 3, pressure: 10 + index * 10 },
+  }));
+  const preview = (): ExperimentReaderPreviewV1 => ({
+    schemaId: "circleheart-experiment-reader-preview-v1", sourceSha256: "0".repeat(64), previewSha256: "1".repeat(64),
+    scenarios: ["scenario/baseline", "scenario/comparison"].map(scenarioId => ({ scenarioId,
+      acceptedRevision: 6, acceptedTimeSec: .6, analyses: [],
+      outputs: { pressure: { outputId: "pressure", value: 100, availability: "available", quality: "authoritative-state" } },
+      samples: rows([0, .25, .5, .9, 0, .25]).map(({ inputEpoch: _, ...row }) => row),
+    })),
+  });
+  const liveStore = () => { const store = new WorkbenchScenarioPresentationSampleStoreV3(); store.setCyclePhaseOutputId("phase"); return store; };
+
+  it("moves the real head before a complete live beat while preserving the saved background", () => {
+    const saved = createArticleReaderPreviewPresentationV1(snapshotV3(), preview(), "phase", []).sampleStore;
+    const live = liveStore();
+    const original = saved.getPressureVolumeSnapshot();
+    for (const count of [1, 2]) {
+      live.append("scenario/baseline", rows([0, .25]).slice(0, count));
+      const actual = live.getPressureVolumeSnapshot();
+      const drawing = articleReaderSampledPresentationV1(actual, saved);
+      if (drawing?.renderer !== "pressure-volume") throw Error("Expected PV figure");
+      expect(actual.completedCyclesByScenarioId["scenario/baseline"]).toHaveLength(0);
+      expect(drawing.currentCycleSamplesByScenarioId["scenario/baseline"]?.at(-1)?.acceptedRevision).toBe(count);
+      expect(drawing.currentCycleSamplesByScenarioId["scenario/baseline"]).toBe(actual.currentCycleSamplesByScenarioId["scenario/baseline"]);
+      expect(drawing.completedCyclesByScenarioId["scenario/baseline"]).toBe(original.completedCyclesByScenarioId["scenario/baseline"]);
+      expect(live.getScenarioSnapshot("scenario/baseline")).toHaveLength(count);
+    }
+    expect(saved.getPressureVolumeSnapshot()).toBe(original);
+  });
+
+  it("replaces each completed background independently and drops it after an input epoch change", () => {
+    const saved = createArticleReaderPreviewPresentationV1(snapshotV3(), preview(), "phase", []).sampleStore;
+    const live = liveStore();
+    live.append("scenario/baseline", rows([0, .25, .5, .9, 0]));
+    live.append("scenario/comparison", rows([0, .25]));
+    const actual = live.getPressureVolumeSnapshot();
+    const drawing = articleReaderSampledPresentationV1(actual, saved);
+    if (drawing?.renderer !== "pressure-volume") throw Error("Expected PV figure");
+    expect(drawing.completedCyclesByScenarioId["scenario/baseline"]).toBe(actual.completedCyclesByScenarioId["scenario/baseline"]);
+    expect(drawing.completedCyclesByScenarioId["scenario/comparison"]).toBe(saved.getPressureVolumeSnapshot().completedCyclesByScenarioId["scenario/comparison"]);
+    live.append("scenario/comparison", rows([0, .25], 1));
+    const edited = articleReaderSampledPresentationV1(live.getPressureVolumeSnapshot(), saved);
+    if (edited?.renderer !== "pressure-volume") throw Error("Expected PV figure");
+    expect(edited.completedCyclesByScenarioId["scenario/comparison"]).toHaveLength(0);
+  });
+
+  it("starts the live waveform immediately without concatenating two simulation clocks", () => {
+    const saved = createArticleReaderPreviewPresentationV1(snapshotV3(), preview(), "phase", []).sampleStore;
+    const live = liveStore();
+    live.append("scenario/baseline", rows([0, .25]));
+    const drawing = articleReaderSampledPresentationV1(live.getSweepSnapshot(), saved);
+    if (drawing?.renderer !== "sweep") throw Error("Expected waveform");
+    expect(drawing.samplesByScenarioId["scenario/baseline"]).toBe(live.getScenarioSnapshot("scenario/baseline"));
+    expect(drawing.samplesByScenarioId["scenario/comparison"]).toBe(saved.getScenarioSnapshot("scenario/comparison"));
+    expect(articleReaderSampledPresentationV1(live.getSweepSnapshot(), undefined)).toBe(live.getSweepSnapshot());
+    expect(articleReaderSampledPresentationV1(null, saved)).toBeNull();
+  });
+
+  it("keeps live subscriptions and prefers live values; edits never fall back to sealed values", () => {
+    const live = readerRuntimeStubV3();
+    const outputs: UseArticleReaderLiveRuntimeResultV3[] = [];
+    const actual = { outputId: "pressure", value: 42, availability: "available" as const, quality: "authoritative-state" as const };
+    const render = (runtime: UseArticleReaderLiveRuntimeResultV3) => {
+      function Probe() { outputs.push(useArticleReaderPreviewV1(runtime, snapshotV3(), preview(), "phase", [])); return null; }
+      renderToStaticMarkup(<Probe />);
+      return outputs.at(-1)!;
+    };
+    const opening = render(live);
+    expect(opening.sampleStore).toBe(live.sampleStore);
+    expect(opening.previewSampleStore).toBeDefined();
+    expect(opening.presentationOutput?.("scenario/baseline", "pressure")?.value).toBe(100);
+    expect(render({ ...live, presentationOutput: () => actual }).presentationOutput?.("scenario/baseline", "pressure")).toBe(actual);
+    const sealedTrace = opening.presentationTrace!("scenario/baseline")!;
+    const startingTrace = { ...sealedTrace, frame: { ...sealedTrace.frame, runtimeSessionId: "live" } };
+    expect(render({ ...live, presentationTrace: () => startingTrace }).presentationTrace?.("scenario/baseline")?.frame.runtimeSessionId).toBe("reader-preview");
+    const unavailable = { ...actual, value: null, availability: "not-evaluated-at-accepted-state" as const };
+    const waitingTrace = { ...startingTrace, frame: { ...startingTrace.frame, outputs: { pressure: unavailable } } };
+    expect(render({ ...live, presentationTrace: () => waitingTrace }).presentationOutput?.("scenario/baseline", "pressure")).toBe(unavailable);
+    expect(render({ ...live, presentationTrace: () => ({ ...startingTrace, frame: { ...startingTrace.frame, outputs: {} } }) }).presentationOutput?.("scenario/baseline", "pressure")).toBeUndefined();
+    const liveAnalysis: StudioSimulationAnalysisV2 = { ...startingTrace.frame, analysisId: "ejection",
+      sourceAcceptedRevision: startingTrace.frame.acceptedRevision, sourceAcceptedTimeSec: startingTrace.frame.acceptedTimeSec, payload: {} };
+    const completeTrace = { ...startingTrace, analyses: [liveAnalysis] };
+    expect(render({ ...live, presentationTrace: () => completeTrace }).presentationTrace?.("scenario/baseline")).toBe(completeTrace);
+    const edited = { ...live, state: { ...live.state, changedScenarioIds: ["scenario/baseline"] } };
+    expect(render(edited)).toBe(edited);
+  });
+});
 
 function snapshotV3(): ExperimentSnapshotV2 {
   return {
@@ -723,6 +816,14 @@ describe("Article Reader V3 experiment anchor", () => {
     expect(articleReaderPlacementInReadingAreaV3([
       { id: "waiting", top: 180, bottom: 760 }, { id: "running", top: 920, bottom: 1470 },
     ], viewport, "waiting")).toBe("waiting");
+  });
+
+  it("prefers the next readable instrument over a thin previous tail, while preserving explicit interaction", () => {
+    const viewport = { top: 0, bottom: 800 };
+    const placements = [{ id: "a", top: -650, bottom: 120 }, { id: "b", top: 190, bottom: 790 }];
+    expect(articleReaderPlacementInReadingAreaV3(placements, viewport, "a")).toBe("b");
+    expect(articleReaderPlacementInReadingAreaV3(placements, viewport, "a", "a")).toBe("a");
+    expect(articleReaderPlacementInReadingAreaV3([{ id: "b", top: 190, bottom: 790 }], viewport, "a", "a")).toBe("b");
   });
 
   it("treats history depth zero as no previous structural states", () => {
@@ -2064,6 +2165,20 @@ describe("Article Reader first screen and opened forms", () => {
     // Fixed bindings still need no selector and retain their original targets.
     expect(render("peek", sealed)).not.toContain("article-reader-scenario-chip");
     expect(sealed.controls[0]!.binding).toEqual({ mode: "fixed", scenarioIds: ["scenario/a"], application: "absolute" });
+  });
+
+  it("names a shared reader-focus target once in the accessible selector, but identifies mixed fixed targets", () => {
+    const sealed = sealedBriefing();
+    const focus = { ...sealed, controls: sealed.controls.filter(c => c.sourcePaneId === sealed.controls[0]!.sourcePaneId).map(c =>
+      ({ ...c, binding: { mode: "reader-focus" as const, allowedScenarioIds: ["scenario/a", "scenario/b"] } })) };
+    const html = render("peek", focus);
+    expect(html).toContain('role="group" aria-label="操作するScenario"');
+    expect(html).not.toContain('article-reader-scenario-selector-label');
+    expect(html).not.toContain('対象:');
+    expect(html).not.toContain('対象：');
+    const mixed = { ...focus, controls: focus.controls.map((c, i) => i === 0 ? c
+      : { ...c, binding: { mode: "fixed" as const, scenarioIds: ["scenario/b"], application: "absolute" as const } }) };
+    expect(render("peek", mixed)).toContain('対象:');
   });
 
   it("reads the author's primary outputs and controls inline at every width, with nothing to unfold", () => {

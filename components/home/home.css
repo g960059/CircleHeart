@@ -71,7 +71,9 @@
 /* ---------- contained site header ---------- */
 .home-site-header,
 .management-site-header,
-.public-static-site-header.home-site-header {
+.article-site-header,
+.public-static-site-header.home-site-header,
+.public-static-site-header.article-site-header {
   padding-inline: max(32px, calc((100vw - 1152px) / 2));
   gap: 16px;
 }
@@ -1394,7 +1396,9 @@ body[data-app-theme="dark"] .home-cover {
   }
   .home-site-header,
   .management-site-header,
-  .public-static-site-header.home-site-header {
+  .article-site-header,
+  .public-static-site-header.home-site-header,
+  .public-static-site-header.article-site-header {
     padding-inline: 20px;
   }
   .home-intro {
@@ -1434,7 +1438,9 @@ body[data-app-theme="dark"] .home-cover {
   }
   .home-site-header,
   .management-site-header,
-  .public-static-site-header.home-site-header {
+  .article-site-header,
+  .public-static-site-header.home-site-header,
+  .public-static-site-header.article-site-header {
     padding-inline: 16px;
     gap: 8px;
   }
@@ -1496,7 +1502,9 @@ body[data-app-theme="dark"] .home-cover {
 @media (max-width: 600px) {
   .home-site-header,
   .management-site-header,
-  .public-static-site-header.home-site-header {
+  .article-site-header,
+  .public-static-site-header.home-site-header,
+  .public-static-site-header.article-site-header {
     padding-inline: 12px;
     gap: 4px;
   }

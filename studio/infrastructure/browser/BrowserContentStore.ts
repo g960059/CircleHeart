@@ -44,6 +44,13 @@ type BrowserContentEnvelope = Readonly<{
   articles: readonly StudioArticleDraftV2[];
 }>;
 
+type StoredBrowserContentEnvelope = Readonly<{
+  schemaId: typeof BROWSER_CONTENT_STORE_SCHEMA_ID;
+  experiments: readonly unknown[];
+  snapshots: readonly unknown[];
+  articles: readonly unknown[];
+}>;
+
 export type BrowserPublicationSnapshotSource = Readonly<{
   experimentId: string;
   expectedVersion: number;
@@ -75,13 +82,15 @@ export class BrowserContentStore {
   }
 
   readSnapshot(snapshotId: string): ExperimentSnapshotV2 | null {
-    return this.#read().snapshots.find((snapshot) =>
-      snapshot.snapshotId === snapshotId) ?? null;
+    const stored = selectStoredRecordV3(this.#readStored().snapshots, "snapshotId", snapshotId);
+    return stored === null ? null : validateExperimentSnapshotV2(stored);
   }
 
   readArticle(articleId: string): StudioArticleDraftV2 | null {
-    return this.#read().articles.find((article) =>
-      article.articleId === articleId) ?? null;
+    // Prose has an independent read boundary, just as in the remote repository.
+    // Snapshot validation belongs to the lazy embed, never the article shell.
+    const stored = selectStoredRecordV3(this.#readStored().articles, "articleId", articleId);
+    return stored === null ? null : validateStudioArticleDraftV2(stored);
   }
 
   /**
@@ -212,6 +221,18 @@ export class BrowserContentStore {
   }
 
   #read(): BrowserContentEnvelope {
+    const record = this.#readStored();
+    const envelope: BrowserContentEnvelope = Object.freeze({
+      schemaId: BROWSER_CONTENT_STORE_SCHEMA_ID,
+      experiments: Object.freeze(record.experiments.map(validateExperimentV2)),
+      snapshots: Object.freeze(record.snapshots.map(validateExperimentSnapshotV2)),
+      articles: Object.freeze(record.articles.map(validateStudioArticleDraftV2)),
+    });
+    assertEnvelopeV3(envelope);
+    return envelope;
+  }
+
+  #readStored(): StoredBrowserContentEnvelope {
     const raw = this.#storage.getItem(BROWSER_CONTENT_STORE_KEY);
     if (raw === null) return emptyEnvelopeV3();
     let parsed: unknown;
@@ -238,14 +259,12 @@ export class BrowserContentStore {
     ) {
       throw new Error("Stored Studio browser content schema is invalid");
     }
-    const envelope: BrowserContentEnvelope = Object.freeze({
+    return {
       schemaId: BROWSER_CONTENT_STORE_SCHEMA_ID,
-      experiments: Object.freeze(record.experiments.map(validateExperimentV2)),
-      snapshots: Object.freeze(record.snapshots.map(validateExperimentSnapshotV2)),
-      articles: Object.freeze(record.articles.map(validateStudioArticleDraftV2)),
-    });
-    assertEnvelopeV3(envelope);
-    return envelope;
+      experiments: record.experiments,
+      snapshots: record.snapshots,
+      articles: record.articles,
+    };
   }
 
   #write(input: BrowserContentEnvelope): void {
@@ -261,6 +280,13 @@ export class BrowserContentStore {
       studioCanonicalJsonStringify(envelope),
     );
   }
+}
+
+function selectStoredRecordV3(records: readonly unknown[], key: string, id: string): unknown | null {
+  const matches = records.filter(record => record !== null && typeof record === "object"
+    && !Array.isArray(record) && (record as Record<string, unknown>)[key] === id);
+  if (matches.length > 1) throw new Error(`Stored Studio browser content has duplicate ${key}: ${id}`);
+  return matches[0] ?? null;
 }
 
 function assertContentPreservesCandidateAuthoredContentV3(

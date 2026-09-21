@@ -1,3 +1,4 @@
+import { validReaderPreviewShapeV1 } from "./StudioReaderPreviewV1";
 import {
   STUDIO_BRIEFING_PRIMARY_CONTROL_LIMIT_V2,
   STUDIO_BRIEFING_PRIMARY_OUTPUT_LIMIT_V2,
@@ -115,14 +116,21 @@ export function validateExperimentSurfaceV2(
 export function validateExperimentSnapshotV2(
   value: unknown,
 ): ExperimentSnapshotV2 {
+  recordV2(value, "$.snapshot");
+  // A disposable cache must not invalidate the authoritative Snapshot, even
+  // when it fails portable-JSON validation. Preserve all mandatory descriptors
+  // and the prototype so separating the cache cannot sanitize invalid content.
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const previewDescriptor = descriptors.readerPreview;
+  delete descriptors.readerPreview;
   const snapshot = clonePortableJsonV2(
-    value,
+    Object.create(Object.getPrototypeOf(value), descriptors),
     "$.snapshot",
   ) as ExperimentSnapshotV2;
   assertRequiredOptionalKeysV2(
     snapshot,
     ["schemaId", "snapshotId", "surfaceReleaseId", "content", "createdAt"],
-    ["createdBy"],
+    ["createdBy", "readerPreview"],
     "$.snapshot",
   );
   if (snapshot.schemaId !== STUDIO_EXPERIMENT_SNAPSHOT_V2_SCHEMA_ID) {
@@ -137,6 +145,16 @@ export function validateExperimentSnapshotV2(
   isoTimestampV2(snapshot.createdAt, "$.snapshot.createdAt");
   if (hasOwnV2(snapshot, "createdBy")) {
     requiredPortableIdV2(snapshot.createdBy, "$.snapshot.createdBy");
+  }
+  if (previewDescriptor?.enumerable && "value" in previewDescriptor) {
+    try {
+      const readerPreview = clonePortableJsonV2(previewDescriptor.value, "$.snapshot.readerPreview");
+      if (validReaderPreviewShapeV1(readerPreview)) {
+        return Object.freeze({ ...snapshot, readerPreview });
+      }
+    } catch {
+      // Corrupt or obsolete presentation caches are safe to regenerate.
+    }
   }
   return snapshot;
 }

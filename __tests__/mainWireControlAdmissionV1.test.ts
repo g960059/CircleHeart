@@ -16,7 +16,7 @@ import type { StudioSimulationFrameV2 } from "@/studio/contracts/v2/simulation";
 import { canonicalJsonStringify } from "@/engine/integrity";
 import { CURRENT_MODEL_PRESETS_V1 } from "@/data/model-releases/CurrentModelReleaseV1";
 import { executeMainWirePressureCrossingPvV1 } from "@/analysis/methods/mainWire/MainWirePressureCrossingExecutionV1";
-import { readPreparedModelAnalysisV1 } from "@/components/workbench/presentation/PreparedModelAnalysisV1";
+import { readPreparedModelAnalysisV1 } from "@/studio/application/authoring/PreparedModelAnalysisV1";
 import { sha256CanonicalJsonHex } from "@/engine/integrity";
 import { MAIN_WIRE_PRESSURE_CROSSING_PV_ANALYSIS_V1_ID as pvAnalysis } from "@/analysis/methods/mainWire/MainWireStructuralAnalysisContractV3";
 import { advanceMainWireProjectionWithRecoveryV1 as recover,

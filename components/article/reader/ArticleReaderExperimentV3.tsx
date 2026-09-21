@@ -6,6 +6,8 @@ import type { ArticleReaderPlaybackPreferenceV3 } from "./ArticleReaderLiveRunti
 import { selectPresentationAnalysisIdsV1, workbenchModelCyclePhaseOutputIdV3 } from "@/components/workbench/presentation/WorkbenchPresentationOutputSelectionV3";
 import { CompletedEjectionWaveformV1 } from "@/components/workbench/presentation/CompletedEjectionWaveformV1";
 import { createPortal } from "react-dom";
+import type { ExperimentReaderPreviewV1 } from "@/studio/contracts/v2/readerPreview";
+import { articleReaderSampledPresentationV1, useArticleReaderPreviewV1 } from "./useArticleReaderPreviewV1";
 import {
   ChevronRight,
   MoreHorizontal,
@@ -133,6 +135,7 @@ export type ArticleReaderExperimentV3Props = Readonly<{
   contractAvailability?: "loading" | "ready" | "unavailable";
   runtimeComposition?: StudioClientCompositionV2 | null;
   live: boolean;
+  readerPreview?: ExperimentReaderPreviewV1 | null;
   onViewportVisibilityChange?(visible: boolean): void;
   expandedPresentation: ArticleReaderExpandedPresentationV3 | null;
   peekPortalHost?: HTMLElement | null;
@@ -167,6 +170,7 @@ export function ArticleReaderExperimentV3({
   contract,
   contractAvailability = contract === null ? "unavailable" : "ready",
   runtimeComposition = null,
+  readerPreview = null,
   live,
   expandedPresentation,
   peekPortalHost = null,
@@ -311,14 +315,16 @@ export function ArticleReaderExperimentV3({
       data-reader-placement-id={block.placement.placementId}
       data-reader-placement-live={live}
       data-reader-presentation={forceInline ? undefined : presentation}
-      onPointerDownCapture={() => { if (!live && inlinePresentation) onActivate(); }}
-      onFocusCapture={() => { if (!live && inlinePresentation) onActivate(); }}
+      onPointerDownCapture={() => { if (inlinePresentation) onActivate(); }}
+      onFocusCapture={() => { if (inlinePresentation) onActivate(); }}
       style={inlinePresentation && !live && inlineHeight > 0 ? { minHeight: inlineHeight } : undefined}
     >
-      {(live || started) && contract !== null ? (
+      {(live || started || (readerPreview !== null && inlinePresentation)) && contract !== null ? (
         <ArticleReaderObservationMemoryContextV3.Provider value={observationMemory}>
           <ArticleReaderLiveOwnerV3
             active={live}
+            startRuntime={live || started}
+            readerPreview={readerPreview}
             key={restartGeneration}
             onRestart={() => setRestartGeneration(value => value + 1)}
             briefing={briefing}
@@ -395,6 +401,8 @@ function ArticleReaderStaticExperimentV3({
 
 function ArticleReaderLiveOwnerV3({
   active,
+  startRuntime,
+  readerPreview,
   onRestart,
   briefing,
   contract,
@@ -415,6 +423,8 @@ function ArticleReaderLiveOwnerV3({
   onTitleCommit,
 }: Readonly<{
   active: boolean;
+  startRuntime: boolean;
+  readerPreview: ExperimentReaderPreviewV1 | null;
   onRestart(): void;
   briefing: ExperimentPlacementBriefingV2;
   contract: ModelContractV2;
@@ -453,7 +463,7 @@ function ArticleReaderLiveOwnerV3({
       runtimeComposition.modelSurface.catalog, runtimeComposition.modelSurface.analysis.presentationMethods,
       snapshot.content.surface.graphPanes.filter(pane => briefing.graphs.some(g => g.paneId === pane.paneId)).map(pane => pane.graphId)),
   [briefing, runtimeComposition, snapshot]);
-  const runtime = useArticleReaderLiveRuntimeV3(
+  const liveRuntime = useArticleReaderLiveRuntimeV3(
     snapshot,
     requiredArticleReaderRuntimeCompositionV3(runtimeComposition),
     briefing.scenarioScope.initialFocusScenarioId,
@@ -467,7 +477,10 @@ function ArticleReaderLiveOwnerV3({
     workbenchModelCyclePhaseOutputIdV3(contract),
     Math.max(0, ...briefing.graphs.map(graph => graph.overrides?.windowSec
       ?? snapshot.content.surface.graphPanes.find(pane => pane.paneId === graph.paneId)?.windowSec ?? 0)),
+    startRuntime,
   );
+  const runtime = useArticleReaderPreviewV1(liveRuntime, snapshot, sessionMemory.pending === null ? readerPreview : null,
+    workbenchModelCyclePhaseOutputIdV3(contract), presentationAnalysisIds);
   const inline = (forceInline || presentation === "inflow") && expandedPresentation === null;
   const readingBriefing = inline && !forceInline ? articleBriefingInflowContentV3(briefing) : briefing;
   const analysisRecompute = articleBriefingAnalysisRecomputeV3(briefing);
@@ -1150,7 +1163,7 @@ export function ArticleReaderAnalysisStatusV3({
     return (
       <div className="article-reader-analysis-status" data-reader-analysis-state={failedUpdate ? "error" : "stale"}
         data-reader-analysis-stale-scenarios={failedUpdate ? undefined : stale.map(({ scenarioId }) => scenarioId).join(" ")}>
-        <span>{t(failedUpdate ? "articleReader.analysisError" : "articleReader.analysisStale")}</span>
+        {failedUpdate && <span>{t("articleReader.analysisError")}</span>}
         <button type="button" disabled={!canRequest} onClick={() => request(targets.map(({ scenarioId }) => scenarioId))}
           data-reader-recompute-analysis aria-describedby={descriptionId} title={t("articleReader.analysisStaleHint")}>
           {actionLabel}
@@ -1276,13 +1289,21 @@ function ArticleReaderLiveGraphV3({
     pane === undefined
       ? undefined
       : contract.graphCatalog.find(({ graphId }) => graphId === pane.graphId);
-  const sampledPresentation =
+  const livePresentation =
     useWorkbenchOptionalSampledGraphPresentationSamplesV3(
       sampleStore,
-      graph?.renderer === "sweep" || graph?.renderer === "pressure-volume"
-        ? graph.renderer
-        : null,
+      // Completed-waveform observers arrive with scalar batches too. Their
+      // memoized canvas only redraws when the completed analysis changes.
+      graph?.renderer === "cycle-waveform"
+        ? "sweep"
+        : graph?.renderer === "sweep" || graph?.renderer === "pressure-volume"
+          ? graph.renderer
+          : null,
     );
+  const sampledPresentation = React.useMemo(
+    () => articleReaderSampledPresentationV1(livePresentation, runtime.previewSampleStore),
+    [livePresentation, runtime.previewSampleStore],
+  );
   if (resolved === null || pane === undefined || graph === undefined)
     return null;
   const series = resolved.series;
@@ -1917,7 +1938,8 @@ function articleReaderPeriodicPvaScalarV3(
 /**
  * Controls grouped by source pane. The pane's sealed Scenario binding is the
  * section heading, never a reader choice; when a section drives several
- * targets or a legacy reader-focus binding, every row names its own target.
+ * different bindings, each row identifies the target when the selector or
+ * section heading cannot do so unambiguously.
  * In an opened form each pane folds; the caller decides which start open.
  */
 function ArticleReaderControlsV3({
@@ -1962,12 +1984,15 @@ function ArticleReaderControlsV3({
       readerFocusBindings.some((binding) => binding.allowedScenarioIds.includes(scenarioId)));
     const showFocusSelector = allowed.length > 1
       || (allowed.length === 1 && allowed[0]!.scenarioId !== runtime.state.activeScenarioId);
+    const headingTargets = sharedFixedTargets.length > 0 ? sharedFixedTargets
+      : bindingSignatures.size === 1 && !showFocusSelector && allowed.length === 1
+        ? [allowed[0]!.scenarioId] : [];
     return {
       key: sourcePaneId,
       title: pane?.label?.trim() || t("articleReader.controls"),
       ...(onTogglePane === undefined ? {} : { collapsed: collapsedPaneIds?.has(sourcePaneId) === true, onToggle: () => onTogglePane(sourcePaneId) }),
-      ...(multiScenario && sharedFixedTargets.length > 0
-        ? { scenario: { label: sharedFixedTargets.map(scenarioLabel).join(", "), colorHex: scenarioColor(sharedFixedTargets[0]!) } }
+      ...(multiScenario && headingTargets.length > 0
+        ? { scenario: { label: headingTargets.map(scenarioLabel).join(", "), colorHex: scenarioColor(headingTargets[0]!) } }
         : {}),
       ...(showFocusSelector ? {
         lead: (
@@ -1995,7 +2020,7 @@ function ArticleReaderControlsV3({
                 definition={definition}
                 runtime={runtime}
                 scenarioColor={scenarioColor}
-                showTarget={multiScenario && (readerFocusBindings.length > 0 || bindingSignatures.size > 1)}
+                showTarget={multiScenario && bindingSignatures.size > 1}
                 snapshot={snapshot}
               />
             );

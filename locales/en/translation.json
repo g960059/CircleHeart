@@ -826,7 +826,6 @@
     "viewPair": "{{first}} + {{second}}",
     "controlTarget": "Target: {{scenarios}}",
     "scenarioFocus": "Scenario to control",
-    "analysisStale": "Conditions changed",
     "analysisStaleHint": "Calculate derived results, such as ESPVR/EDPVR and Starling curves, for the current conditions. Waveforms and ordinary readings already update with your controls. Analysis may take some time.",
     "refreshCurves": "Update curves",
     "refreshAnalysisValues": "Update derived values",

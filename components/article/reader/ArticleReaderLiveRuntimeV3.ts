@@ -223,7 +223,7 @@ export class ArticleReaderLiveRuntimeV3 {
             ? Promise.resolve(null)
             : loadArticleReaderPreparedAnalysisV1(dependencies.releaseTicket, {
                 fixture: seed.fixture, checkpoint: seed.checkpoint,
-              }),
+              }, undefined, backgroundWorkerPool),
           presentationOutputIds: () =>
             this.#presentationOutputIds ?? Object.freeze([]),
           presentationAnalysisIds: () => dependencies.presentationAnalysisIds ?? [],

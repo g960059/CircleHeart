@@ -3,8 +3,8 @@ import type { ScenarioCaptureV2 } from "@/studio/contracts/v2/content";
 import type { StudioModelWorkerReleaseTicketV2 } from "@/studio/contracts/v2/release";
 import type { StudioJsonObjectV2 } from "@/studio/contracts/v2/json";
 import type { StudioSimulationAnalysisV2 } from "@/studio/contracts/v2/simulation";
-import { loadPreparedScenarioAnalysisV1 } from "@/components/workbench/runtime/PreparedModelAnalysisRegistryV1";
-import { readPreparedScenarioAnalysisV1 } from "@/components/workbench/presentation/PreparedModelAnalysisV1";
+import { loadPreparedScenarioAnalysisV1, validatePreparedAnalysisForDisplayV1 } from "@/components/workbench/runtime/PreparedModelAnalysisRegistryV1";
+import type { WorkbenchBackgroundWorkerPoolPortV3 } from "@/components/workbench/runtime/WorkbenchBackgroundWorkerPoolV3";
 import { BrowserPreparedAnalysisStoreV1 } from "@/studio/infrastructure/browser/BrowserPreparedAnalysisStoreV1";
 
 /**
@@ -21,16 +21,14 @@ export async function loadArticleReaderPreparedAnalysisV1(
   ticket: StudioModelWorkerReleaseTicketV2,
   capture: ScenarioCaptureV2,
   store: BrowserPreparedAnalysisStoreV1 = new BrowserPreparedAnalysisStoreV1(),
+  pool?: WorkbenchBackgroundWorkerPoolPortV3,
 ): Promise<StudioSimulationAnalysisV2 | null> {
-  const registered = await loadPreparedScenarioAnalysisV1(ticket, capture);
+  const registered = await loadPreparedScenarioAnalysisV1(ticket, capture, pool);
   if (registered !== null) return registered;
   try {
     const record = store.read(await hash(capture));
     if (record === null) return null;
-    const saved = await readPreparedScenarioAnalysisV1(record, {
-      modelId: ticket.modelId, artifactRevisionId: ticket.artifactRevisionId,
-      surface: ticket.surfaceRelease, capture,
-    });
+    const saved = await validatePreparedAnalysisForDisplayV1(record, ticket, capture, pool);
     return {
       ...saved.analysis,
       payload: {

@@ -374,7 +374,6 @@ export function ArticleReaderScenarioSelectorV3({
     || (scenarios.length === 1 && scenarios[0]!.scenarioId === activeScenarioId)) return null;
   return (
     <div className="article-reader-scenario-selector" role="group" aria-label={label}>
-      <span className="article-reader-scenario-selector-label">{label}</span>
       {scenarios.map((scenario) => (
         <button
           key={scenario.scenarioId}

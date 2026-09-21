@@ -5,16 +5,18 @@ import { join } from "node:path";
 import { exportPreparedSnapshotAnalysesV1 } from "@/tools/authoring/PrepareSnapshotAnalysisAssetsV1";
 import type { ExperimentSnapshotV2 } from "@/studio/contracts/v2/content";
 import { sha256CanonicalJsonHex as hash } from "@/engine/integrity";
-import * as integrity from "@/engine/integrity";
+import * as integrity from "@/domain/json/CanonicalJsonSha256";
 import { loadPreparedModelAnalysisV1 as load } from "@/components/workbench/runtime/PreparedModelAnalysisRegistryV1";
+import { validatePreparedAnalysisForDisplayV1 } from "@/components/workbench/runtime/PreparedModelAnalysisRegistryV1";
+import type { WorkbenchBackgroundWorkerPoolPortV3 } from "@/components/workbench/runtime/WorkbenchBackgroundWorkerPoolV3";
 import type { StudioModelWorkerReleaseTicketV2 } from "@/studio/contracts/v2/release";
 import surface from "@/studio/integrations/mainWireIntegratedV3/MainWireIntegratedStudioStaticCaseSurfaceV4";
 import oldSurface from "@/studio/integrations/mainWireIntegratedV3/MainWireIntegratedStudioStaticCaseSurfaceV2";
 import boundedSurface from "@/studio/integrations/mainWireIntegratedV3/MainWireIntegratedStudioStaticCaseSurfaceV5";
 import { buildPreparedModelAnalysisV1 as build, readPreparedModelAnalysisV1 as read,
   buildPreparedScenarioAnalysisV1 as buildScenario, readPreparedScenarioAnalysisV1 as readScenario,
-  assessPreparedModelAnalysisV1 as assess, inspectModelAnalysisV1 as inspect } from "@/components/workbench/presentation/PreparedModelAnalysisV1";
-import * as decoder from "@/components/workbench/presentation/GuytonStarlingOrientationCanvasV3";
+  assessPreparedModelAnalysisV1 as assess, inspectModelAnalysisV1 as inspect } from "@/studio/application/authoring/PreparedModelAnalysisV1";
+import * as decoder from "@/analysis/methods/mainWire/MainWireStructuralReturnPayloadV3";
 import * as registry from "@/analysis/registry/RegisteredAnalysisMethodsV1";
 import * as pva from "@/analysis/methods/mainWire/MainWirePeriodicPvaV1";
 import currentBundle from "@/data/model-releases/standard74/bundle.json";
@@ -33,6 +35,48 @@ const analysis: StudioSimulationAnalysisV2 = { modelId: high.modelId, runtimeSes
   analysisId: registry.resolveRegisteredAnalysisMethodsV1(surface).periodicPvaDerivation!.sourceAnalysisId!, payload: { status: "available" } };
 const expected = { modelId: high.modelId, artifactRevisionId: "a".repeat(64), capture, surface };
 afterEach(() => vi.restoreAllMocks());
+
+it("validates in the bounded pool, sharing only completed exact-source receipts between owners", async () => {
+  const ticket = { modelId: expected.modelId, artifactRevisionId: expected.artifactRevisionId, surfaceRelease: surface } as StudioModelWorkerReleaseTicketV2;
+  const receipt = { analysis, recordSha256: "1".repeat(64), captureSha256: "2".repeat(64), preparationSourceSha256: "3".repeat(64) };
+  let finish!: (value: typeof receipt) => void;
+  const validatePreparedAnalysis = vi.fn(() => new Promise<typeof receipt>(resolve => { finish = resolve; }));
+  const run = vi.fn((_priority, operation) => operation({ validatePreparedAnalysis }));
+  const pool = { run } as unknown as WorkbenchBackgroundWorkerPoolPortV3;
+  const record = { test: "shared-valid-source" };
+  const first = validatePreparedAnalysisForDisplayV1(record, ticket, capture, pool);
+  const second = validatePreparedAnalysisForDisplayV1(record, ticket, capture, pool);
+  await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
+  finish(receipt);
+  expect(await first).toBe(receipt);
+  expect(await second).toBe(receipt);
+  const otherRun = vi.fn().mockResolvedValue(receipt);
+  const otherPool = { run: otherRun } as unknown as WorkbenchBackgroundWorkerPoolPortV3;
+  expect(await validatePreparedAnalysisForDisplayV1(record, ticket, capture, otherPool)).toBe(receipt);
+  expect(otherRun).not.toHaveBeenCalled();
+  await validatePreparedAnalysisForDisplayV1({ ...record, altered: true }, ticket, capture, otherPool);
+  await validatePreparedAnalysisForDisplayV1(record, { ...ticket, artifactRevisionId: "f".repeat(64) }, capture, otherPool);
+  expect(otherRun).toHaveBeenCalledTimes(2);
+});
+
+it("does not reuse cancelled validation, including another owner's pending work", async () => {
+  const ticket = { modelId: expected.modelId, artifactRevisionId: expected.artifactRevisionId, surfaceRelease: surface } as StudioModelWorkerReleaseTicketV2;
+  let cancel!: (reason: Error) => void;
+  const run = vi.fn(() => new Promise((_, reject) => { cancel = reject; }));
+  const pool = { run } as unknown as WorkbenchBackgroundWorkerPoolPortV3;
+  const record = { test: "cancelled-source" };
+  const first = validatePreparedAnalysisForDisplayV1(record, ticket, capture, pool);
+  const rejected = expect(first).rejects.toThrow("cancelled");
+  await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
+  const otherRun = vi.fn().mockRejectedValue(new Error("different owner"));
+  const otherPool = { run: otherRun } as unknown as WorkbenchBackgroundWorkerPoolPortV3;
+  await expect(validatePreparedAnalysisForDisplayV1(record, ticket, capture, otherPool)).rejects.toThrow("different owner");
+  expect(otherRun).toHaveBeenCalledOnce();
+  cancel(new Error("cancelled")); await rejected;
+  otherRun.mockRejectedValueOnce(new Error("retried"));
+  await expect(validatePreparedAnalysisForDisplayV1(record, ticket, capture, otherPool)).rejects.toThrow("retried");
+  expect(otherRun).toHaveBeenCalledTimes(2);
+});
 
 it("exports a saved Scenario's actual Guyton/PV family and rejects a different Snapshot or artifact", async () => {
   const preset = CURRENT_MODEL_PRESETS_V1[0]!;
@@ -123,7 +167,7 @@ function complete() {
 }
 
 it("does not hash a large capture when the pinned method has no launch assets", async () => {
-  const digest = vi.spyOn(integrity, "sha256CanonicalJsonHex");
+  const digest = vi.spyOn(integrity, "sha256StudioCanonicalJsonHex");
   expect(await load({ surfaceRelease: oldSurface } as StudioModelWorkerReleaseTicketV2, capture)).toBeNull();
   expect(digest).not.toHaveBeenCalled();
 });

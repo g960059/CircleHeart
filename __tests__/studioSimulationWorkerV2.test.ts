@@ -3143,6 +3143,35 @@ describe("Studio simulation worker V2 multi-Scenario authoring", () => {
 });
 
 describe("Studio simulation worker V2 client", () => {
+  it("validates prepared analysis without opening a numerical session", async () => {
+    const loadExactRuntime = vi.fn();
+    const prepared = { analysis: analysisV2({ modelId: STANDARD_TEST_RELEASE_TICKET_V1.modelId }), recordSha256: "a".repeat(64), captureSha256: "b".repeat(64), preparationSourceSha256: "c".repeat(64) };
+    const validatePreparedAnalysis = vi.fn(async () => prepared);
+    const postMessage = vi.fn();
+    const runtime = new StudioSimulationWorkerRuntimeV2({ loadExactRuntime, validatePreparedAnalysis, port: { postMessage, close: vi.fn() } });
+    runtime.enqueue({ protocol: STUDIO_SIMULATION_WORKER_PROTOCOL_V2, requestId: 1, kind: "validate-prepared-analysis",
+      record: { sealed: true }, releaseTicket: STANDARD_TEST_RELEASE_TICKET_V1, capture: experimentV2().content.scenarios[0]!.capture });
+    await runtime.whenIdle();
+    expect(loadExactRuntime).not.toHaveBeenCalled();
+    expect(validatePreparedAnalysis).toHaveBeenCalledOnce();
+    expect(postMessage.mock.calls[0]?.[0]).toMatchObject({ requestId: 1, status: "ok", kind: "prepared-analysis-validated", prepared });
+    runtime.terminate();
+  });
+
+  it.each([
+    {}, { modelId: "wrong-model" }, { inputEpoch: 1 }, { sourceAcceptedRevision: 1 }, { sourceAcceptedTimeSec: 1 },
+  ])("correlates the validated preparation with its sealed source %j", async (override) => {
+    const transport = new FakeWorkerTransportV2();
+    const client = createStudioSimulationWorkerClientForTestV2({ transport });
+    const result = client.validatePreparedAnalysis({ record: {}, releaseTicket: STANDARD_TEST_RELEASE_TICKET_V1,
+      capture: experimentV2().content.scenarios[0]!.capture });
+    transport.emitMessage({ protocol: STUDIO_SIMULATION_WORKER_PROTOCOL_V2, requestId: 1, status: "ok", kind: "prepared-analysis-validated",
+      prepared: { analysis: analysisV2({ modelId: STANDARD_TEST_RELEASE_TICKET_V1.modelId, ...override }), recordSha256: "a".repeat(64), captureSha256: "b".repeat(64), preparationSourceSha256: "c".repeat(64) } });
+    if (Object.keys(override).length) await expect(result).rejects.toThrow(/source mismatch/);
+    else await expect(result).resolves.toMatchObject({ analysis: analysisV2({ modelId: STANDARD_TEST_RELEASE_TICKET_V1.modelId }) });
+    client.terminate();
+  });
+
   it("constructs the production client with its own real Worker boundary", () => {
     const transport = new FakeWorkerTransportV2();
     const workerConstructor = vi.fn(function WorkerTestDouble(

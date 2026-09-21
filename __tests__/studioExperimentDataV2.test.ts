@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { readerPreviewSourceSha256V1, verifiedReaderPreviewV1 } from "@/studio/application/authoring/StudioReaderPreviewV1";
+import { sha256StudioCanonicalJsonHex } from "@/domain/json/CanonicalJsonSha256";
+import { buildReaderPreviewV1 } from "@/studio/workers/StudioReaderPreviewBuilderV1";
+import type { RegisteredModelSimulationAdapterV2, StudioSimulationFrameV2 } from "@/studio/contracts/v2/simulation";
 
 import {
   STUDIO_EXPERIMENT_PLACEMENT_V2_SCHEMA_ID,
@@ -1112,6 +1116,102 @@ describe("Studio Experiment data V2", () => {
       .toThrow(/cyclic JSON/);
   });
 
+});
+
+describe("Disposable Snapshot reader preview", () => {
+  it("isolates non-portable optional caches without relaxing mandatory Snapshot validation", () => {
+    const snapshot = validateExperimentSnapshotV2(snapshotV2());
+    const nested = Array.from({ length: 260 }).reduce<object>(child => ({ child }), {});
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    for (const readerPreview of [JSON.parse('{"extra":-0}'), nested, cyclic]) {
+      const result = validateExperimentSnapshotV2({ ...snapshot, readerPreview });
+      expect(result).toEqual(snapshot);
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(() => validateExperimentSnapshotV2({ ...snapshot, createdAt: "invalid", readerPreview })).toThrow();
+    }
+    const getter = vi.fn(() => { throw Error("must not invoke cache accessors"); });
+    const withAccessor = Object.defineProperty({ ...snapshot }, "readerPreview", { enumerable: true, get: getter });
+    expect(validateExperimentSnapshotV2(withAccessor)).toEqual(snapshot);
+    expect(getter).not.toHaveBeenCalled();
+    const invalidPrototype = Object.assign(Object.create({ inherited: true }), snapshot);
+    expect(() => validateExperimentSnapshotV2(invalidPrototype)).toThrow(/plain objects/);
+  });
+
+  const previewFor = async (snapshot = validateExperimentSnapshotV2(snapshotV2())) => {
+    const body = { schemaId: "circleheart-experiment-reader-preview-v1" as const,
+      sourceSha256: await readerPreviewSourceSha256V1(snapshot),
+      scenarios: snapshot.content.scenarios.map(s => ({ scenarioId: s.scenarioId,
+        acceptedRevision: s.capture.checkpoint.acceptedRevision + 1,
+        acceptedTimeSec: s.capture.checkpoint.acceptedTimeSec + 0.002,
+        outputs: {}, analyses: [], samples: [{ acceptedRevision: s.capture.checkpoint.acceptedRevision + 1,
+          acceptedTimeSec: s.capture.checkpoint.acceptedTimeSec + 0.002, values: { pressure: 100 } }] })),
+    };
+    return { ...body, previewSha256: await sha256StudioCanonicalJsonHex(body) };
+  };
+  it("binds the display cache to every exact capture and the Surface pin; rejects altered rows and out-of-source times", async () => {
+    const snapshot = validateExperimentSnapshotV2(snapshotV2());
+    const readerPreview = await previewFor(snapshot);
+    const valid = validateExperimentSnapshotV2({ ...snapshot, readerPreview });
+    expect(await verifiedReaderPreviewV1(valid)).toEqual(readerPreview);
+    expect(valid.content).toEqual(snapshot.content);
+    expect(verifiedReaderPreviewV1(valid)).toBe(verifiedReaderPreviewV1(valid));
+    expect(await verifiedReaderPreviewV1({ ...valid, surfaceReleaseId: "surface/other" })).toBeNull();
+    expect(await verifiedReaderPreviewV1({ ...valid, content: { ...valid.content, scenarios: valid.content.scenarios.map(s =>
+      ({ ...s, capture: { ...s.capture, fixture: { changed: true } } })) } })).toBeNull();
+    const changed = structuredClone(readerPreview);
+    changed.scenarios[0]!.samples[0]!.values.pressure = 200;
+    expect(await verifiedReaderPreviewV1({ ...valid, readerPreview: changed })).toBeNull();
+    const { previewSha256: _, ...early } = structuredClone(readerPreview);
+    early.scenarios[0]!.samples[0]!.acceptedTimeSec = 0;
+    expect(await verifiedReaderPreviewV1({ ...valid, readerPreview: { ...early, previewSha256: await sha256StudioCanonicalJsonHex(early) } })).toBeNull();
+    const fallback = validateExperimentSnapshotV2({ ...valid, readerPreview: { schemaId: "unknown" } });
+    expect(fallback).toEqual(snapshot);
+    expect(Object.isFrozen(fallback)).toBe(true);
+    const oversized = { ...readerPreview, extra: "字".repeat(510_000) };
+    expect(validateExperimentSnapshotV2({ ...valid, readerPreview: oversized })).toEqual(snapshot);
+  });
+
+  it("observes a detached session and preserves every accepted display row without starting a TBV sweep", async () => {
+    const snapshot = validateExperimentSnapshotV2(snapshotV2());
+    const original = JSON.stringify(snapshot);
+    const source = snapshot.content.scenarios[0]!;
+    let ordinal = 0, collected = 0, sessionId = "";
+    const currentFrame = (): StudioSimulationFrameV2 => ({ modelId: snapshot.content.modelId, runtimeSessionId: sessionId,
+      scenarioId: source.scenarioId, inputEpoch: 0, acceptedRevision: 1200 + ordinal, acceptedTimeSec: 2.4 + ordinal * 0.002,
+      outputs: Object.fromEntries([["v", 144], ["p", 100], ["phase", (ordinal % 400) / 400]].map(([outputId, value]) =>
+        [outputId, { outputId, value, availability: "available", quality: "authoritative-state" }])) as StudioSimulationFrameV2["outputs"],
+    });
+    const disposeSession = vi.fn();
+    const requestAnalysis = vi.fn(() => { throw new Error("No TBV sweeping in a preview"); });
+    const adapter = { currentFrame, disposeSession, requestAnalysis,
+      advancePresentationBatch: async ({ stepCount, presentationOutputIds }: { stepCount: number; presentationOutputIds: readonly string[] }) => {
+        const frames = Array.from({ length: stepCount }, () => { ordinal++; return currentFrame(); });
+        return { outputIds: presentationOutputIds, acceptedTimesSec: Float64Array.from(frames.map(f => f.acceptedTimeSec)),
+          acceptedRevisions: Float64Array.from(frames.map(f => f.acceptedRevision)), outputStates: new Uint8Array(frames.length * presentationOutputIds.length),
+          outputValues: Float64Array.from(frames.flatMap(f => presentationOutputIds.map(id => f.outputs[id]!.value as number))),
+          terminalFrame: frames.at(-1)! };
+      },
+    } as unknown as RegisteredModelSimulationAdapterV2;
+    const contract: ModelContractV2 = { ...modelContractV2(), graphCatalog: [{ graphId: "catalog.graph/pressure", renderer: "pressure-volume",
+      defaultSeriesIds: ["MAP"], seriesCatalog: [{ seriesId: "MAP", kind: "pressure-volume", volumeOutputId: "v", pressureOutputId: "p", cyclePhaseOutputId: "phase", pressureBasis: "transmural" }] }] };
+    const createSession = vi.fn(async (id: string, scenario: typeof source) => { sessionId = id; expect(scenario.capture).toEqual(source.capture); });
+    const preview = await buildReaderPreviewV1({ snapshot, contract, adapter, createSession,
+      methods: [{ methodId: "method/display", requiredExactOutputIds: ["p"], create: () => ({ ingest: batch => { collected += batch.acceptedTimesSec.length; return undefined; } }) }],
+    });
+    expect(preview).toBeDefined();
+    expect(collected).toBe(800);
+    expect(preview!.scenarios[0]!.samples.length).toBe(800);
+    expect(preview!.scenarios[0]!.samples.at(-1)!.acceptedRevision).toBe(2000);
+    expect(await verifiedReaderPreviewV1({ ...snapshot, readerPreview: preview })).toEqual(preview);
+    expect(JSON.stringify(snapshot)).toBe(original);
+    expect(requestAnalysis).not.toHaveBeenCalled();
+    expect(createSession).toHaveBeenCalledOnce();
+    expect(disposeSession).toHaveBeenCalledWith(sessionId);
+    expect(JSON.stringify(preview)).not.toContain(sessionId);
+    await expect(buildReaderPreviewV1({ snapshot, contract, adapter, createSession: async () => { throw Error("fork failed"); }, methods: [] })).rejects.toThrow("fork failed");
+    expect(disposeSession).toHaveBeenCalledTimes(2);
+  });
 });
 
 function captureV2() {

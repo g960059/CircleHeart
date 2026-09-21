@@ -48,7 +48,7 @@ import { resolveRegisteredAnalysisMethodsV1 } from "@/analysis/registry/Register
 import {
   buildPreparedScenarioAnalysisV1,
   type PreparedScenarioAnalysisV1,
-} from "@/components/workbench/presentation/PreparedModelAnalysisV1";
+} from "@/studio/application/authoring/PreparedModelAnalysisV1";
 import {
   ARTICLE_EMBED_STUDY_SCENARIOS_V1,
   ARTICLE_EMBED_STUDY_SURFACE_V1,

@@ -209,8 +209,8 @@ describe("Studio public content delivery V1", () => {
     expect(titleHtml).toContain('<span class="article-heading-phrases">');
     expect(rendered.documentHtml).toContain('<div id="public-static-root">');
     expect(rendered.documentHtml).toContain('<div id="root" hidden></div>');
-    expect(rendered.documentHtml).toContain('class="public-static-site-header"');
-    const header = rendered.documentHtml.match(/<header class="public-static-site-header">(.*?)<\/header>/s)![1];
+    expect(rendered.documentHtml).toContain('class="public-static-site-header article-site-header"');
+    const header = rendered.documentHtml.match(/<header class="public-static-site-header article-site-header">(.*?)<\/header>/s)![1];
     const scriptEnabledHeader = header.replace(/<noscript>.*?<\/noscript>/gs, "");
     expect(scriptEnabledHeader).toContain('data-testid="site-account-pending-v3"');
     expect(scriptEnabledHeader).not.toContain('href="/ja/login"');

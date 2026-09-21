@@ -172,24 +172,32 @@ function ArticleReaderV3Resource({
       const request = Promise.resolve().then(() => remoteRepository
         ? remoteRepository.readSnapshot(snapshotId) : store.readSnapshot(snapshotId));
       pending.set(snapshotId, request);
-      const clear = () => { pending.delete(snapshotId); };
-      void request.then(clear, clear);
+      // Immutable Snapshots are shared by every placement in this article.
+      // Retain successful reads; retry missing data and failures on demand.
+      void request.then(snapshot => { if (snapshot === null) pending.delete(snapshotId); }, () => { pending.delete(snapshotId); });
       return request;
     };
-  }, [remoteRepository, store]);
+  }, [articleId, remoteRepository, store]);
   const [activePlacementId, setActivePlacementId] = React.useState<string | null>(
     null,
   );
   const visibleInlinePlacementsRef = React.useRef(new Set<string>());
+  const explicitPlacementRef = React.useRef<{ id: string; scrollTop: number } | null>(null);
   const selectReadingPlacement = React.useCallback(() => {
     const host = document.querySelector<HTMLElement>(".article-reader-article-pane");
     if (!host) return;
     const bounds = host.getBoundingClientRect();
     const viewport = { top: Math.max(0, bounds.top), bottom: Math.min(window.innerHeight, bounds.bottom) };
+    const explicit = explicitPlacementRef.current;
+    // Keep a slider or keyboard interaction in charge until the reader moves
+    // on. Reflow/observer callbacks alone do not steal its Worker lane.
+    if (explicit && Math.abs(host.scrollTop - explicit.scrollTop) > Math.min(160, (viewport.bottom - viewport.top) * 0.25)) {
+      explicitPlacementRef.current = null;
+    }
     const placements = [...host.querySelectorAll<HTMLElement>('[data-reader-presentation="inflow"]')]
       .map(element => ({ id: element.dataset.readerPlacementId!, ...pickReadingBoundsV3(element) }))
       .filter(p => visibleInlinePlacementsRef.current.has(p.id));
-    setActivePlacementId(current => articleReaderPlacementInReadingAreaV3(placements, viewport, current));
+    setActivePlacementId(current => articleReaderPlacementInReadingAreaV3(placements, viewport, current, explicitPlacementRef.current?.id ?? null));
   }, []);
   React.useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -580,7 +588,11 @@ function ArticleReaderV3Resource({
                 expandedPresentation={expandedPresentation}
                 peekPortalHost={peekPortalHost}
                 peekMaximized={peekMaximized}
-                onActivate={() => setActivePlacementId(block.placement.placementId)}
+                onActivate={() => {
+                  const host = document.querySelector<HTMLElement>(".article-reader-article-pane");
+                  explicitPlacementRef.current = { id: block.placement.placementId, scrollTop: host?.scrollTop ?? 0 };
+                  setActivePlacementId(block.placement.placementId);
+                }}
                 onViewportVisibilityChange={(visible) => {
                   if (visible) visibleInlinePlacementsRef.current.add(block.placement.placementId);
                   else visibleInlinePlacementsRef.current.delete(block.placement.placementId);

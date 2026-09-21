@@ -2,6 +2,7 @@ import type {
   ExperimentSurfaceV2,
   ExperimentSnapshotV2,
   ExperimentV2,
+  ScenarioCheckpointV2,
 } from "@/studio/contracts/v2/content";
 import type {
   StudioSimulationAnalysisV2,
@@ -9,6 +10,10 @@ import type {
 } from "@/studio/contracts/v2/simulation";
 import type { StudioJsonValueV2 } from "@/studio/contracts/v2/json";
 import {
+  STUDIO_SIMULATION_WORKER_PROTOCOL_V2,
+  validateStudioSimulationWorkerRequestV2,
+  type StudioPreparedAnalysisValidationV1,
+  type StudioValidatedPreparedAnalysisV1,
   type StudioSimulationWorkerAddScenarioFromPresetInputV2,
   type StudioSimulationWorkerAdvancePresentationInputV2,
   type StudioSimulationWorkerApplyControlInputV2,
@@ -170,6 +175,7 @@ type InternalClientConstructorV2 = new (
 ) => StudioSimulationWorkerClientV2;
 
 type ExpectedResponseV2 =
+  | Readonly<{ kind: "prepared-analysis-validated"; modelId: string; checkpoint: ScenarioCheckpointV2 }>
   | Readonly<{
       kind: "initialized";
       modelId: string;
@@ -297,6 +303,7 @@ export class StudioSimulationWorkerClientV2 {
   #lastInitializationTiming:
     StudioSimulationWorkerInitializationTimingV2 | undefined;
   #operationInFlight:
+    | "validate-prepared-analysis"
     | "advance"
     | "advance-presentation"
     | "apply-control"
@@ -915,6 +922,22 @@ export class StudioSimulationWorkerClientV2 {
     }
   }
 
+  /** Pure background validation; requires no numerical session or model load. */
+  async validatePreparedAnalysis(input: StudioPreparedAnalysisValidationV1): Promise<StudioValidatedPreparedAnalysisV1> {
+    if (this.#operationInFlight !== undefined || (this.#state !== "new" && this.#state !== "active")) {
+      throw new Error("simulation worker client is unavailable for preparation validation");
+    }
+    this.#operationInFlight = "validate-prepared-analysis";
+    try {
+      const request = validateStudioSimulationWorkerRequestV2({ ...input, protocol: STUDIO_SIMULATION_WORKER_PROTOCOL_V2,
+        requestId: this.#allocateRequestId(), kind: "validate-prepared-analysis" });
+      const response = await this.#postRequest(request, { kind: "prepared-analysis-validated",
+        modelId: input.releaseTicket.modelId, checkpoint: input.capture.checkpoint });
+      if (response.status !== "ok" || response.kind !== "prepared-analysis-validated") throw new Error("Unexpected preparation validation response");
+      return response.prepared;
+    } finally { this.#operationInFlight = undefined; }
+  }
+
   async createSnapshot(
     input: StudioSimulationWorkerCreateSnapshotInputV2,
   ): Promise<StudioSimulationWorkerAdmittedSnapshotCommitV2> {
@@ -1226,6 +1249,15 @@ function assertExpectedResponseV2(
     throw new Error(
       `simulation worker response kind mismatch: expected ${expected.kind}`,
     );
+  }
+  if (response.kind === "prepared-analysis-validated" && expected.kind === "prepared-analysis-validated") {
+    const analysis = response.prepared.analysis;
+    if (analysis.modelId !== expected.modelId || analysis.inputEpoch !== 0
+      || analysis.sourceAcceptedRevision !== expected.checkpoint.acceptedRevision
+      || analysis.sourceAcceptedTimeSec !== expected.checkpoint.acceptedTimeSec) {
+      throw new Error("Prepared analysis source mismatch");
+    }
+    return;
   }
   if (response.kind === "initialized" && expected.kind === "initialized") {
     assertFrameIdentityV2(
