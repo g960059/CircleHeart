@@ -1119,6 +1119,25 @@ describe("Studio Experiment data V2", () => {
 });
 
 describe("Disposable Snapshot reader preview", () => {
+  it("isolates non-portable optional caches without relaxing mandatory Snapshot validation", () => {
+    const snapshot = validateExperimentSnapshotV2(snapshotV2());
+    const nested = Array.from({ length: 260 }).reduce<object>(child => ({ child }), {});
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    for (const readerPreview of [JSON.parse('{"extra":-0}'), nested, cyclic]) {
+      const result = validateExperimentSnapshotV2({ ...snapshot, readerPreview });
+      expect(result).toEqual(snapshot);
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(() => validateExperimentSnapshotV2({ ...snapshot, createdAt: "invalid", readerPreview })).toThrow();
+    }
+    const getter = vi.fn(() => { throw Error("must not invoke cache accessors"); });
+    const withAccessor = Object.defineProperty({ ...snapshot }, "readerPreview", { enumerable: true, get: getter });
+    expect(validateExperimentSnapshotV2(withAccessor)).toEqual(snapshot);
+    expect(getter).not.toHaveBeenCalled();
+    const invalidPrototype = Object.assign(Object.create({ inherited: true }), snapshot);
+    expect(() => validateExperimentSnapshotV2(invalidPrototype)).toThrow(/plain objects/);
+  });
+
   const previewFor = async (snapshot = validateExperimentSnapshotV2(snapshotV2())) => {
     const body = { schemaId: "circleheart-experiment-reader-preview-v1" as const,
       sourceSha256: await readerPreviewSourceSha256V1(snapshot),
