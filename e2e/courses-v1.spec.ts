@@ -517,7 +517,13 @@ test("@desktop @mobile @webkit public discovery stays consistent across themes a
       );
     await expect(page.getByRole("group", { name: "コンテンツの種類" }).getByRole("button"))
       .toHaveText(["すべて", "コース", "記事", "シミュレーション"]);
-    await expect(page.locator(".home-card")).toHaveCount(3);
+    await expect(page.locator(".home-card")).toHaveCount(4);
+    await expect(page.locator(".home-card h3")).toContainText([
+      course.title,
+      "一拍を読む：PV・圧・流量の対応",
+      "一拍を読む",
+      "循環をつなぐ",
+    ]);
     await page.getByRole("button", { name: "記事", exact: true }).click();
     await expect(page.locator(".home-card")).toHaveCount(2);
     await expect(page.locator(".home-card h3")).toContainText(["一拍を読む", "循環をつなぐ"]);
@@ -525,7 +531,7 @@ test("@desktop @mobile @webkit public discovery stays consistent across themes a
     await page.getByRole("combobox", { name: "並び順", exact: true }).selectOption("new");
     await expect(page.locator(".home-card")).toHaveCount(4);
     await page.getByRole("combobox", { name: "並び順", exact: true }).selectOption("recommended");
-    await expect(page.locator("main .home-official")).toHaveCount(3);
+    await expect(page.locator("main .home-official")).toHaveCount(4);
     expect(
       await page
         .locator(".home-page")
