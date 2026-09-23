@@ -723,44 +723,36 @@ body[data-app-theme="dark"] .home-mini-demo {
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
-  gap: 3px;
-  min-height: 36px;
-  padding: 6px 13px;
-  border: 1px solid var(--home-border-visible);
-  border-radius: 999px;
-  background: var(--wb-panel-bg);
+  gap: 1px;
+  min-height: 34px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: var(--article-tag-fill);
   color: var(--wb-text-muted);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
   transition:
     color 0.15s,
-    background-color 0.15s,
-    border-color 0.15s;
+    background-color 0.15s;
 }
 .home-topic > span {
-  color: var(--wb-text-subtle);
-  font-weight: 500;
+  opacity: 0.55;
 }
 .home-topic small {
-  margin-left: 4px;
+  margin-left: 6px;
   font-size: 11px;
-  font-weight: 550;
-  color: var(--wb-text-subtle);
   font-variant-numeric: tabular-nums;
+  opacity: 0.6;
 }
 .home-topic:hover:not(:disabled) {
   color: var(--wb-text);
-  background: var(--wb-hover-bg);
+  background: var(--article-tag-fill-strong);
 }
-.home-topic[aria-pressed="true"] {
-  color: var(--wb-accent);
-  background: var(--wb-accent-soft);
-  border-color: var(--wb-accent);
-}
-.home-topic[aria-pressed="true"] > span,
-.home-topic[aria-pressed="true"] small {
-  color: inherit;
+.home-topic[aria-pressed="true"],
+.home-topic[aria-pressed="true"]:hover:not(:disabled) {
+  color: var(--wb-canvas-bg);
+  background: var(--wb-text);
 }
 .home-topic:focus-visible,
 .home-card-tag:focus-visible,
@@ -773,7 +765,7 @@ body[data-app-theme="dark"] .home-mini-demo {
   z-index: 1;
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 6px;
+  gap: 4px;
   margin: 10px 0 0;
   padding: 0;
   list-style: none;
@@ -782,24 +774,27 @@ body[data-app-theme="dark"] .home-mini-demo {
   display: inline-flex;
   align-items: center;
   min-height: 24px;
-  padding: 2px 9px;
-  border-radius: 999px;
-  background: var(--wb-panel-bg-soft);
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--article-tag-fill);
   color: var(--wb-text-muted);
   font-size: 11.5px;
-  font-weight: 550;
+  font-weight: 500;
   overflow-wrap: anywhere;
   transition:
     color 0.15s,
     background-color 0.15s;
 }
+.home-card-tag > span {
+  opacity: 0.55;
+}
 .home-card-tag:hover {
   color: var(--wb-text);
-  background: var(--wb-hover-bg);
+  background: var(--article-tag-fill-strong);
 }
 .home-card-tag[aria-pressed="true"] {
-  color: var(--wb-accent);
-  background: var(--wb-accent-soft);
+  color: var(--wb-text);
+  background: var(--article-tag-fill-strong);
 }
 .home-card-tag-more {
   display: inline-flex;

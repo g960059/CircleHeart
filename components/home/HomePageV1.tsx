@@ -587,14 +587,16 @@ function HomeCardTagsV1({
               aria-label={ja ? `#${tag} で絞り込む` : `Filter by #${tag}`}
               onClick={() => onTag(tag)}
             >
-              #{tag}
+              <span aria-hidden="true">#</span>
+              {tag}
             </button>
           ) : (
             <HomeLinkV1
               className="home-card-tag"
               href={articleTagHref({ locale, tag })}
             >
-              #{tag}
+              <span aria-hidden="true">#</span>
+              {tag}
             </HomeLinkV1>
           )}
         </li>

@@ -1,4 +1,4 @@
-import { ExternalLink, Globe, Hash, Loader2 } from "lucide-react";
+import { ExternalLink, Globe, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 export type EditorSaveStatusV3 =
@@ -177,7 +177,6 @@ function ArticlePublishTagsV3({
       </div>
       {tags.length === 0 ? (
         <p className="article-publish-tags-empty">
-          <Hash aria-hidden="true" />
           {t("articleTags.publishEmpty")}
         </p>
       ) : (

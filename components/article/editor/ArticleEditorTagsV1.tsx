@@ -1,5 +1,5 @@
 import React from "react";
-import { Hash, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   STUDIO_ARTICLE_TAG_LIMIT_V1,
@@ -123,10 +123,10 @@ export const ArticleEditorTagsV1 = React.forwardRef<
         if (normalizedText.length > 0 && !tooLong) commit(text);
       }}
     >
-      <Hash className="article-editor-tags-icon" aria-hidden="true" />
       <ul className="article-editor-tag-list" aria-label={t("articleTags.label")}>
         {tags.map((tag) => (
           <li key={tag} className="article-editor-tag">
+            <span aria-hidden="true">#</span>
             <span>{tag}</span>
             <button
               type="button"
