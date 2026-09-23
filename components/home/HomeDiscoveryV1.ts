@@ -103,14 +103,14 @@ export function homeTopicsV1(
     locale,
   ).slice(0, HOME_TOPIC_LIMIT_V1);
 }
-/** A course can collect another author's article; that must never hide their card. */
+/** Course membership does not remove an article's direct discovery entry. */
 export function selectHomeItemsV1(
   items: readonly HomeItemV1[],
   filter: HomeFilterV1,
   saved: ReadonlySet<string> = new Set(),
 ): readonly HomeItemV1[] {
   const query = filter.query.trim().normalize("NFKC").toLocaleLowerCase();
-  let found = items.filter(
+  const found = items.filter(
     (item) =>
       (filter.kind === "all" || item.kind === filter.kind) &&
       (!filter.savedOnly || saved.has(item.key)) &&
@@ -131,25 +131,6 @@ export function selectHomeItemsV1(
           .toLocaleLowerCase()
           .includes(query)),
   );
-  // Search and private saves remain direct entry points to individual chapters.
-  if (
-    filter.kind === "all" &&
-    filter.sort === "recommended" &&
-    !filter.savedOnly &&
-    filter.tag === null &&
-    !query
-  ) {
-    const grouped = new Set<string>();
-    for (const item of found)
-      if (item.course)
-        for (const e of item.course.entries) {
-          if (e.available && e.author?.userId === item.course.ownerId)
-            grouped.add(e.articleId);
-        }
-    found = found.filter(
-      (item) => item.kind !== "article" || !grouped.has(item.id),
-    );
-  }
   const recent = (a: HomeItemV1, b: HomeItemV1) =>
     Date.parse(b.publishedAt) - Date.parse(a.publishedAt) ||
     a.key.localeCompare(b.key);

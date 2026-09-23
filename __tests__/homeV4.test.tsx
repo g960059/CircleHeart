@@ -82,11 +82,24 @@ describe("Home discovery", () => {
     expect(html).toContain("本体の計算結果ではありません");
     expect(html).toContain("数理モデル・プリセット");
   });
-  it("groups only available same-author chapters in recommended All, preserving direct search and article tabs", () => {
-    const items = homeItemsV1(bootstrap),
+  it("shows course chapters alongside courses and simulations in recommended All and direct filters", () => {
+    const items = homeItemsV1({
+      ...bootstrap,
+      experiments: [{
+        experimentId: "pv-experiment",
+        title: "PVループを動かす",
+        publicSlug: "pv-loop",
+        publishedAt: course.updatedAt,
+        snapshotId: "pv-snapshot",
+        modelId: "fixture-model",
+        scenarioCount: 1,
+      }],
+    }),
       chapter = items.find((i) => i.id === course.entries[0].articleId)!;
     expect(selectHomeItemsV1(items, HOME_FILTER_V1).map((i) => i.key)).toEqual([
       "course:" + course.courseId,
+      "experiment:pv-experiment",
+      chapter.key,
       "article:community-article",
     ]);
     expect(
@@ -122,6 +135,20 @@ describe("Home discovery", () => {
         (i) => i.key === chapter.key,
       ),
     ).toBe(true);
+  });
+  it.each([true, false])("includes course article cards in the visible page and Show more (staticRender=%s)", (staticRender) => {
+    const page = (limit: number) => renderToStaticMarkup(
+      <HomePageV1 locale="ja" data={bootstrap} limit={limit} staticRender={staticRender} />,
+    );
+    const initial = page(2);
+    expect(initial).toContain(`<h3><a href="/ja/courses/${course.courseId}">`);
+    expect(initial).toContain('<h3><a href="/ja/articles/read-a-beat">一拍を読む</a></h3>');
+    expect(initial).not.toContain("Community PV loop");
+    expect(initial).toContain("さらに表示");
+    const expanded = page(3);
+    expect(expanded).toContain('<h3><a href="/ja/articles/read-a-beat">一拍を読む</a></h3>');
+    expect(expanded).toContain("Community PV loop");
+    expect(expanded).not.toContain("さらに表示");
   });
   it("keeps the canonical course/author distinction and escapes authored labels in SSR", () => {
     const html = renderToStaticMarkup(
@@ -341,7 +368,7 @@ describe("Home topics", () => {
       expect.arrayContaining(["前負荷", "心不全", "後負荷"]),
     );
   });
-  it("narrows discovery to tagged Articles, including grouped course chapters", () => {
+  it("narrows discovery to tagged Articles, including course chapters", () => {
     const items = homeItemsV1(tagged);
     const byTag = selectHomeItemsV1(items, { ...HOME_FILTER_V1, tag: "PV LOOP" });
     expect(byTag.map((item) => item.id).sort()).toEqual(

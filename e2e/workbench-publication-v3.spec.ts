@@ -6,6 +6,19 @@ const bundle = JSON.parse(readFileSync(new URL("../data/model-releases/standard7
 const artifact = readFileSync(new URL("../data/model-releases/standard74/artifact.mjs.txt", import.meta.url), "utf8");
 const experimentId = "40000000-0000-4000-8000-000000000001";
 
+async function openPublicationMenu(page: Page) {
+  const menu = page.getByTestId("workbench-publication-menu-v3");
+  // Runtime capture can disable the trigger between Playwright's actionability
+  // check and the click. Retry only opening the menu, never its publication action.
+  await expect(async () => {
+    if (!await menu.isVisible()) {
+      await page.getByTestId("v3-publish-experiment").click({ timeout: 1000 });
+    }
+    await expect(menu).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 30_000 });
+  return menu;
+}
+
 async function authoringFixture(page: Page) {
   const user = { id: "40000000-0000-4000-8000-000000000002", aud: "authenticated", role: "authenticated", email: "publication@example.test", is_anonymous: false, user_metadata: {}, app_metadata: {}, created_at: "2026-09-18T00:00:00Z" };
   const state = { resource: null as any, failSave: false, failPublish: false, saves: 0, publishes: 0, saveDelay: 0, lastResolvedSnapshotId: null as string | null, snapshots: new Map<string, any>() };
@@ -81,8 +94,7 @@ test("@desktop @mobile Workbench save and publication stay distinct through fail
   await title.fill("公開の操作確認");
   await expect(save).toBeEnabled();
   await expect(publish).toBeEnabled();
-  await publish.click();
-  const menu = page.getByTestId("workbench-publication-menu-v3");
+  const menu = await openPublicationMenu(page);
   await expect(menu).toContainText("非公開");
   state.failSave = true;
   await menu.getByRole("button", { name: "保存して公開", exact: true }).click();
@@ -100,7 +112,7 @@ test("@desktop @mobile Workbench save and publication stay distinct through fail
   await expect(save).toHaveText("保存済み");
   await expect(title).toHaveValue("公開の操作確認");
   state.failPublish = false;
-  if (!await menu.isVisible()) await publish.click();
+  await openPublicationMenu(page);
   await menu.getByRole("button", { name: "公開する", exact: true }).click();
   await expect(publish).toHaveText("公開中", { timeout: 90_000 });
   await expect(page).toHaveURL(new RegExp(`/experiments/${experimentId}$`));
@@ -117,7 +129,7 @@ test("@desktop @mobile Workbench save and publication stay distinct through fail
   expect(state.resource.experiment.version).toBe(1);
   await page.reload();
   await expect(publish).toHaveAttribute("data-stale", "true");
-  await publish.click();
+  await openPublicationMenu(page);
   await expect(menu.getByRole("button", { name: "公開版を更新", exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("fable-publication-menu.png") });
   if (testInfo.project.name === "mobile-chromium") {
@@ -141,7 +153,7 @@ test("@desktop @mobile Workbench save and publication stay distinct through fail
     await page.getByTestId("workbench-theme-toggle").click();
   }
   await title.fill("公開更新後の追加編集");
-  await publish.click();
+  await openPublicationMenu(page);
   await menu.getByRole("button", { name: "保存して公開版を更新", exact: true }).click();
   await expect(publish).toHaveText("公開中", { timeout: 90_000 });
   await expect(publish).toHaveAttribute("data-stale", "false", { timeout: 90_000 });
@@ -175,9 +187,8 @@ test("@desktop edits during saving remain unsaved and prevent chained publicatio
   await expect(publish).toBeVisible();
   const title = page.getByTestId("workbench-experiment-title-v3");
   await title.fill("保存開始時の内容");
-  await publish.click();
+  const menu = await openPublicationMenu(page);
   state.saveDelay = 1500;
-  const menu = page.getByTestId("workbench-publication-menu-v3");
   await menu.getByRole("button", { name: "保存して公開", exact: true }).click();
   await expect.poll(() => state.saves).toBe(1);
   await menu.getByRole("button", { name: "閉じる", exact: true }).click();
