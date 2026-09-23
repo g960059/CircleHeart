@@ -7,6 +7,7 @@ import {
 import katex from "katex";
 import circleHeartWordmark from "@/assets/brand/circleheart-wordmark.svg?raw";
 import { articleHeadingPhrasesV1 } from "@/studio/application/article/StudioArticleHeadingPhrasesV1";
+import { articleTagHref } from "@/homeLinks";
 
 import enTranslation from "@/locales/en/translation.json";
 import jaTranslation from "@/locales/ja/translation.json";
@@ -113,6 +114,7 @@ export function renderPublicArticleBodyHtmlV1(
     `<h1 class="article-title">${renderHeadingTextHtmlV1(article.title, article.locale)}</h1>`,
     publicAuthorHtmlV1(author, article.locale),
     `<p class="article-publication-date"><span>${copy.publishedLabel}</span> <time datetime="${escapeHtmlAttributeV1(article.publishedAt)}">${escapeHtmlTextV1(formatStudioPublicArticleDateV1(article.publishedAt, article.locale))}</time></p>`,
+    publicArticleTagListHtmlV1(article.tags, article.locale),
     `</header>`,
     `<div class="public-static-content">`,
     renderReadingTocHtmlV1(article.blocks, article.locale),
@@ -133,6 +135,9 @@ export function renderPublicArticleMarkdownV1(
     `title: ${yamlStringV1(article.title)}`,
     `locale: ${yamlStringV1(article.locale)}`,
     `public_slug: ${yamlStringV1(article.publicSlug)}`,
+    ...(article.tags.length === 0
+      ? []
+      : [`tags: [${article.tags.map(yamlStringV1).join(", ")}]`]),
     `published_at: ${yamlStringV1(article.publishedAt)}`,
     `updated_at: ${yamlStringV1(article.updatedAt)}`,
     `article_content_id: ${yamlStringV1(article.articleContentId)}`,
@@ -192,6 +197,7 @@ function publicArticleHeadHtmlV1(
     datePublished: article.publishedAt,
     dateModified: article.updatedAt,
     inLanguage: article.locale,
+    ...(article.tags.length === 0 ? {} : { keywords: article.tags.join(", ") }),
     mainEntityOfPage: metadata.canonicalUrl,
     publisher: {
       "@type": "Organization",
@@ -210,11 +216,28 @@ function publicArticleHeadHtmlV1(
     `<meta name="twitter:description" content="${escapeHtmlAttributeV1(metadata.description)}" />`,
     `<meta property="article:published_time" content="${escapeHtmlAttributeV1(article.publishedAt)}" />`,
     `<meta property="article:modified_time" content="${escapeHtmlAttributeV1(article.updatedAt)}" />`,
+    ...article.tags.map((tag) =>
+      `<meta property="article:tag" content="${escapeHtmlAttributeV1(tag)}" />`),
     `<link rel="alternate" hreflang="${article.locale}" href="${escapeHtmlAttributeV1(metadata.canonicalUrl)}" />`,
     `<link rel="alternate" type="text/markdown" href="${escapeHtmlAttributeV1(markdownUrl)}" title="${escapeHtmlAttributeV1(article.title)}" />`,
     `<link rel="alternate" type="application/json" href="${escapeHtmlAttributeV1(jsonUrl)}" title="${escapeHtmlAttributeV1(article.title)}" />`,
     `<script type="application/ld+json">${jsonLd}</script>`,
   ].join("\n    ");
+}
+
+/**
+ * Tag chips shared by the first response and the interactive Reader
+ * (`ArticleTagListV1` renders the same classes and destinations).
+ */
+export function publicArticleTagListHtmlV1(
+  tags: readonly string[],
+  locale: "ja" | "en",
+): string {
+  if (tags.length === 0) return "";
+  const copy = studioPublicArticlePresentationCopyV1(locale);
+  const items = tags.map((tag) =>
+    `<li><a class="article-tag" href="${escapeHtmlAttributeV1(articleTagHref({ locale, tag }))}"><span aria-hidden="true">#</span>${escapeHtmlTextV1(tag)}</a></li>`);
+  return `<ul class="article-tags" aria-label="${escapeHtmlAttributeV1(copy.tagsLabel)}">${items.join("")}</ul>`;
 }
 
 function renderHeadingTextHtmlV1(text: string, locale: string): string {

@@ -2,6 +2,11 @@ import type { PublicAuthorV1 } from "@/studio/application/profile/StudioPublicPr
 import type { PublicCourseV1 } from "@/studio/application/course/StudioCourseV1";
 import type { StudioPublicHomeBootstrapV1 } from "@/studio/application/publication/StudioPublicHomeBootstrapV1";
 import { publishedExperimentHref } from "@/homeLinks";
+import {
+  articleHasTagV1,
+  countArticleTagsV1,
+  type StudioArticleTagCountV1,
+} from "@/studio/application/article/StudioArticleTagsV1";
 
 export type HomeKindV1 = "course" | "article" | "experiment";
 export type HomeItemV1 = Readonly<{
@@ -15,6 +20,8 @@ export type HomeItemV1 = Readonly<{
   author?: PublicAuthorV1;
   authorName?: string;
   course?: PublicCourseV1;
+  /** Published Article tags; other kinds carry none. */
+  tags: readonly string[];
   featured: boolean;
 }>;
 export function homeItemsV1(
@@ -36,6 +43,7 @@ export function homeItemsV1(
         author: c.author,
         authorName: c.authorName,
         course: c,
+        tags: [],
         featured: featured.has(c.courseId),
       }),
     ),
@@ -49,6 +57,7 @@ export function homeItemsV1(
         href: `/${locale}/articles/${encodeURIComponent(a.publicSlug)}`,
         publishedAt: a.publishedAt,
         author: a.author,
+        tags: a.tags,
         featured: false,
       }),
     ),
@@ -62,6 +71,7 @@ export function homeItemsV1(
         href: publishedExperimentHref({ locale, publicSlug: e.publicSlug }),
         publishedAt: e.publishedAt,
         author: e.author,
+        tags: [],
         featured: false,
       }),
     ),
@@ -72,13 +82,27 @@ export type HomeFilterV1 = Readonly<{
   sort: "recommended" | "new";
   savedOnly: boolean;
   query: string;
+  /** Narrows discovery to Articles carrying this tag (case-insensitive). */
+  tag: string | null;
 }>;
 export const HOME_FILTER_V1: HomeFilterV1 = {
   kind: "all",
   sort: "recommended",
   savedOnly: false,
   query: "",
+  tag: null,
 };
+export const HOME_TOPIC_LIMIT_V1 = 12;
+/** Topics come from the loaded Article summaries: no extra request, no fake popularity. */
+export function homeTopicsV1(
+  items: readonly HomeItemV1[],
+  locale: "ja" | "en",
+): readonly StudioArticleTagCountV1[] {
+  return countArticleTagsV1(
+    items.filter((item) => item.kind === "article").map((item) => item.tags),
+    locale,
+  ).slice(0, HOME_TOPIC_LIMIT_V1);
+}
 /** A course can collect another author's article; that must never hide their card. */
 export function selectHomeItemsV1(
   items: readonly HomeItemV1[],
@@ -90,12 +114,14 @@ export function selectHomeItemsV1(
     (item) =>
       (filter.kind === "all" || item.kind === filter.kind) &&
       (!filter.savedOnly || saved.has(item.key)) &&
+      (filter.tag === null || articleHasTagV1(item.tags, filter.tag)) &&
       (!query ||
         [
           item.title,
           item.description,
           item.author?.displayName,
           item.authorName,
+          ...item.tags.map((tag) => "#" + tag),
           ...(item.course?.entries
             .filter((e) => e.available)
             .map((e) => e.title) ?? []),
@@ -110,6 +136,7 @@ export function selectHomeItemsV1(
     filter.kind === "all" &&
     filter.sort === "recommended" &&
     !filter.savedOnly &&
+    filter.tag === null &&
     !query
   ) {
     const grouped = new Set<string>();

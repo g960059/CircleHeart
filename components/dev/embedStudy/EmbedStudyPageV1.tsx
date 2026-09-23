@@ -262,6 +262,7 @@ export function buildArticleEmbedStudyArticleV1(snapshot: ExperimentSnapshotV2):
     visibility: "draft",
     locale: "ja",
     title: "循環血液量が増えると心臓は何をするか — 記事埋め込みスタディ v3",
+    tags: [],
     blocks: [
       paragraph("p-lead", "この記事は記事埋め込みの読み方スタディ用です。3つのScenario（基準、TBV +500 mL、TBV +1000 mL）は、登録済みStandard74基準captureから総血液量controlを適用し、実モデルで20拍進めた地点をcaptureしたものです。各Scenarioの封入時のESPVR/EDPVR・Starling測定は、登録済み解析executorで事前に測定してSnapshotと一緒に持ち込んでいます。qualifiedな基準でも公開Snapshotでもありません。"),
       heading("h-inline", "1. 本文内で一目で読む"),

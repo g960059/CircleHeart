@@ -45,7 +45,9 @@ signed-receipt boundary.
 Experiments are mutable private heads. Snapshots and Article content revisions
 are immutable. Article Placements reference neutral Snapshots; the database
 derives reference ownership from validated Article blocks rather than trusting
-a second caller-supplied reference list.
+a second caller-supplied reference list. Article tags belong to the content
+revision, so public pages, summaries, and tag vocabulary expose only the tags
+of the revision a live publication points to.
 
 A Snapshot is readable by its owner or through an authorized published
 Experiment/Article reference. Draft references do not make it public.

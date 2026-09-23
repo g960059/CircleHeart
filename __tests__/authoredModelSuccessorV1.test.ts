@@ -15,7 +15,7 @@ export function successorBackupFixtureV1(): AuthoredModelBackupV1 {
     surface: { graphPanes: [], outputPanes: [], controlPanes: [], note: { text: "Keep authored note" } } });
   const placement = { schemaId: "circleheart-studio-experiment-placement-v2", placementId: "placement/test", snapshotId: uuid(3), titleOverride: null, caption: null,
     briefing: { defaultTitle: "Saved experiment", scenarioScope: { visibleScenarioIds: ["scenario/test"], initialFocusScenarioId: "scenario/test" }, graphs: [], outputs: [], controls: [] } };
-  const article = (id: number, text: string) => ({ article_content_id: uuid(id), owner_id: owner, locale: "ja", title: "Article",
+  const article = (id: number, text: string) => ({ article_content_id: uuid(id), owner_id: owner, locale: "ja", title: "Article", tags: ["前負荷"],
     blocks: [{ kind: "paragraph", blockId: "text", text }, { kind: "experiment", blockId: "experiment", placement }], content_size_bytes: 0, created_at: date });
   return {
     activeBundle: { singleton: true, model_id: "model/successor-before", surface_release_id: "surface/successor-test", version: 17, updated_at: date },
@@ -131,6 +131,7 @@ rollback;`;
     expect(plan.after.experiments[0]!.current_content_id).toBe(plan.mapping.contents[backup.contents[1]!.content_id]);
     expect(plan.after.articles[0]!.current_draft_content_id).not.toBe(plan.after.articlePublications[0]!.current_content_id);
     expect(plan.after.articleContents.map(c => c.blocks[0].text)).toEqual(["Unpublished changes", "Published text"]);
+    expect(plan.after.articleContents.map(c => c.tags)).toEqual([["前負荷"], ["前負荷"]]);
     expect(plan.after.experiments[0]!.version).toBe(9); expect(plan.after.articles[0]!.version).toBe(6);
     const sql = authoredModelSuccessorSqlV1(plan, "a".repeat(64));
     expect(sql.forward).toContain("preimage conflict"); expect(sql.forward).toContain("publication inventory changed");

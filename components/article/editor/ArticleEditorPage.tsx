@@ -53,6 +53,14 @@ import {
 } from "@/components/article/editor/ArticleEditorRichBlocksV3";
 import { articleEditorErrorMessageV3 } from "@/components/article/editor/ArticleEditorUtilitiesV3";
 import {
+  ArticleEditorTagsV1,
+  type ArticleEditorTagSuggestionV1,
+} from "@/components/article/editor/ArticleEditorTagsV1";
+import {
+  articleTagKeyV1,
+  countArticleTagsV1,
+} from "@/studio/application/article/StudioArticleTagsV1";
+import {
   ARTICLE_EDITOR_PEEK_FRACTION_STORAGE_KEY_V3,
   ARTICLE_EDITOR_PEEK_MAX_FRACTION_V3,
   ARTICLE_EDITOR_PEEK_MIN_FRACTION_V3,
@@ -188,6 +196,10 @@ export function ArticleEditorPage() {
     initialArticleEditorPeekFractionV3,
   );
   const [peekMaximized, setPeekMaximized] = React.useState(false);
+  const tagInputRef = React.useRef<HTMLInputElement | null>(null);
+  const [tagSuggestions, setTagSuggestions] = React.useState<
+    readonly ArticleEditorTagSuggestionV1[]
+  >([]);
 
   const saveRouteKey = articleEditorRouteKeyV3(routeArticleId);
   React.useLayoutEffect(() => {
@@ -379,6 +391,49 @@ export function ArticleEditorPage() {
     hydratedRouteKey,
     routeArticleId,
   );
+
+  // Suggest the shared public vocabulary of the draft's language plus the
+  // author's own tags, so one topic keeps one spelling across Articles.
+  const draftLocale = draft.locale;
+  React.useEffect(() => {
+    let current = true;
+    const load = async () => {
+      const [publicTags, ownTagLists] = remoteRepository === null
+        ? [[], store.listArticles()
+            .filter((article) => article.locale === draftLocale)
+            .map((article) => article.tags)]
+        : await Promise.all([
+            draftLocale === "ja" || draftLocale === "en"
+              ? remoteRepository.listPublicArticleTags(draftLocale).catch(() => [])
+              : Promise.resolve([]),
+            remoteRepository.listMyArticles({ limit: 100 })
+              .then((page) => page.items
+                .filter((article) => article.locale === draftLocale)
+                .map((article) => article.tags))
+              .catch(() => []),
+          ]);
+      const merged = new Map<string, ArticleEditorTagSuggestionV1>();
+      // Public tags arrive most used first, so the first spelling of a key wins.
+      for (const entry of publicTags) {
+        const key = articleTagKeyV1(entry.tag);
+        const existing = merged.get(key);
+        merged.set(key, existing === undefined
+          ? { tag: entry.tag, key, publicCount: entry.articleCount, mine: false }
+          : { ...existing, publicCount: existing.publicCount + entry.articleCount });
+      }
+      for (const entry of countArticleTagsV1(ownTagLists, draftLocale)) {
+        const existing = merged.get(entry.key);
+        merged.set(entry.key, existing === undefined
+          ? { tag: entry.tag, key: entry.key, publicCount: 0, mine: true }
+          : { ...existing, mine: true });
+      }
+      if (current) setTagSuggestions(Object.freeze([...merged.values()]));
+    };
+    void load();
+    return () => {
+      current = false;
+    };
+  }, [draftLocale, remoteRepository, store]);
 
   React.useLayoutEffect(() => {
     const element = titleRef.current;
@@ -1201,6 +1256,14 @@ export function ArticleEditorPage() {
           open={publishMenuOpen}
           saving={status === "saving"}
           visibility={draft.visibility}
+          tags={draft.tags}
+          onEditTags={() => {
+            setPublishMenuOpen(false);
+            window.requestAnimationFrame(() => {
+              tagInputRef.current?.focus();
+              tagInputRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+            });
+          }}
           onToggleOpen={() => {
             setInsertMenu(null);
             setBlockMenuId(null);
@@ -1262,6 +1325,13 @@ export function ArticleEditorPage() {
             placeholder={t("articleEditor.titlePlaceholder")}
             aria-label={t("articleEditor.title")}
             className="article-title article-editor-title block w-full resize-none overflow-hidden bg-transparent outline-none placeholder:text-wb-subtle"
+          />
+          <ArticleEditorTagsV1
+            ref={tagInputRef}
+            tags={draft.tags}
+            suggestions={tagSuggestions}
+            disabled={!routeHydrated}
+            onChange={(tags) => updateDraft((current) => ({ ...current, tags }))}
           />
 
           {error !== null && (

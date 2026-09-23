@@ -7,7 +7,7 @@ insert into auth.users(id,raw_app_meta_data,raw_user_meta_data,is_anonymous) val
 select set_config('request.jwt.claims','{"sub":"d1000000-0000-0000-0000-000000000001","role":"authenticated","is_anonymous":false}',true);
 create temporary table profile_test(key text primary key,value jsonb);
 grant all on profile_test to authenticated,anon;
-insert into profile_test values('article', public.save_article_v1(gen_random_uuid(),null,null,'ja','A beat','[{"kind":"paragraph","blockId":"p","text":"Read a beat"}]'));
+insert into profile_test values('article', public.save_article_v1(gen_random_uuid(),null,null,'ja','A beat','[{"kind":"paragraph","blockId":"p","text":"Read a beat"}]','{}'));
 select is(public.read_my_profile_v1()->'displayName','null'::jsonb,'Auth metadata is not published as a name');
 select is(public.read_public_resource_author_v1('article',((select value->>'articleId' from profile_test where key='article'))::uuid),null::jsonb,'A private article does not expose a profile');
 select public.publish_article_v1(gen_random_uuid(),((select value->>'articleId' from profile_test where key='article'))::uuid,0,'profile-beat');

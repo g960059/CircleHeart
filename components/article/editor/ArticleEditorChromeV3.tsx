@@ -1,4 +1,4 @@
-import { ExternalLink, Globe, Loader2 } from "lucide-react";
+import { ExternalLink, Globe, Hash, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 export type EditorSaveStatusV3 =
@@ -56,6 +56,8 @@ export function ArticlePublishMenuV3({
   open,
   saving,
   visibility,
+  tags,
+  onEditTags,
   onToggleOpen,
   onSetVisibility,
 }: Readonly<{
@@ -64,6 +66,8 @@ export function ArticlePublishMenuV3({
   open: boolean;
   saving: boolean;
   visibility: "draft" | "public";
+  tags: readonly string[];
+  onEditTags: () => void;
   onToggleOpen: () => void;
   onSetVisibility: (visibility: "draft" | "public") => void;
 }>) {
@@ -105,6 +109,7 @@ export function ArticlePublishMenuV3({
               <p className="mt-1.5 text-xs leading-5 text-wb-muted">
                 {t("articleEditor.publishMenu.publishedDescription")}
               </p>
+              <ArticlePublishTagsV3 tags={tags} onEditTags={onEditTags} />
               <a
                 href={articleHref}
                 target="_blank"
@@ -133,6 +138,7 @@ export function ArticlePublishMenuV3({
               <p className="mt-1.5 text-xs leading-5 text-wb-muted">
                 {t("articleEditor.publishMenu.draftDescription")}
               </p>
+              <ArticlePublishTagsV3 tags={tags} onEditTags={onEditTags} />
               <button
                 type="button"
                 disabled={saving}
@@ -149,5 +155,44 @@ export function ArticlePublishMenuV3({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Publication is where discoverability matters: show which tags readers will
+ * find this Article under, or that it currently has none, before publishing.
+ */
+function ArticlePublishTagsV3({
+  tags,
+  onEditTags,
+}: Readonly<{ tags: readonly string[]; onEditTags: () => void }>) {
+  const { t } = useTranslation();
+  return (
+    <section className="article-publish-tags" data-testid="article-publish-tags">
+      <div className="article-publish-tags-header">
+        <p>{t("articleTags.label")}</p>
+        <button type="button" onClick={onEditTags}>
+          {tags.length === 0 ? t("articleTags.add") : t("articleTags.edit")}
+        </button>
+      </div>
+      {tags.length === 0 ? (
+        <p className="article-publish-tags-empty">
+          <Hash aria-hidden="true" />
+          {t("articleTags.publishEmpty")}
+        </p>
+      ) : (
+        <>
+          <ul aria-label={t("articleTags.label")}>
+            {tags.map((tag) => (
+              <li key={tag} className="article-tag article-tag-compact">
+                <span aria-hidden="true">#</span>
+                {tag}
+              </li>
+            ))}
+          </ul>
+          <p className="article-publish-tags-note">{t("articleTags.publishNote")}</p>
+        </>
+      )}
+    </section>
   );
 }

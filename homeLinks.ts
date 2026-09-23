@@ -30,6 +30,13 @@ export const experimentDetailHref = ({
 /** Public Article directory. */
 export const articlesHref = (locale?: Locale) => prefixPath("/articles", locale);
 
+/** Tag page: the public Article directory narrowed to one tag. */
+export const articleTagHref = ({
+  locale,
+  tag,
+}: Readonly<{ locale?: Locale; tag: string }>) =>
+  `${articlesHref(locale)}?${new URLSearchParams({ tag }).toString()}`;
+
 /** Account-scoped management for authored Articles, including drafts. */
 export const myArticlesHref = (locale?: Locale) =>
   prefixPath("/me/articles", locale);

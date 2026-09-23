@@ -213,6 +213,7 @@ function articleV3(
 ): StudioArticleDraftV2 {
   return {
     schemaId: STUDIO_ARTICLE_DRAFT_V2_SCHEMA_ID,
+    tags: [],
     articleId: "article/browser-store",
     draftVersion: input.version ?? 0,
     visibility: "draft",

@@ -27,6 +27,8 @@ export type StudioPublishedArticleV1 = Readonly<{
   publicSlug: string;
   locale: "ja" | "en";
   title: string;
+  /** Tags of the published revision; never the owner's newer draft tags. */
+  tags: readonly string[];
   blocks: readonly StudioArticleBlockV2[];
   publishedAt: string;
   updatedAt: string;
@@ -53,6 +55,7 @@ export function validateStudioPublishedArticleV1(
     "publicSlug",
     "publishedAt",
     "schemaId",
+    "tags",
     "title",
     "updatedAt",
   ], "$.publishedArticle");
@@ -85,6 +88,7 @@ export function validateStudioPublishedArticleV1(
     visibility: "public",
     locale: detached.locale,
     title: detached.title,
+    tags: detached.tags,
     blocks: detached.blocks,
   });
   assertArticleReadingReadyV1(detached.blocks);
@@ -102,6 +106,7 @@ export function publishedArticleDraftProjectionV1(
     visibility: "public",
     locale: article.locale,
     title: article.title,
+    tags: article.tags,
     blocks: article.blocks,
   });
 }

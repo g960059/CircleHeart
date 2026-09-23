@@ -1,6 +1,7 @@
 import { validateDisplayNameV1, validatePublicAuthorV1, validateMyProfileV1, type PublicAuthorV1, type MyProfileV1 } from "@/studio/application/profile/StudioPublicProfileV1";
 import { validateCourseContentV1, validateCourseDraftV1, validatePublicCourseV1, type CourseContentV1, type CourseDraftV1, type PublicCourseV1 } from "@/studio/application/course/StudioCourseV1";
 import { assertArticleReadingReadyV1, stripArticleReadingMarkupV1 } from "@/studio/application/article/StudioArticleReadingV1";
+import { articleTagsV1, isCanonicalArticleTagV1 } from "@/studio/application/article/StudioArticleTagsV1";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
@@ -107,9 +108,17 @@ export type StudioRemoteArticleSummaryV1 = Readonly<{
   visibility: "draft" | "public";
   locale: string;
   title: string;
+  /** Tags of the current draft revision (the live revision when public). */
+  tags: readonly string[];
   createdAt: string;
   updatedAt: string;
   publicSlug: string | null;
+}>;
+
+/** One entry of the shared public tag vocabulary for a locale. */
+export type StudioPublicArticleTagCountV1 = Readonly<{
+  tag: string;
+  articleCount: number;
 }>;
 
 export function createStudioSupabaseContentRepositoryV1():
@@ -269,6 +278,7 @@ export class StudioSupabaseContentRepositoryV1 {
       p_locale: article.locale,
       p_title: article.title,
       p_blocks: article.blocks,
+      p_tags: article.tags,
     });
     try {
       const result = recordV1(data, "save_article_v1 result");
@@ -544,6 +554,26 @@ export class StudioSupabaseContentRepositoryV1 {
     );
   }
 
+  /** Tags used by live publications of one locale, most used first. */
+  async listPublicArticleTags(
+    locale: "ja" | "en",
+  ): Promise<readonly StudioPublicArticleTagCountV1[]> {
+    const data = await this.#rpc("list_public_article_tags_v1", {
+      p_locale: locale,
+      p_limit: 100,
+    });
+    return Object.freeze(arrayV1(data, "Public Article tags").map((value) => {
+      const record = recordV1(value, "Public Article tag");
+      if (!isCanonicalArticleTagV1(record.tag)) {
+        throw new Error("Public Article tag must be canonical");
+      }
+      return Object.freeze({
+        tag: record.tag,
+        articleCount: nonnegativeIntegerV1(record.articleCount, "articleCount"),
+      });
+    }));
+  }
+
   async listPublicArticles(
     request: StudioSummaryPageRequestV1 = {},
   ): Promise<StudioSummaryPageV1<StudioPublicArticleSummaryV1>> {
@@ -723,6 +753,7 @@ function validateArticleSummaryV1(
     visibility,
     locale: requiredStringV1(record.locale, "locale"),
     title: requiredStringV1(record.title, "title"),
+    tags: articleTagsV1(record.tags, "Article summary tags"),
     createdAt: isoTimestampV1(record.createdAt, "createdAt"),
     updatedAt: isoTimestampV1(record.updatedAt, "updatedAt"),
     publicSlug: nullableStringV1(record.publicSlug, "publicSlug"),
@@ -754,6 +785,7 @@ function validatePublicArticleSummaryV1(
     articleId: requiredStringV1(record.articleId, "articleId"),
     locale: requiredStringV1(record.locale, "locale"),
     title: requiredStringV1(record.title, "title"),
+    tags: articleTagsV1(record.tags, "Public Article summary tags"),
     excerpt: record.excerpt === null ? null : stripArticleReadingMarkupV1(nullableStringV1(record.excerpt, "excerpt") ?? ""),
     publicSlug: requiredStringV1(record.publicSlug, "publicSlug"),
     publishedAt: isoTimestampV1(record.publishedAt, "publishedAt"),

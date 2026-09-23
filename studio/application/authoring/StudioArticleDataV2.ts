@@ -10,6 +10,7 @@ import {
 import {
   cloneAndFreezeStudioJson,
 } from "@/domain/json/CanonicalJson";
+import { assertArticleTagsV1 } from "@/studio/application/article/StudioArticleTagsV1";
 
 const PORTABLE_ID_V2 = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/;
 
@@ -31,6 +32,7 @@ export function validateStudioArticleDraftV2(value: unknown): StudioArticleDraft
     "visibility",
     "locale",
     "title",
+    "tags",
     "blocks",
   ], "$.article");
   if (draft.schemaId !== STUDIO_ARTICLE_DRAFT_V2_SCHEMA_ID) {
@@ -43,6 +45,14 @@ export function validateStudioArticleDraftV2(value: unknown): StudioArticleDraft
   }
   trimmedNonemptyV2(draft.locale, "$.article.locale", 64);
   authoredStringV2(draft.title, "$.article.title", 240);
+  try {
+    assertArticleTagsV1(draft.tags, "$.article.tags");
+  } catch (error) {
+    throw new StudioArticleDataValidationErrorV2(
+      "$.article.tags",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
   if (!Array.isArray(draft.blocks)) {
     failV2("$.article.blocks", "must be an array");
   }

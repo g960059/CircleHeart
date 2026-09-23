@@ -7,8 +7,8 @@ insert into auth.users(id,raw_app_meta_data,raw_user_meta_data,is_anonymous) val
 create temporary table course_test(key text primary key,value jsonb);
 grant all on course_test to authenticated,anon;
 select set_config('request.jwt.claims','{"sub":"c1000000-0000-0000-0000-000000000001","role":"authenticated","is_anonymous":false}',true);
-insert into course_test values('a',public.save_article_v1(gen_random_uuid(),null,null,'ja','Public A','[{"kind":"paragraph","blockId":"p","text":"Alpha"}]'));
-insert into course_test values('b',public.save_article_v1(gen_random_uuid(),null,null,'ja','Public B','[{"kind":"paragraph","blockId":"p","text":"Beta"}]'));
+insert into course_test values('a',public.save_article_v1(gen_random_uuid(),null,null,'ja','Public A','[{"kind":"paragraph","blockId":"p","text":"Alpha"}]','{}'));
+insert into course_test values('b',public.save_article_v1(gen_random_uuid(),null,null,'ja','Public B','[{"kind":"paragraph","blockId":"p","text":"Beta"}]','{}'));
 insert into course_test values('body',jsonb_build_object('title','Course one','description','Mechanisms','audience','Clinicians','locale','ja','articleIds',jsonb_build_array((select value->>'articleId' from course_test where key='a'),(select value->>'articleId' from course_test where key='b'))));
 insert into course_test values('course',public.save_course_v1('c2000000-0000-0000-0000-000000000001',null,null,(select value from course_test where key='body')));
 set local role authenticated;
@@ -40,7 +40,7 @@ insert into course_test values('foreign-course',public.save_course_v1(gen_random
 select lives_ok($$select public.publish_course_v1(gen_random_uuid(),((select value->>'courseId' from course_test where key='foreign-course'))::uuid,0,true)$$,'Other authors can reference public articles without editing them');
 reset role;
 select set_config('request.jwt.claims','{"sub":"c1000000-0000-0000-0000-000000000001","role":"authenticated","is_anonymous":false}',true);
-select public.save_article_v1(gen_random_uuid(),((select value->>'articleId' from course_test where key='a'))::uuid,0,'ja','SECRET draft A','[{"kind":"paragraph","blockId":"p","text":"Secret"}]');
+select public.save_article_v1(gen_random_uuid(),((select value->>'articleId' from course_test where key='a'))::uuid,0,'ja','SECRET draft A','[{"kind":"paragraph","blockId":"p","text":"Secret"}]','{}');
 select is(public.read_public_course_v1(((select value->>'courseId' from course_test where key='course'))::uuid)->'entries'->0->>'title','Public A','Owner sees published chapter rather than own draft');
 select public.save_course_v1(gen_random_uuid(),((select value->>'courseId' from course_test where key='course'))::uuid,1,jsonb_set(jsonb_set((select value from course_test where key='body'),'{title}','"SECRET course draft"'),'{articleIds}',jsonb_build_array((select value->>'articleId' from course_test where key='b'),(select value->>'articleId' from course_test where key='a'))));
 select is(public.read_public_course_v1(((select value->>'courseId' from course_test where key='course'))::uuid)->>'title','Course one','Draft save keeps live course unchanged');

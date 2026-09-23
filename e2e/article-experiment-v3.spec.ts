@@ -31,6 +31,7 @@ async function openColdPeek(page: Page, search = "") {
   };
   const article: StudioArticleDraftV2 = {
     schemaId: "circleheart-studio-article-draft-v2", articleId: "article-reader-peek-test",
+    tags: [],
     draftVersion: 1, visibility: "draft", locale: "ja", title: "二つの圧波形を読む",
     blocks: [{
       blockId: "experiment", kind: "experiment",

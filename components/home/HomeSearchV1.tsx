@@ -139,8 +139,8 @@ export function HomeSearchProviderV1({
               aria-label={ja ? "検索キーワード" : "Search query"}
               placeholder={
                 ja
-                  ? "コース・記事・シミュレーションを検索"
-                  : "Search courses, articles and simulations"
+                  ? "コース・記事・シミュレーション・#タグを検索"
+                  : "Search courses, articles, simulations and #tags"
               }
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -192,6 +192,11 @@ export function HomeSearchProviderV1({
                       {item.author?.displayName && (
                         <span className="home-search-author">
                           {item.author.displayName}
+                        </span>
+                      )}
+                      {item.tags.length > 0 && (
+                        <span className="home-search-tags">
+                          {item.tags.map((tag) => "#" + tag).join(" ")}
                         </span>
                       )}
                     </span>
