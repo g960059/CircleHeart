@@ -3,6 +3,7 @@ import type { StudioArticleDraftV2 } from "@/studio/contracts/v2/article";
 export function articleReadingFixtureV1(): StudioArticleDraftV2 {
   return {
     schemaId: "circleheart-studio-article-draft-v2", articleId: "article-reading-fixture",
+    tags: [],
     draftVersion: 1, visibility: "draft", locale: "ja", title: "文献・注釈・実測図の読み方",
     blocks: [
       { blockId: "intro", kind: "paragraph", text: "本文から文献へ移動します。[@ref/b][@ref/a]補足も確認できます。[^note/b]" },

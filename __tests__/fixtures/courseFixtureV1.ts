@@ -37,6 +37,7 @@ export function courseArticleFixtureV1(index = 0): StudioPublishedArticleV1 {
   const e = courseFixtureV1.entries[index];
   return {
     schemaId: "circleheart-studio-published-article-v1",
+    tags: [],
     articleId: e.articleId,
     articleContentId: e.articleId,
     publicSlug: e.publicSlug!,

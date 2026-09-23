@@ -15,10 +15,13 @@ import { formatStudioPublicArticleDateV1 } from "@/studio/application/publicatio
 import {
   HOME_FILTER_V1,
   homeItemsV1,
+  homeTopicsV1,
   selectHomeItemsV1,
   type HomeItemV1,
   type HomeFilterV1,
 } from "./HomeDiscoveryV1";
+import { articleTagHref } from "@/homeLinks";
+import { articleTagKeyV1 } from "@/studio/application/article/StudioArticleTagsV1";
 import { HomeHeroV1 } from "./HomeHeroV1";
 import { HomeCoverArtV1, homeCoverSubjectV1 } from "./HomeCoverArtV1";
 import { HomeLinkV1 } from "./HomeLinkV1";
@@ -76,7 +79,28 @@ export function HomePageV1(props: HomePagePropsV1) {
     filter.kind === "all" &&
     filter.sort === "recommended" &&
     !filter.savedOnly &&
+    filter.tag === null &&
     !filter.query;
+  const activeTagKey = filter.tag === null ? null : articleTagKeyV1(filter.tag);
+  const topics = homeTopicsV1(items, locale);
+  // A tag chosen from a card may be outside the most-used topics; keep it visible.
+  const shownTopics =
+    filter.tag !== null && !topics.some((topic) => topic.key === activeTagKey)
+      ? [{ tag: filter.tag, key: activeTagKey!, count: items.filter((item) => item.tags.some((tag) => articleTagKeyV1(tag) === activeTagKey)).length }, ...topics]
+      : topics;
+  const showTopics =
+    shownTopics.length > 0 && (filter.kind === "all" || filter.kind === "article");
+  const selectTag = props.onFilter
+    ? (tag: string) => {
+        const next = activeTagKey === articleTagKeyV1(tag) ? null : tag;
+        set({ tag: next });
+        if (next !== null && typeof document !== "undefined") {
+          document
+            .getElementById("home-discovery")
+            ?.scrollIntoView({ block: "start", behavior: "smooth" });
+        }
+      }
+    : undefined;
   const featured = visible.find(
     (item) => item.featured && item.kind === "course",
   );
@@ -152,7 +176,15 @@ export function HomePageV1(props: HomePagePropsV1) {
                     key={kind}
                     disabled={!props.onFilter}
                     aria-pressed={filter.kind === kind}
-                    onClick={() => set({ kind })}
+                    onClick={() =>
+                      set({
+                        kind,
+                        // Tags describe Articles; other kinds cannot match one.
+                        ...(kind === "course" || kind === "experiment"
+                          ? { tag: null }
+                          : {}),
+                      })
+                    }
                   >
                     {kindLabels[locale][kind]}
                   </button>
@@ -194,6 +226,48 @@ export function HomePageV1(props: HomePagePropsV1) {
               </label>
             </div>
           </div>
+          {showTopics && (
+            <div
+              className="home-topics"
+              role="group"
+              aria-labelledby="home-topics-label"
+            >
+              <span id="home-topics-label" className="home-topics-label">
+                {ja ? "トピック" : "Topics"}
+              </span>
+              <div className="home-topics-list">
+                {shownTopics.map((topic) => {
+                  const active = topic.key === activeTagKey;
+                  const content = (
+                    <>
+                      <span aria-hidden="true">#</span>
+                      {topic.tag}
+                      <small>{topic.count}</small>
+                    </>
+                  );
+                  return selectTag ? (
+                    <button
+                      type="button"
+                      key={topic.key}
+                      className="home-topic"
+                      aria-pressed={active}
+                      onClick={() => selectTag(topic.tag)}
+                    >
+                      {content}
+                    </button>
+                  ) : (
+                    <HomeLinkV1
+                      key={topic.key}
+                      className="home-topic"
+                      href={articleTagHref({ locale, tag: topic.tag })}
+                    >
+                      {content}
+                    </HomeLinkV1>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           {filter.savedOnly && (
             <p className="home-catalog-note">
               {ja
@@ -217,6 +291,17 @@ export function HomePageV1(props: HomePagePropsV1) {
             <p className="home-result-count" role="status">
               {visible.length}
               {ja ? "件" : " results"}{" "}
+              {filter.tag !== null && (
+                <HomeLinkV1
+                  className="home-tag-page-link"
+                  href={articleTagHref({ locale, tag: filter.tag })}
+                >
+                  {ja
+                    ? `#${filter.tag} の記事をすべて見る`
+                    : `All articles tagged #${filter.tag}`}
+                  <ArrowRight aria-hidden="true" />
+                </HomeLinkV1>
+              )}
               <button
                 type="button"
                 onClick={() => props.onFilter?.(HOME_FILTER_V1)}
@@ -276,6 +361,8 @@ export function HomePageV1(props: HomePagePropsV1) {
                   wide={isDefault && item.key === featured?.key}
                   saved={saved.has(item.key)}
                   onSave={props.onSave}
+                  activeTagKey={activeTagKey}
+                  onTag={selectTag}
                 />
               ))}
             </div>
@@ -366,12 +453,16 @@ function HomeCardV1({
   wide,
   saved,
   onSave,
+  activeTagKey,
+  onTag,
 }: {
   item: HomeItemV1;
   locale: "ja" | "en";
   wide: boolean;
   saved: boolean;
   onSave?: HomePagePropsV1["onSave"];
+  activeTagKey: string | null;
+  onTag?: (tag: string) => void;
 }) {
   const ja = locale === "ja",
     Icon = kindIcons[item.kind],
@@ -407,6 +498,14 @@ function HomeCardV1({
         </h3>
         {item.description && (
           <p className="home-card-description">{item.description}</p>
+        )}
+        {item.tags.length > 0 && (
+          <HomeCardTagsV1
+            tags={item.tags}
+            locale={locale}
+            activeTagKey={activeTagKey}
+            onTag={onTag}
+          />
         )}
         {!!item.course &&
           entries.length > 0 &&
@@ -460,6 +559,54 @@ function HomeCardV1({
         </div>
       </div>
     </article>
+  );
+}
+const HOME_CARD_TAG_LIMIT_V1 = 3;
+function HomeCardTagsV1({
+  tags,
+  locale,
+  activeTagKey,
+  onTag,
+}: {
+  tags: readonly string[];
+  locale: "ja" | "en";
+  activeTagKey: string | null;
+  onTag?: (tag: string) => void;
+}) {
+  const ja = locale === "ja";
+  const hidden = tags.length - HOME_CARD_TAG_LIMIT_V1;
+  return (
+    <ul className="home-card-tags" aria-label={ja ? "タグ" : "Tags"}>
+      {tags.slice(0, HOME_CARD_TAG_LIMIT_V1).map((tag) => (
+        <li key={tag}>
+          {onTag ? (
+            <button
+              type="button"
+              className="home-card-tag"
+              aria-pressed={articleTagKeyV1(tag) === activeTagKey}
+              aria-label={ja ? `#${tag} で絞り込む` : `Filter by #${tag}`}
+              onClick={() => onTag(tag)}
+            >
+              <span aria-hidden="true">#</span>
+              {tag}
+            </button>
+          ) : (
+            <HomeLinkV1
+              className="home-card-tag"
+              href={articleTagHref({ locale, tag })}
+            >
+              <span aria-hidden="true">#</span>
+              {tag}
+            </HomeLinkV1>
+          )}
+        </li>
+      ))}
+      {hidden > 0 && (
+        <li className="home-card-tag-more" title={tags.slice(HOME_CARD_TAG_LIMIT_V1).map((tag) => "#" + tag).join(" ")}>
+          +{hidden}
+        </li>
+      )}
+    </ul>
   );
 }
 function ChapterListV1({ item }: { item: HomeItemV1 }) {

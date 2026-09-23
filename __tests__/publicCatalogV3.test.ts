@@ -24,6 +24,7 @@ describe("public catalog V3", () => {
   it("exposes public Articles and valid published Snapshot pointers only", () => {
     const publicArticle = {
       schemaId: "circleheart-studio-article-draft-v2",
+      tags: [],
       articleId: "article-public",
       draftVersion: 0,
       locale: "en",
@@ -33,6 +34,7 @@ describe("public catalog V3", () => {
     } as StudioArticleDraftV2;
     const draftArticle = {
       schemaId: "circleheart-studio-article-draft-v2",
+      tags: [],
       articleId: "article-draft",
       draftVersion: 0,
       locale: "en",
@@ -109,6 +111,7 @@ describe("public catalog V3", () => {
         locale: "ja",
         title: "SSRの記事",
         excerpt: "最初のHTMLから読めます。",
+        tags: [],
         publicSlug: "ssr-article",
         publishedAt: "2026-08-14T00:00:00.000Z",
       }],
@@ -192,6 +195,7 @@ function publicArticleSummary(articleId: string, locale: "ja" | "en") {
     locale,
     title: articleId,
     excerpt: null,
+    tags: [],
     publicSlug: `${articleId}-slug`,
     publishedAt: "2026-08-13T00:00:00.000Z",
   });

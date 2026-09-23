@@ -330,6 +330,7 @@ export function createEmptyArticleDraftV3(
     visibility: "draft",
     locale,
     title,
+    tags: Object.freeze([]),
     blocks: Object.freeze([]),
   });
 }

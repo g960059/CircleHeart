@@ -7,8 +7,8 @@ const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
 test("@desktop @mobile @webkit article references, endnotes, figure and card navigation", async ({ page }) => {
   const draft = articleReadingFixtureV1();
   await page.addInitScript(article => {
-    localStorage.setItem("circleheart.studio.browser-content.v9", JSON.stringify({
-      schemaId: "circleheart-studio-browser-content-v9", experiments: [], snapshots: [], articles: [article],
+    localStorage.setItem("circleheart.studio.browser-content.v10", JSON.stringify({
+      schemaId: "circleheart-studio-browser-content-v10", experiments: [], snapshots: [], articles: [article],
     }));
   }, draft);
   // Exercise the same preview reader when the build has a configured remote repository.

@@ -11,6 +11,27 @@ import { describe, expect, it, vi } from "vitest";
 
 import i18n from "@/i18n";
 import {
+  STUDIO_ARTICLE_TAG_LIMIT_V1,
+  addArticleTagsV1,
+  articleTagFromSearchV1,
+  countArticleTagsV1,
+  isCanonicalArticleTagV1,
+  normalizeArticleTagV1,
+  parseArticleTagInputV1,
+} from "@/studio/application/article/StudioArticleTagsV1";
+import { articleTagHref } from "@/homeLinks";
+import {
+  ArticleEditorTagsV1,
+  mergeArticleTagSuggestionsV1,
+  selectArticleTagSuggestionsV1,
+} from "@/components/article/editor/ArticleEditorTagsV1";
+import { ArticlePublishMenuV3 } from "@/components/article/editor/ArticleEditorChromeV3";
+import {
+  readArticleLibraryFilterV3,
+  selectArticleLibraryItemsV3,
+} from "@/components/article/ArticleLibraryPage";
+import {
+  createEmptyArticleDraftV3,
   adoptSavedArticleDraftV3,
   articleBlockDropBoundaryV3,
   articleEditorRouteHydratedV3,
@@ -262,6 +283,7 @@ describe("Article Editor V3 briefing", () => {
   it("adopts publication authority after moving the Article pointer", async () => {
     const saved = Object.freeze({
       schemaId: STUDIO_ARTICLE_DRAFT_V2_SCHEMA_ID,
+      tags: [],
       articleId: "6368328d-c852-4440-aa15-07dea45f7753",
       draftVersion: 2,
       visibility: "draft" as const,
@@ -382,6 +404,7 @@ describe("Article Editor V3 briefing", () => {
   it("keeps edits typed during an autosave round-trip while adopting identity", () => {
     const candidate = Object.freeze({
       schemaId: STUDIO_ARTICLE_DRAFT_V2_SCHEMA_ID,
+      tags: [],
       articleId: "article-local",
       draftVersion: 0,
       visibility: "draft" as const,
@@ -422,6 +445,7 @@ describe("Article Editor V3 briefing", () => {
   it("preserves in-progress author whitespace through autosave validation", () => {
     const authored = {
       schemaId: STUDIO_ARTICLE_DRAFT_V2_SCHEMA_ID,
+      tags: [],
       articleId: "article/autosave-whitespace",
       draftVersion: 2,
       visibility: "draft" as const,
@@ -462,6 +486,7 @@ describe("Article Editor V3 briefing", () => {
   it("validates and renders portable equation, image, and divider blocks", () => {
     const rich = validateStudioArticleDraftV2({
       schemaId: STUDIO_ARTICLE_DRAFT_V2_SCHEMA_ID,
+      tags: [],
       articleId: "article/rich-blocks",
       draftVersion: 0,
       visibility: "draft",
@@ -512,6 +537,7 @@ describe("Article Editor V3 briefing", () => {
   it("validates and renders progressive disclosure, quiz, and Article links", () => {
     const rich = validateStudioArticleDraftV2({
       schemaId: STUDIO_ARTICLE_DRAFT_V2_SCHEMA_ID,
+      tags: [],
       articleId: "article/progressive-blocks",
       draftVersion: 0,
       visibility: "draft",
@@ -576,6 +602,7 @@ describe("Article Editor V3 briefing", () => {
   it("rejects invalid quiz answers, nested accordions, and unsafe links", () => {
     const base = {
       schemaId: STUDIO_ARTICLE_DRAFT_V2_SCHEMA_ID,
+      tags: [],
       articleId: "article/invalid-progressive",
       draftVersion: 0,
       visibility: "draft",
@@ -643,6 +670,7 @@ describe("Article Editor V3 briefing", () => {
   it("rejects unsafe image URLs and hidden rich-block fields", () => {
     const base = {
       schemaId: STUDIO_ARTICLE_DRAFT_V2_SCHEMA_ID,
+      tags: [],
       articleId: "article/bad-rich-block",
       draftVersion: 0,
       visibility: "draft",
@@ -821,6 +849,7 @@ describe("Article Editor V3 briefing", () => {
     const snapshot = snapshotV3();
     const authored = {
       schemaId: STUDIO_ARTICLE_DRAFT_V2_SCHEMA_ID,
+      tags: [],
       articleId: "article-initial-save-race",
       draftVersion: 0,
       visibility: "draft",
@@ -1192,5 +1221,122 @@ describe("Workbench Briefing re-capture", () => {
     });
     expect(narrowed.presentation).toEqual({ extent: "full", views: [{ paneIds: ["pane/pressure"] }], analysisRecompute: "automatic" });
     expect(reconcileWorkbenchBriefingV3({ briefing: null, preferredFocusScenarioId: "scenario/baseline", snapshot }).presentation).toBeUndefined();
+  });
+});
+
+describe("Article tags", () => {
+  it("normalizes typed tags to the same canonical form the database enforces", () => {
+    expect(normalizeArticleTagV1("  ＃ＰＶ　 loop ")).toBe("PV loop");
+    expect(normalizeArticleTagV1("#前負荷")).toBe("前負荷");
+    expect(parseArticleTagInputV1("前負荷、後負荷, 収縮性\n心不全")).toEqual([
+      "前負荷", "後負荷", "収縮性", "心不全",
+    ]);
+    expect(isCanonicalArticleTagV1("PV loop")).toBe(true);
+    for (const invalid of ["", " lead", "two  spaces", "#hash", "a,b", "ＰＶ", "x".repeat(33), "zero\u200bwidth"]) {
+      expect(isCanonicalArticleTagV1(invalid)).toBe(false);
+    }
+    expect(isCanonicalArticleTagV1("😀".repeat(32))).toBe(true);
+  });
+
+  it("adds tags without duplicates beyond the five-tag limit", () => {
+    const first = addArticleTagsV1([], "PV loop, 前負荷");
+    expect(first).toEqual({ tags: ["PV loop", "前負荷"], rejected: [] });
+    const duplicate = addArticleTagsV1(first.tags, "pv LOOP");
+    expect(duplicate.tags).toBe(first.tags);
+    const full = addArticleTagsV1(first.tags, "a, b, c, d");
+    expect(full.tags).toHaveLength(STUDIO_ARTICLE_TAG_LIMIT_V1);
+    expect(full.rejected).toEqual(["d"]);
+    expect(addArticleTagsV1([], "x".repeat(33)).rejected).toHaveLength(1);
+  });
+
+  it("counts tags case-insensitively and reads canonical tag pages", () => {
+    expect(countArticleTagsV1([["PV loop"], ["pv loop", "前負荷"], ["PV loop"]], "ja")).toEqual([
+      { tag: "PV loop", key: "pv loop", count: 3 },
+      { tag: "前負荷", key: "前負荷", count: 1 },
+    ]);
+    expect(articleTagFromSearchV1("?tag=%23PV%20loop")).toBe("PV loop");
+    expect(articleTagFromSearchV1("?tag=%20")).toBeNull();
+    expect(articleTagHref({ locale: "ja", tag: "PV loop" })).toBe("/ja/articles?tag=PV+loop");
+  });
+
+  it("keeps tags in the exact draft contract", () => {
+    const draft = createEmptyArticleDraftV3("ja", "Untitled");
+    expect(draft.tags).toEqual([]);
+    expect(validateStudioArticleDraftV2({ ...draft, tags: ["前負荷"] }).tags).toEqual(["前負荷"]);
+    expect(() => validateStudioArticleDraftV2({ ...draft, tags: ["a", "a"] })).toThrow(/tags/);
+    expect(() => validateStudioArticleDraftV2({ ...draft, tags: ["a", "b", "c", "d", "e", "f"] })).toThrow(/at most 5/);
+    const { tags: _omitted, ...withoutTags } = draft;
+    expect(() => validateStudioArticleDraftV2(withoutTags)).toThrow(/keys must be exactly/);
+  });
+
+  it("suggests shared spellings first, excluding tags already chosen", () => {
+    const suggestions = [
+      { tag: "PV loop", key: "pv loop", publicCount: 4, mine: false },
+      { tag: "前負荷", key: "前負荷", publicCount: 2, mine: true },
+      { tag: "後負荷", key: "後負荷", publicCount: 1, mine: false },
+      { tag: "負荷試験", key: "負荷試験", publicCount: 0, mine: true },
+    ];
+    expect(selectArticleTagSuggestionsV1(suggestions, ["後負荷"], "").map((entry) => entry.tag))
+      .toEqual(["前負荷", "負荷試験", "PV loop"]);
+    expect(selectArticleTagSuggestionsV1(suggestions, [], "負荷").map((entry) => entry.tag))
+      .toEqual(["負荷試験", "前負荷", "後負荷"]);
+  });
+
+  it("merges public and own tags without double-counting one Article", () => {
+    const merged = mergeArticleTagSuggestionsV1(
+      [{ tag: "PV loop", articleCount: 1 }, { tag: "pv loop", articleCount: 1 }, { tag: "前負荷", articleCount: 3 }],
+      [["PV LOOP"], ["後負荷"]],
+      "ja",
+    );
+    expect(merged).toEqual([
+      { tag: "PV loop", key: "pv loop", publicCount: 1, mine: true },
+      { tag: "前負荷", key: "前負荷", publicCount: 3, mine: false },
+      { tag: "後負荷", key: "後負荷", publicCount: 0, mine: true },
+    ]);
+  });
+
+  it("renders the tag field and the publication tag summary", async () => {
+    await i18n.changeLanguage("ja");
+    const field = renderToStaticMarkup(React.createElement(ArticleEditorTagsV1, {
+      tags: ["前負荷"],
+      suggestions: [],
+      onChange: () => undefined,
+    }));
+    expect(field).toContain("article-editor-tag");
+    expect(field).toContain('aria-label="タグ「前負荷」を外す"');
+    expect(field).toContain('role="combobox"');
+    const menu = (tags: readonly string[]) => renderToStaticMarkup(React.createElement(ArticlePublishMenuV3, {
+      articleHref: "/ja/articles/example",
+      disabled: false,
+      open: true,
+      saving: false,
+      visibility: "draft",
+      tags,
+      onEditTags: () => undefined,
+      onToggleOpen: () => undefined,
+      onSetVisibility: () => undefined,
+    }));
+    expect(menu([])).toContain("タグが未設定です");
+    expect(menu(["前負荷"])).toContain("タグを編集");
+    expect(menu(["前負荷"])).toContain("前負荷");
+  });
+
+  it("filters Article management by status, tag, untagged and title or #tag search", () => {
+    const items = [
+      { articleId: "a", version: 1, visibility: "public" as const, title: "前負荷の基本", tags: ["前負荷"], updatedAt: null },
+      { articleId: "b", version: 1, visibility: "draft" as const, title: "PVループ", tags: ["PV loop", "前負荷"], updatedAt: null },
+      { articleId: "c", version: 1, visibility: "draft" as const, title: "メモ", tags: [], updatedAt: null },
+    ];
+    const ids = (search: string) => selectArticleLibraryItemsV3(
+      items,
+      readArticleLibraryFilterV3(new URLSearchParams(search)),
+    ).map((item) => item.articleId);
+    expect(ids("")).toEqual(["a", "b", "c"]);
+    expect(ids("status=draft")).toEqual(["b", "c"]);
+    expect(ids("tag=%E5%89%8D%E8%B2%A0%E8%8D%B7")).toEqual(["a", "b"]);
+    expect(ids("tag=pv%20LOOP&status=draft")).toEqual(["b"]);
+    expect(ids("untagged=1")).toEqual(["c"]);
+    expect(ids("q=%23pv")).toEqual(["b"]);
+    expect(ids("q=%E3%83%A1%E3%83%A2")).toEqual(["c"]);
   });
 });

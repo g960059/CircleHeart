@@ -1,5 +1,13 @@
 import { MODEL_READING_ENTRIES_V1 } from "@/studio/presentation/modelDocumentation/ModelReadingCatalogV1";
-import { modelDocumentationHref } from "@/homeLinks";
+import { articleTagHref, modelDocumentationHref } from "@/homeLinks";
+import {
+  articleHasTagV1,
+  articleTagKeyV1,
+  countArticleTagsV1,
+  normalizeArticleTagV1,
+  isCanonicalArticleTagV1,
+  type StudioArticleTagCountV1,
+} from "@/studio/application/article/StudioArticleTagsV1";
 import { handleModelDocumentRequestV1, type ModelDocumentAssetReaderV1 } from "./ModelDocumentContentV1";
 import { publicAuthorHtmlV1 } from "@/studio/application/profile/StudioPublicProfileV1";
 import { renderCourseBootstrapV1 } from "@/studio/application/course/StudioCourseBootstrapV1";
@@ -260,22 +268,67 @@ export async function handleStudioPublicContentRequestV1(
   const directoryMatch = /^\/(ja|en)\/articles\/?$/.exec(url.pathname);
   if (directoryMatch !== null) {
     const locale = directoryMatch[1] as "ja" | "en";
-    const articles = (
+    const requestedTag = url.searchParams.get("tag");
+    const tag = requestedTag === null ? null : normalizeArticleTagV1(requestedTag);
+    if (
+      requestedTag !== null
+      && (tag !== requestedTag || !isCanonicalArticleTagV1(tag))
+    ) {
+      // One tag page per spelling: "#PV loop", "ＰＶ loop" and a blank tag
+      // resolve to the canonical query (or the unfiltered directory).
+      const location = new URL(
+        tag !== null && isCanonicalArticleTagV1(tag)
+          ? articleTagHref({ locale, tag })
+          : `/${locale}/articles`,
+        dependencies.canonicalOrigin,
+      ).toString();
+      return responseV1(
+        "",
+        308,
+        "text/plain; charset=utf-8",
+        { Location: location, "Cache-Control": "public, max-age=300, s-maxage=86400" },
+        request.method,
+      );
+    }
+    const localized = (
       await listAllPublicArticlesV1(dependencies.dataSource)
     ).filter((article) => article.locale === locale);
+    const tagCounts = countArticleTagsV1(
+      localized.map((article) => article.tags),
+      locale,
+    );
+    const activeTag = tag === null
+      ? null
+      : tagCounts.find((entry) => entry.key === articleTagKeyV1(tag))?.tag ?? tag;
+    const articles = activeTag === null
+      ? localized
+      : localized.filter((article) => articleHasTagV1(article.tags, activeTag));
     const canonicalUrl = new URL(
-      `/${locale}/articles`,
+      activeTag === null
+        ? `/${locale}/articles`
+        : articleTagHref({ locale, tag: activeTag }),
       dependencies.canonicalOrigin,
     ).toString();
-    const title =
-      locale === "ja" ? "記事 | CircleHeart" : "Articles | CircleHeart";
-    const description =
-      locale === "ja"
+    const title = activeTag === null
+      ? locale === "ja" ? "記事 | CircleHeart" : "Articles | CircleHeart"
+      : locale === "ja"
+        ? `#${activeTag} の記事 | CircleHeart`
+        : `Articles tagged #${activeTag} | CircleHeart`;
+    const description = activeTag === null
+      ? locale === "ja"
         ? "循環動態をシミュレーションで学ぶCircleHeartの記事一覧です。"
-        : "CircleHeart articles for learning hemodynamics through simulation.";
+        : "CircleHeart articles for learning hemodynamics through simulation."
+      : locale === "ja"
+        ? `「${activeTag}」のタグが付いたCircleHeartの記事一覧です。`
+        : `CircleHeart articles tagged “${activeTag}”.`;
     const documentHtml = injectStudioPublicDocumentV1({
-      additionalHeadHtml: `<meta property="og:type" content="website" />`,
-      bodyHtml: articleDirectoryBodyV1(articles, locale),
+      additionalHeadHtml: [
+        `<meta property="og:type" content="website" />`,
+        ...(activeTag !== null && articles.length === 0
+          ? [`<meta name="robots" content="noindex" />`]
+          : []),
+      ].join("\n    "),
+      bodyHtml: articleDirectoryBodyV1(articles, locale, activeTag, tagCounts),
       canonicalUrl,
       clientTemplate: dependencies.clientTemplate,
       description,
@@ -501,12 +554,23 @@ async function listLocalizedHomeArticlesV1(
 function articleDirectoryBodyV1(
   articles: readonly StudioPublicArticleSummaryV1[],
   locale: "ja" | "en",
+  activeTag: string | null = null,
+  tagCounts: readonly StudioArticleTagCountV1[] = [],
 ): string {
-  const heading = locale === "ja" ? "記事" : "Articles";
-  const empty =
-    locale === "ja"
+  const heading = activeTag === null
+    ? locale === "ja" ? "記事" : "Articles"
+    : `<span class="public-static-tag-mark" aria-hidden="true">#</span>${escapeHtmlTextV1(activeTag)}`;
+  const empty = activeTag !== null
+    ? locale === "ja"
+      ? "このタグの公開記事はありません。"
+      : "No public articles have this tag."
+    : locale === "ja"
       ? "公開中の記事はまだありません。"
       : "No public articles yet.";
+  const tagNavigation = tagCounts.length === 0
+    ? ""
+    : `<nav class="public-static-tag-nav" aria-label="${locale === "ja" ? "タグ" : "Tags"}"><a class="article-tag" href="/${locale}/articles"${activeTag === null ? ` aria-current="page"` : ""}>${locale === "ja" ? "すべて" : "All"}</a>${tagCounts.map((entry) =>
+        `<a class="article-tag" href="${escapeHtmlAttributeV1(articleTagHref({ locale, tag: entry.tag }))}"${activeTag !== null && articleTagKeyV1(activeTag) === entry.key ? ` aria-current="page"` : ""}><span aria-hidden="true">#</span>${escapeHtmlTextV1(entry.tag)} <small>${entry.count}</small></a>`).join("")}</nav>`;
   const cards =
     articles.length === 0
       ? `<p>${empty}</p>`
@@ -517,10 +581,17 @@ function articleDirectoryBodyV1(
               article.excerpt === null
                 ? ""
                 : `<p>${escapeHtmlTextV1(article.excerpt)}</p>`;
-            return `<li><a href="${href}"><h2>${escapeHtmlTextV1(article.title)}</h2>${excerpt}${publicAuthorHtmlV1(article.author,locale)}<time datetime="${escapeHtmlAttributeV1(article.publishedAt)}">${escapeHtmlTextV1(article.publishedAt.slice(0, 10))}</time></a></li>`;
+            const tags =
+              article.tags.length === 0
+                ? ""
+                : `<p class="public-static-card-tags">${article.tags.map((tag) => `<span>#${escapeHtmlTextV1(tag)}</span>`).join(" ")}</p>`;
+            return `<li><a href="${href}"><h2>${escapeHtmlTextV1(article.title)}</h2>${excerpt}${tags}${publicAuthorHtmlV1(article.author,locale)}<time datetime="${escapeHtmlAttributeV1(article.publishedAt)}">${escapeHtmlTextV1(article.publishedAt.slice(0, 10))}</time></a></li>`;
           })
           .join("\n");
-  return `<main class="public-static-shell"><section class="public-static-directory"><header><p class="public-static-kicker">CircleHeart</p><h1>${heading}</h1></header>${articles.length === 0 ? cards : `<ul>${cards}</ul>`}</section></main>`;
+  const kicker = activeTag === null
+    ? "CircleHeart"
+    : `<a class="public-static-back" href="/${locale}/articles">${locale === "ja" ? "記事" : "Articles"}</a> · ${locale === "ja" ? `タグ · ${articles.length}件` : `Tag · ${articles.length} ${articles.length === 1 ? "article" : "articles"}`}`;
+  return `<main class="public-static-shell"><section class="public-static-directory"><header><p class="public-static-kicker">${kicker}</p><h1>${heading}</h1>${tagNavigation}</header>${articles.length === 0 ? `<p>${empty}</p>` : `<ul>${cards}</ul>`}</section></main>`;
 }
 
 function sitemapXmlV1(
@@ -555,6 +626,12 @@ function sitemapXmlV1(
       ).toString();
       return `  <url><loc>${escapeXmlV1(location)}</loc><lastmod>${escapeXmlV1(article.publishedAt)}</lastmod></url>`;
     }),
+    ...(["ja", "en"] as const).flatMap((locale) =>
+      countArticleTagsV1(
+        articles.filter((article) => article.locale === locale).map((article) => article.tags),
+        locale,
+      ).map((entry) =>
+        `  <url><loc>${escapeXmlV1(new URL(articleTagHref({ locale, tag: entry.tag }), canonicalOrigin).toString())}</loc></url>`)),
   ];
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,

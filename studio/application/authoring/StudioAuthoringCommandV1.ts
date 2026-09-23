@@ -13,6 +13,10 @@ import {
   validateStudioArticleDraftV2,
 } from "@/studio/application/authoring/StudioArticleDataV2";
 import {
+  STUDIO_ARTICLE_TAG_LIMIT_V1,
+  STUDIO_ARTICLE_TAG_MAX_LENGTH_V1,
+} from "@/studio/application/article/StudioArticleTagsV1";
+import {
   assertExperimentBriefingMatchesModelV2,
   assertExperimentContentMatchesModelV2,
   assertExperimentContentMatchesModelSurfaceCapabilitiesV2,
@@ -858,9 +862,22 @@ export function describeStudioAuthoringProtocolV1(selectedAction?: string): Read
       blockId: id, kind: { const: "experiment" }, placement: experimentPlacement,
     }),
   ] });
+  // Discovery tags: NFKC text without '#', commas or invisible characters,
+  // single inner spaces. Normalize before saving; the backend rejects others.
+  const articleTags = Object.freeze({
+    type: "array",
+    maxItems: STUDIO_ARTICLE_TAG_LIMIT_V1,
+    uniqueItems: true,
+    items: {
+      type: "string",
+      minLength: 1,
+      maxLength: STUDIO_ARTICLE_TAG_MAX_LENGTH_V1,
+      pattern: "^[^#,\\s\u3001]+(?: [^#,\\s\u3001]+)*$",
+    },
+  });
   const articleDraft = object([
-    "articleId", "blocks", "draftVersion", "locale", "schemaId", "title",
-    "visibility",
+    "articleId", "blocks", "draftVersion", "locale", "schemaId", "tags",
+    "title", "visibility",
   ], {
     schemaId: { const: "circleheart-studio-article-draft-v2" },
     articleId: id,
@@ -868,6 +885,7 @@ export function describeStudioAuthoringProtocolV1(selectedAction?: string): Read
     visibility: { enum: ["draft", "public"] },
     locale: id,
     title: id,
+    tags: articleTags,
     blocks: { type: "array", items: articleBlock },
   });
   const articleBlockOperation = Object.freeze({ oneOf: [
@@ -909,10 +927,10 @@ export function describeStudioAuthoringProtocolV1(selectedAction?: string): Read
     },
   );
   const articleSummary = object(
-    ["articleId", "blockCount", "draftVersion", "locale", "title", "visibility"],
+    ["articleId", "blockCount", "draftVersion", "locale", "tags", "title", "visibility"],
     {
       articleId: id, draftVersion: version, visibility: { enum: ["draft", "public"] },
-      locale: id, title: id, blockCount: version,
+      locale: id, title: id, tags: articleTags, blockCount: version,
     },
   );
   const published = object(["published"], { published: { const: true } });
@@ -957,14 +975,15 @@ export function describeStudioAuthoringProtocolV1(selectedAction?: string): Read
     createdAt: { type: "string", format: "date-time" },
   });
   const articleListItem = object([
-    "articleId", "createdAt", "locale", "publicSlug", "title", "updatedAt",
-    "version", "visibility",
+    "articleId", "createdAt", "locale", "publicSlug", "tags", "title",
+    "updatedAt", "version", "visibility",
   ], {
     articleId: uuid,
     version,
     visibility: { enum: ["draft", "public"] },
     locale: id,
     title: id,
+    tags: articleTags,
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
     publicSlug: nullableId,
@@ -1207,10 +1226,10 @@ export function describeStudioAuthoringProtocolV1(selectedAction?: string): Read
         selection: briefingSelection, target: briefingTarget,
       }), resultSchema: object([
         "articleId", "blockCount", "blockId", "draftVersion", "locale",
-        "placementId", "snapshotId", "title", "visibility",
+        "placementId", "snapshotId", "tags", "title", "visibility",
       ], {
         articleId: id, draftVersion: version, visibility: { enum: ["draft", "public"] },
-        locale: id, title: id, blockCount: version,
+        locale: id, title: id, tags: articleTags, blockCount: version,
         blockId: id, placementId: id, snapshotId: id,
       }) }),
     Object.freeze({ action: "article.blocks.patch", mutation: true,
@@ -2178,6 +2197,7 @@ function summarizeArticleMutationV1(article: StudioArticleDraftV2) {
     visibility: article.visibility,
     locale: article.locale,
     title: article.title,
+    tags: article.tags,
     blockCount: article.blocks.length,
   });
 }

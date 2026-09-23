@@ -31,6 +31,7 @@ async function openColdPeek(page: Page, search = "") {
   };
   const article: StudioArticleDraftV2 = {
     schemaId: "circleheart-studio-article-draft-v2", articleId: "article-reader-peek-test",
+    tags: [],
     draftVersion: 1, visibility: "draft", locale: "ja", title: "二つの圧波形を読む",
     blocks: [{
       blockId: "experiment", kind: "experiment",
@@ -47,9 +48,9 @@ async function openColdPeek(page: Page, search = "") {
     }],
   };
   await page.addInitScript((envelope: string) => {
-    localStorage.setItem("circleheart.studio.browser-content.v9", envelope);
+    localStorage.setItem("circleheart.studio.browser-content.v10", envelope);
   }, JSON.stringify({
-    schemaId: "circleheart-studio-browser-content-v9", experiments: [], snapshots: [snapshot], articles: [article],
+    schemaId: "circleheart-studio-browser-content-v10", experiments: [], snapshots: [snapshot], articles: [article],
   }));
   await page.route("**/rest/v1/rpc/read_article_v1", route => route.fulfill({ json: article }));
   await page.route("**/rest/v1/rpc/read_experiment_snapshot_v1", route => route.fulfill({ json: snapshot }));

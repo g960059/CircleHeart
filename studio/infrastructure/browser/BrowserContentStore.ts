@@ -26,11 +26,13 @@ import {
 /**
  * Current pre-release envelope. There is deliberately no compatibility
  * reader; retired keys are inert and left to browser storage maintenance.
+ * Any change to a stored content contract (v10: required Article tags)
+ * moves to a new key, so an older envelope can never fail the current one.
  */
 export const BROWSER_CONTENT_STORE_KEY =
-  "circleheart.studio.browser-content.v9";
+  "circleheart.studio.browser-content.v10";
 export const BROWSER_CONTENT_STORE_SCHEMA_ID =
-  "circleheart-studio-browser-content-v9" as const;
+  "circleheart-studio-browser-content-v10" as const;
 
 export type BrowserStoragePort = Pick<
   Storage,

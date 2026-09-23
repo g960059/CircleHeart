@@ -1236,7 +1236,7 @@ body[data-app-theme="light"] .article-reader-companion {
 }
 
 .article-editor-title {
-  margin-block-end: clamp(2.5rem, 2.1rem + 1.2cqi, 3.25rem);
+  margin-block-end: 0.5rem;
 }
 
 .article-publication-date {
@@ -3586,3 +3586,247 @@ body[data-app-theme="light"] .public-static-theme-moon {
 .article-briefing-phone-slider { display: block; block-size: 0.35rem; border-radius: 999px; background: var(--wb-soft); }
 .article-briefing-phone-segments { display: flex; gap: 0.25rem; }
 .article-briefing-phone-segments span { flex: 1 1 0; border-radius: 0.35rem; padding: 0.2rem 0; background: var(--wb-soft); color: var(--wb-text-subtle); font-size: 0.6875rem; text-align: center; }
+
+/*
+ * Article tags: one quiet label everywhere (Reader, cards, directory,
+ * management, Home, editor, publication popover). Borderless, a soft
+ * neutral fill, a 6px radius so tags read as labels rather than the
+ * pill-shaped buttons around them, and a muted "#". Filter chips invert
+ * when selected; tags inside content only deepen their fill.
+ */
+/* Declared on the palette scope so each theme resolves its own text color. */
+.app-root,
+body[data-app-theme],
+body:has(.public-static-shell) {
+  --article-tag-fill: color-mix(in srgb, var(--wb-text) 7%, transparent);
+  --article-tag-fill-strong: color-mix(in srgb, var(--wb-text) 13%, transparent);
+}
+.article-tags,
+.article-card-tags,
+.management-row-tags,
+.article-publish-tags ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.article-tags { margin-block-start: 1.1rem; }
+.article-card-tags { position: relative; z-index: 1; margin-block-start: 0.75rem; }
+.management-row-tags { margin-block-start: 0.5rem; }
+
+.article-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  min-height: 1.75rem;
+  max-width: 100%;
+  padding: 0.2rem 0.6rem;
+  border: 0;
+  border-radius: 0.375rem;
+  background: var(--article-tag-fill);
+  color: var(--wb-text-muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+  transition: color 150ms, background-color 150ms;
+}
+.article-tag > span[aria-hidden="true"] { opacity: 0.55; }
+.article-tag small {
+  margin-inline-start: 0.35rem;
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+}
+a.article-tag:hover,
+button.article-tag:hover:not(:disabled) {
+  background: var(--article-tag-fill-strong);
+  color: var(--wb-text);
+}
+.article-tag[aria-current="page"],
+.article-tag[aria-pressed="true"],
+a.article-tag[aria-current="page"]:hover,
+button.article-tag[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--wb-text);
+  color: var(--wb-canvas-bg);
+}
+.article-tag:focus-visible { outline: 2px solid var(--wb-accent); outline-offset: 2px; }
+.article-tag-compact { min-height: 1.5rem; padding: 0.1rem 0.5rem; font-size: 0.6875rem; }
+/* Inside a card or row the current tag is marked, not shouted. */
+.article-tag-compact[aria-current="page"],
+.article-tag-compact[aria-pressed="true"],
+a.article-tag-compact[aria-current="page"]:hover,
+button.article-tag-compact[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--article-tag-fill-strong);
+  color: var(--wb-text);
+}
+/* Actions next to tags are plain text until hovered. */
+.article-tag-more { gap: 0.3rem; background: transparent; }
+
+.article-tag-directory-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-block-start: 1.75rem;
+}
+
+/* First-response directory: its cards style every anchor, so reset chips. */
+.public-static-tag-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-block-start: 1.5rem;
+}
+.public-static-tag-nav { gap: 0.375rem; }
+.public-static-directory .article-tag {
+  display: inline-flex;
+  gap: 0.1rem;
+  margin: 0;
+  padding: 0.2rem 0.6rem;
+  border: 0;
+  border-radius: 0.375rem;
+  color: var(--wb-text-muted);
+}
+.public-static-directory .article-tag[aria-current="page"] { color: var(--wb-canvas-bg); }
+.public-static-tag-mark { color: var(--wb-text-subtle); font-weight: 500; }
+.public-static-directory .public-static-back {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.public-static-directory .public-static-card-tags {
+  color: var(--wb-text-subtle);
+  font-size: 0.8rem;
+}
+
+/* Editor: a quiet metadata line between the title and the body. */
+.article-editor-tags {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 2rem;
+  margin-block-end: clamp(2rem, 1.6rem + 1.2cqi, 2.75rem);
+  color: var(--wb-text-subtle);
+}
+.article-editor-tag-list { display: contents; list-style: none; }
+.article-editor-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  min-height: 1.75rem;
+  max-width: 100%;
+  padding: 0.15rem 0.15rem 0.15rem 0.6rem;
+  border-radius: 0.375rem;
+  background: var(--article-tag-fill);
+  color: var(--wb-text);
+  font-size: 0.75rem;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.article-editor-tag > span[aria-hidden="true"] { opacity: 0.45; }
+.article-editor-tag button {
+  display: inline-grid;
+  place-items: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  margin-inline-start: 0.15rem;
+  border-radius: 0.25rem;
+  color: var(--wb-text-subtle);
+  transition: color 150ms, background-color 150ms;
+}
+.article-editor-tag button:hover:not(:disabled) { color: var(--wb-text); background: var(--article-tag-fill-strong); }
+/* "Edit tags" may land here after a mouse click, so focus is always shown. */
+.article-editor-tag button:focus { color: var(--wb-text); outline: 2px solid var(--wb-accent); outline-offset: 1px; }
+.article-editor-tag button svg { width: 0.75rem; height: 0.75rem; }
+.article-editor-tag-input { position: relative; flex: 1 1 10rem; min-width: 8rem; }
+.article-editor-tag-input input {
+  width: 100%;
+  min-height: 1.75rem;
+  padding: 0.2rem 0.25rem;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--wb-text);
+  font: inherit;
+  font-size: 0.8125rem;
+  outline: none;
+}
+.article-editor-tag-input input::placeholder { color: var(--wb-text-subtle); }
+.article-editor-tag-input input[aria-invalid="true"] { color: var(--wb-danger); }
+.article-editor-tag-options {
+  position: absolute;
+  inset-inline-start: 0;
+  top: calc(100% + 0.35rem);
+  z-index: 40;
+  width: min(20rem, 80vw);
+  max-height: 18rem;
+  margin: 0;
+  padding: 0.3rem;
+  overflow-y: auto;
+  border-radius: 0.75rem;
+  background: var(--wb-panel-bg);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
+  outline: 1px solid color-mix(in srgb, var(--wb-border) 70%, transparent);
+  list-style: none;
+}
+.article-editor-tag-options li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.5rem;
+  color: var(--wb-text);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.article-editor-tag-options li[aria-selected="true"] { background: var(--wb-hover-bg); }
+.article-editor-tag-option-label { min-width: 0; overflow-wrap: anywhere; }
+.article-editor-tag-options small { flex: none; color: var(--wb-text-subtle); font-size: 0.6875rem; }
+.article-editor-tags-note,
+.article-editor-tags-hint { font-size: 0.6875rem; color: var(--wb-text-subtle); }
+.article-editor-tags-hint { flex-basis: 100%; min-height: 1rem; padding-inline-start: 1.3rem; }
+.article-editor-tags-hint:empty { display: none; }
+.article-editor-tags-hint.is-error { color: var(--wb-danger); }
+
+/* Publication popover: what readers will find this Article under. */
+.article-publish-tags {
+  margin-block-start: 0.85rem;
+  padding-block-start: 0.75rem;
+  border-top: 1px solid var(--wb-border);
+}
+.article-publish-tags-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-block-end: 0.45rem;
+}
+.article-publish-tags-header p { margin: 0; color: var(--wb-text); font-size: 0.75rem; font-weight: 600; }
+.article-publish-tags-header button {
+  min-height: 1.75rem;
+  padding: 0 0.4rem;
+  border-radius: 0.4rem;
+  color: var(--wb-accent);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+.article-publish-tags-header button:hover { background: var(--wb-accent-soft); }
+.article-publish-tags-header button:focus-visible { outline: 2px solid var(--wb-accent); outline-offset: 1px; }
+.article-publish-tags-empty,
+.article-publish-tags-note {
+  margin: 0;
+  color: var(--wb-text-muted);
+  font-size: 0.6875rem;
+  line-height: 1.6;
+}
+.article-publish-tags-note { margin-block-start: 0.5rem; }

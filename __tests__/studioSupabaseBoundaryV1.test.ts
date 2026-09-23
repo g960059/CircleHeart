@@ -15,6 +15,7 @@ import {
 } from "@/studio/infrastructure/supabase/StudioSupabaseClientV1";
 import {
   StudioSupabaseContentRepositoryV1,
+  listAllMyArticleSummariesV1,
   StudioSupabaseMutationAcknowledgedErrorV1,
 } from "@/studio/infrastructure/supabase/StudioSupabaseContentRepositoryV1";
 import {
@@ -791,6 +792,7 @@ describe("Studio Supabase boundary V1", () => {
       .mockResolvedValueOnce({
         data: {
           schemaId: STUDIO_ARTICLE_DRAFT_V2_SCHEMA_ID,
+          tags: [],
           articleId,
           draftVersion: 0,
           visibility: "draft",
@@ -816,6 +818,7 @@ describe("Studio Supabase boundary V1", () => {
         expectedVersion: null,
         article: {
           schemaId: STUDIO_ARTICLE_DRAFT_V2_SCHEMA_ID,
+          tags: [],
           articleId: "article/local-command-placeholder",
           draftVersion: 0,
           visibility: "public",
@@ -831,6 +834,92 @@ describe("Studio Supabase boundary V1", () => {
       "read_article_v1",
       { p_article_id: articleId },
     );
+  });
+
+  it("saves tags with the Article revision and validates tag projections", async () => {
+    const articleId = "8d8f9f03-e81d-4dc7-8320-7f71367a63c4";
+    const draft = {
+      schemaId: STUDIO_ARTICLE_DRAFT_V2_SCHEMA_ID,
+      tags: ["前負荷", "PV loop"],
+      articleId,
+      draftVersion: 3,
+      visibility: "draft" as const,
+      locale: "ja",
+      title: "PV loop",
+      blocks: [],
+    };
+    const rpc = vi.fn()
+      .mockResolvedValueOnce({ data: { articleId, version: 4 }, error: null })
+      .mockResolvedValueOnce({ data: { ...draft, draftVersion: 4 }, error: null })
+      .mockResolvedValueOnce({
+        data: [{ tag: "PV loop", articleCount: 3 }, { tag: "前負荷", articleCount: 1 }],
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: [{ tag: "#bad", articleCount: 1 }], error: null })
+      .mockResolvedValueOnce({
+        data: {
+          items: [{
+            articleId,
+            version: 4,
+            visibility: "public",
+            locale: "ja",
+            title: "PV loop",
+            tags: ["PV loop", "PV loop"],
+            createdAt: "2026-08-12T00:00:00.000Z",
+            updatedAt: "2026-08-12T00:00:00.000Z",
+            publicSlug: "article-8d8f",
+          }],
+          nextCursor: null,
+        },
+        error: null,
+      });
+    const client = {
+      auth: {
+        getSession: vi.fn().mockResolvedValue({
+          data: { session: { user: { id: "author" } } },
+          error: null,
+        }),
+      },
+      rpc,
+    } as unknown as SupabaseClient;
+    const repository = new StudioSupabaseContentRepositoryV1(client);
+
+    const saved = await repository.saveArticle({ articleId, expectedVersion: 3, article: draft });
+    expect(saved.tags).toEqual(["前負荷", "PV loop"]);
+    expect(rpc).toHaveBeenNthCalledWith(1, "save_article_v1", expect.objectContaining({
+      p_article_id: articleId,
+      p_expected_version: 3,
+      p_tags: ["前負荷", "PV loop"],
+    }));
+    await expect(repository.listPublicArticleTags("ja")).resolves.toEqual([
+      { tag: "PV loop", articleCount: 3 },
+      { tag: "前負荷", articleCount: 1 },
+    ]);
+    expect(rpc).toHaveBeenNthCalledWith(3, "list_public_article_tags_v1", { p_locale: "ja", p_limit: 100 });
+    await expect(repository.listPublicArticleTags("ja")).rejects.toThrow(/canonical/);
+    await expect(repository.listMyArticles()).rejects.toThrow(/repeat a tag/);
+    await expect(repository.saveArticle({
+      articleId,
+      expectedVersion: 4,
+      article: { ...draft, tags: ["#前負荷"] },
+    })).rejects.toThrow(/tags/);
+  });
+
+  it("pages through every owned Article for management and tag vocabulary", async () => {
+    const summary = (index: number) => Object.freeze({
+      articleId: `article-${index}`, version: 0, visibility: "draft" as const, locale: "ja",
+      title: `Article ${index}`, tags: index === 150 ? Object.freeze(["古いタグ"]) : Object.freeze([]),
+      createdAt: "2026-08-12T00:00:00.000Z", updatedAt: "2026-08-12T00:00:00.000Z", publicSlug: null,
+    });
+    const cursor = { timestamp: "2026-08-12T00:00:00.000Z", id: "a1000000-0000-4000-8000-000000000001" };
+    const listMyArticles = vi.fn()
+      .mockResolvedValueOnce({ items: Array.from({ length: 100 }, (_, i) => summary(i)), nextCursor: cursor })
+      .mockResolvedValueOnce({ items: Array.from({ length: 60 }, (_, i) => summary(100 + i)), nextCursor: null });
+    const items = await listAllMyArticleSummariesV1({ listMyArticles });
+    expect(items).toHaveLength(160);
+    expect(items.some((item) => item.tags.includes("古いタグ"))).toBe(true);
+    expect(listMyArticles).toHaveBeenNthCalledWith(1, { limit: 100, cursor: null });
+    expect(listMyArticles).toHaveBeenNthCalledWith(2, { limit: 100, cursor });
   });
 
   it("uploads immutable Article images below the signed-in owner's folder", async () => {

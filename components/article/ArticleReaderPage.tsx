@@ -12,6 +12,7 @@ import type { ArticleReaderExpandedPresentationV3 } from "@/components/article/r
 import { articleReaderPlacementAfterViewportExitV3, articleReaderPlacementInReadingAreaV3 } from "@/components/article/reader/ArticleReaderPlacementV3";
 import { ArticleReaderDeferredExperimentV1 } from "@/components/article/reader/ArticleReaderDeferredExperimentV1";
 import { ArticleLoadingSkeletonV1 } from "./ArticleLoadingSkeletonV1";
+import { ArticleTagListV1 } from "./ArticleTagListV1";
 import {
   ArticleAccordionPresentationV3,
   ArticleAccordionContentPresentationV3,
@@ -502,6 +503,10 @@ function ArticleReaderV3Resource({
                 </time>
               </p>
             )}
+            <ArticleTagListV1
+              tags={content.article.tags}
+              locale={isLocale(content.article.locale) ? content.article.locale : locale}
+            />
           </header>
 
           {!authoredPreview && <ArticleCourseNavigationV1 articleId={content.article.articleId} locale={locale} />}

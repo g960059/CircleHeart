@@ -51,7 +51,7 @@ const insertRows = (table: "contents" | "snapshots" | "snapshotSources" | "artic
     contents: ["content_id", "model_id", "content", "created_by", "created_at", "surface_series_id"],
     snapshots: ["snapshot_id", "owner_id", "content_id", "created_at", "surface_release_id"],
     snapshotSources: ["snapshot_id", "source_experiment_id", "source_experiment_version"],
-    articleContents: ["article_content_id", "owner_id", "locale", "title", "blocks", "created_at"],
+    articleContents: ["article_content_id", "owner_id", "locale", "title", "tags", "blocks", "created_at"],
   }[table];
   const [name] = tables[table];
   return `insert into studio.${name} (${columns.join(", ")}) select ${columns.map(c => `r.${c}`).join(", ")} from successor_plan p cross join lateral jsonb_populate_recordset(null::studio.${name}, p.payload -> '${section}' -> '${table}') r${allowExisting ? " on conflict do nothing" : ""};\n`;

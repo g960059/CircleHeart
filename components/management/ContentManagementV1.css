@@ -51,6 +51,78 @@
 .management-create:hover { background: var(--wb-hover-bg); border-color: var(--wb-axis); }
 .management-nav-link:focus-visible, .management-create:focus-visible { outline: 2px solid var(--wb-accent); outline-offset: 3px; }
 .management-list { margin-top: 32px; }
+.management-toolbar { display: grid; gap: 14px; margin-top: 28px; }
+.management-toolbar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
+.management-search {
+  position: relative;
+  display: flex;
+  flex: 1 1 240px;
+  align-items: center;
+  min-width: 0;
+}
+.management-search svg { position: absolute; left: 13px; width: 15px; height: 15px; color: var(--wb-text-subtle); pointer-events: none; }
+.management-search input {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 14px 8px 36px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 22px;
+  background: var(--wb-panel-bg);
+  color: var(--wb-text);
+  font: inherit;
+  font-size: 13px;
+}
+.management-search input::placeholder { color: var(--wb-text-subtle); }
+.management-search input:focus-visible { outline: 2px solid var(--wb-accent); outline-offset: 1px; border-color: transparent; }
+.management-segmented {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--wb-panel-bg-soft);
+}
+.management-segmented button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 5px 13px;
+  border-radius: 999px;
+  color: var(--wb-text-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: color 150ms, background-color 150ms;
+}
+.management-segmented button small { color: var(--wb-text-subtle); font-size: 11px; font-weight: 550; font-variant-numeric: tabular-nums; }
+.management-segmented button:hover { color: var(--wb-text); }
+.management-segmented button[aria-pressed="true"] { background: var(--wb-panel-bg); color: var(--wb-text); box-shadow: 0 1px 3px #0b1a2a1a; }
+.management-segmented button:focus-visible { outline: 2px solid var(--wb-accent); outline-offset: 1px; }
+.management-tag-filter { display: flex; flex-wrap: wrap; gap: 6px; }
+.management-result-count {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 18px 0 0;
+  color: var(--wb-text-muted);
+  font-size: 12.5px;
+}
+.management-result-count button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 6px;
+  border-radius: 6px;
+  color: var(--wb-accent);
+  font-weight: 600;
+}
+.management-result-count button svg { width: 13px; height: 13px; }
+.management-result-count button:hover { background: var(--wb-accent-soft); }
+.management-result-count button:focus-visible { outline: 2px solid var(--wb-accent); outline-offset: 1px; }
+.management-toolbar + .management-list { margin-top: 20px; }
 .management-list > li + li { border-top: 1px solid var(--wb-border); }
 .management-row { padding-block: 24px; }
 .management-row-content { display: flex; align-items: center; gap: 20px; }
@@ -81,6 +153,17 @@
   .management-create { min-height: 36px; padding-inline: 10px; font-size: 12px; }
   .management-nav-link svg { display: none; }
   .management-list { margin-top: 24px; }
+  /* Many tags would push the list below the fold; keep one swipeable row. */
+  .management-tag-filter {
+    flex-wrap: nowrap;
+    margin-inline: -12px;
+    padding: 2px 12px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 24px), transparent);
+  }
+  .management-tag-filter::-webkit-scrollbar { display: none; }
+  .management-tag-filter > .article-tag { flex-shrink: 0; white-space: nowrap; }
   .management-row-content { flex-wrap: wrap; gap: 12px; }
   .management-row-content > :first-child { flex-basis: 100%; }
   .management-row { padding-block: 20px; }

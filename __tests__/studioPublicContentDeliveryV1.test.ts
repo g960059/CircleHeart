@@ -23,6 +23,7 @@ import {
   renderStudioPublicHomeBootstrapV1,
   STUDIO_PUBLIC_HOME_BOOTSTRAP_V1_ELEMENT_ID,
   STUDIO_PUBLIC_HOME_BOOTSTRAP_V1_SCHEMA_ID,
+  type StudioPublicArticleSummaryV1,
   validateStudioPublicHomeBootstrapV1,
 } from "@/studio/application/publication/StudioPublicHomeBootstrapV1";
 import {
@@ -444,6 +445,7 @@ describe("Studio public content delivery V1", () => {
         locale: "ja",
         title: "</script><script>alert('inert')</script>",
         excerpt: null,
+        tags: [],
         publicSlug: "home-article",
         publishedAt: "2026-08-13T00:00:00.000Z",
       }],
@@ -507,6 +509,7 @@ describe("Studio public content delivery V1", () => {
     );
     expect(await json.json()).toMatchObject({
       schemaId: STUDIO_PUBLISHED_ARTICLE_V1_SCHEMA_ID,
+      tags: [],
       articleContentId: "22222222-2222-4222-8222-222222222222",
     });
   });
@@ -634,9 +637,116 @@ describe("Studio public content delivery V1", () => {
   });
 });
 
+describe("Article tags in public delivery", () => {
+  const taggedArticle = (): StudioPublishedArticleV1 =>
+    validateStudioPublishedArticleV1({ ...publishedArticleV1(), tags: ["前負荷", "PV loop"] });
+  const summaryV1 = (
+    overrides: Partial<StudioPublicArticleSummaryV1> & Pick<StudioPublicArticleSummaryV1, "articleId" | "publicSlug">,
+  ): StudioPublicArticleSummaryV1 => ({
+    locale: "ja",
+    title: overrides.publicSlug,
+    excerpt: null,
+    tags: [],
+    publishedAt: "2026-08-12T00:00:00.000Z",
+    ...overrides,
+  });
+  const taggedDependenciesV1 = () => {
+    const base = dependenciesV1();
+    const article = taggedArticle();
+    return Object.freeze({
+      ...base,
+      dataSource: Object.freeze({
+        ...base.dataSource,
+        readPublishedArticle: async (routeKey: string) =>
+          routeKey === article.publicSlug ? article : null,
+        listPublicArticles: async () => Object.freeze({
+          items: Object.freeze([
+            summaryV1({ articleId: article.articleId, publicSlug: article.publicSlug, title: article.title, tags: article.tags }),
+            summaryV1({ articleId: "55555555-5555-4555-8555-555555555555", publicSlug: "pv-loop-basics", title: "PVループ入門", tags: ["pv loop"] }),
+            summaryV1({ articleId: "66666666-6666-4666-8666-666666666666", publicSlug: "untagged-note", title: "タグなしの記事" }),
+            summaryV1({ articleId: "77777777-7777-4777-8777-777777777777", publicSlug: "english-pv", title: "English PV", locale: "en", tags: ["PV loop"] }),
+          ]),
+          nextCursor: null,
+        }),
+      }),
+    });
+  };
+
+  it("renders published tags in HTML, metadata and Markdown from the same revision", async () => {
+    const dependencies = taggedDependenciesV1();
+    const html = await (await handleStudioPublicContentRequestV1(
+      requestV1("/ja/articles/what-determines-blood-pressure"),
+      dependencies,
+    )).text();
+    expect(html).toContain('<ul class="article-tags" aria-label="タグ">');
+    expect(html).toContain('href="/ja/articles?tag=%E5%89%8D%E8%B2%A0%E8%8D%B7"');
+    expect(html).toContain('<meta property="article:tag" content="PV loop" />');
+    expect(html).toContain('"keywords":"前負荷, PV loop"');
+    const markdown = await (await handleStudioPublicContentRequestV1(
+      requestV1("/ja/articles/what-determines-blood-pressure.md"),
+      dependencies,
+    )).text();
+    expect(markdown).toContain('tags: ["前負荷", "PV loop"]');
+  });
+
+  it("serves one canonical tag page per locale with case-insensitive matching", async () => {
+    const response = await handleStudioPublicContentRequestV1(
+      requestV1("/ja/articles?tag=pv%20LOOP"),
+      taggedDependenciesV1(),
+    );
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("<title>#PV loop の記事 | CircleHeart</title>");
+    expect(html).toContain('<link rel="canonical" href="https://www.circleheart.dev/ja/articles?tag=PV+loop" />');
+    expect(html).toContain("血圧を考える");
+    expect(html).toContain("PVループ入門");
+    expect(html).not.toContain("タグなしの記事");
+    expect(html).not.toContain("English PV");
+    expect(html).toMatch(/<a class="article-tag" href="\/ja\/articles\?tag=PV\+loop" aria-current="page">/);
+    expect(html).not.toContain('content="noindex"');
+  });
+
+  it("redirects non-canonical tag queries and marks empty tag pages noindex", async () => {
+    const dependencies = taggedDependenciesV1();
+    const hashed = await handleStudioPublicContentRequestV1(
+      requestV1("/ja/articles?tag=%23%EF%BC%B0%EF%BC%B6%20%20loop"),
+      dependencies,
+    );
+    expect(hashed.status).toBe(308);
+    expect(hashed.headers.get("location")).toBe("https://www.circleheart.dev/ja/articles?tag=PV+loop");
+    const blank = await handleStudioPublicContentRequestV1(requestV1("/ja/articles?tag=%20"), dependencies);
+    expect(blank.status).toBe(308);
+    expect(blank.headers.get("location")).toBe("https://www.circleheart.dev/ja/articles");
+    const missing = await handleStudioPublicContentRequestV1(requestV1("/ja/articles?tag=unknown"), dependencies);
+    expect(missing.status).toBe(200);
+    const missingHtml = await missing.text();
+    expect(missingHtml).toContain('<meta name="robots" content="noindex" />');
+    expect(missingHtml).toContain("このタグの公開記事はありません。");
+  });
+
+  it("lists tag pages with published Articles in the sitemap", async () => {
+    const sitemap = await (await handleStudioPublicContentRequestV1(
+      requestV1("/sitemap.xml"),
+      taggedDependenciesV1(),
+    )).text();
+    expect(sitemap).toContain("<loc>https://www.circleheart.dev/ja/articles?tag=PV+loop</loc>");
+    expect(sitemap).toContain("<loc>https://www.circleheart.dev/en/articles?tag=PV+loop</loc>");
+    expect(sitemap).toContain("?tag=%E5%89%8D%E8%B2%A0%E8%8D%B7</loc>");
+    expect(sitemap.match(/tag=PV\+loop/g)).toHaveLength(2);
+  });
+
+  it("rejects public projections whose tags the database would not store", () => {
+    expect(() => validateStudioPublishedArticleV1({ ...publishedArticleV1(), tags: ["a", "a"] }))
+      .toThrow(/tags/);
+    const { tags: _omitted, ...withoutTags } = publishedArticleV1();
+    expect(() => validateStudioPublishedArticleV1(withoutTags)).toThrow(/keys must be exactly/);
+  });
+});
+
 function publishedArticleV1(): StudioPublishedArticleV1 {
   return validateStudioPublishedArticleV1({
     schemaId: STUDIO_PUBLISHED_ARTICLE_V1_SCHEMA_ID,
+    tags: [],
     articleId: "11111111-1111-4111-8111-111111111111",
     articleContentId: "22222222-2222-4222-8222-222222222222",
     publicSlug: "what-determines-blood-pressure",
@@ -758,6 +868,7 @@ function dependenciesV1() {
         locale: article.locale,
         title: article.title,
         excerpt: "血圧は何で決まるでしょうか。",
+        tags: [],
         publicSlug: article.publicSlug,
         publishedAt: article.publishedAt,
       }]),

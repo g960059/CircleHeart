@@ -91,7 +91,7 @@ export async function prepareAuthoredModelSuccessorV1(input: Readonly<{
     if (!changed) continue;
     const article_content_id = id(); articleContentIds.set(old.article_content_id, article_content_id);
     validateStudioArticleDraftV2({ schemaId: "circleheart-studio-article-draft-v2", articleId: article_content_id,
-      draftVersion: 0, visibility: "draft", locale: old.locale, title: old.title, blocks });
+      draftVersion: 0, visibility: "draft", locale: old.locale, title: old.title, tags: old.tags, blocks });
     articleContents.push({ ...old, article_content_id, blocks, created_at: now });
   }
   const required = (map: Map<string, string>, value: string) => {

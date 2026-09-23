@@ -448,6 +448,37 @@ describe("Studio authoring command V1", () => {
     })).toThrow(/keys must be exactly/);
   });
 
+  it("carries canonical Article tags through discovery, save and block patches", async () => {
+    const description = describeStudioAuthoringProtocolV1();
+    const save = description.actions.find(({ action }) => action === "article.save");
+    const tagSchema = JSON.stringify(save);
+    expect(tagSchema).toContain('"tags"');
+    expect(tagSchema).toContain('"maxItems":5');
+    const command = articleSaveCommandV1();
+    expect(() => validateStudioAuthoringCommandV1({
+      ...command,
+      input: { ...command.input, article: { ...command.input.article, tags: ["#pv"] } },
+    })).toThrow(/tags/);
+    const tagged = { ...articleV1(), tags: ["前負荷", "PV loop"] };
+    const repository = repositoryV1();
+    vi.mocked(repository.readArticle).mockResolvedValue(tagged);
+    vi.mocked(repository.saveArticle).mockImplementation(async ({ article }) => article);
+    await expect(executeStudioAuthoringCommandV1(repository, modelsV1(), {
+      schemaId: STUDIO_AUTHORING_COMMAND_V1_SCHEMA_ID,
+      commandId: "15151515-1515-4515-8515-151515151515",
+      action: "article.blocks.patch",
+      input: {
+        articleId: "article/pv-loop",
+        expectedVersion: 2,
+        title: null,
+        operations: [{ operation: "remove", blockId: "block/equation" }],
+      },
+    })).resolves.toMatchObject({ tags: ["前負荷", "PV loop"] });
+    expect(repository.saveArticle).toHaveBeenCalledWith(expect.objectContaining({
+      article: expect.objectContaining({ tags: ["前負荷", "PV loop"] }),
+    }));
+  });
+
   it("executes through a repository port with an optional policy seam", async () => {
     const repository = repositoryV1();
     const authorize = vi.fn();
@@ -830,6 +861,7 @@ function articleSaveCommandV1() {
 function articleV1() {
   return {
     schemaId: STUDIO_ARTICLE_DRAFT_V2_SCHEMA_ID,
+    tags: [],
     articleId: "article/pv-loop",
     draftVersion: 2,
     visibility: "draft" as const,

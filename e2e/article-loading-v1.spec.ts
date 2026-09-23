@@ -31,7 +31,7 @@ async function isolate(page: Page) {
     if (path.endsWith("list_public_article_summaries_v1")) return route.fulfill({ headers, json: {
       items: [{ articleId: article.articleId, articleContentId: article.articleContentId,
         publicSlug: article.publicSlug, locale: article.locale, title: article.title,
-        excerpt: "本文を先に読む", publishedAt: article.publishedAt, updatedAt: article.updatedAt }], nextCursor: null,
+        excerpt: "本文を先に読む", tags: article.tags, publishedAt: article.publishedAt, updatedAt: article.updatedAt }], nextCursor: null,
     } });
     if (path.endsWith("list_public_experiment_summaries_v1")) return route.fulfill({ headers, json: { items: [], nextCursor: null } });
     if (path.endsWith("list_courses_v1")) return route.fulfill({ headers, json: [] });

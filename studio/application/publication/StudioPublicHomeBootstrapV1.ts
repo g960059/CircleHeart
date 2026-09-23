@@ -6,6 +6,7 @@ import {
   validatePublicCourseV1,
   type PublicCourseV1,
 } from "@/studio/application/course/StudioCourseV1";
+import { articleTagsV1 } from "@/studio/application/article/StudioArticleTagsV1";
 export const STUDIO_PUBLIC_HOME_BOOTSTRAP_V1_SCHEMA_ID =
   "circleheart-public-home-bootstrap-v1";
 export const STUDIO_PUBLIC_HOME_BOOTSTRAP_V1_ELEMENT_ID =
@@ -28,6 +29,8 @@ export type StudioPublicArticleSummaryV1 = Readonly<{
   articleId: string;
   locale: string;
   title: string;
+  /** Tags of the live published revision. */
+  tags: readonly string[];
   excerpt: string | null;
   publicSlug: string;
   publishedAt: string;
@@ -162,6 +165,7 @@ function articleSummaryV1(
       "articleId",
       "locale",
       "title",
+      "tags",
       "excerpt",
       "publicSlug",
       "publishedAt",
@@ -179,6 +183,7 @@ function articleSummaryV1(
     articleId: stringV1(entry.articleId, `${path}.articleId`),
     locale,
     title: stringV1(entry.title, `${path}.title`),
+    tags: tagsV1(entry.tags, `${path}.tags`),
     excerpt: nullableStringV1(entry.excerpt, `${path}.excerpt`),
     publicSlug: stringV1(entry.publicSlug, `${path}.publicSlug`),
     publishedAt: timestampV1(entry.publishedAt, `${path}.publishedAt`),
@@ -220,6 +225,14 @@ function experimentSummaryV1(
     modelId: stringV1(entry.modelId, `${path}.modelId`),
     scenarioCount: scenarioCount as number,
   });
+}
+
+function tagsV1(value: unknown, path: string): readonly string[] {
+  try {
+    return articleTagsV1(value, path);
+  } catch (error) {
+    failV1(path, error instanceof Error ? error.message : String(error));
+  }
 }
 
 function recordV1(value: unknown, path: string): Record<string, unknown> {

@@ -35,6 +35,7 @@ export type PublicArticleCatalogItemV3 = Readonly<{
   publicSlug: string;
   locale: string;
   title: string;
+  tags: readonly string[];
   excerpt: string | null;
   publishedAt: string;
 }>;
@@ -111,6 +112,28 @@ export async function readPublicCatalogAsyncV3(): Promise<PublicCatalogV3> {
     articles: articlePage.items,
     experiments: experimentPage.items,
   });
+}
+
+/**
+ * Every public Article of one locale, matching the server-rendered directory.
+ * Tag pages filter this complete list, so they must not stop at one page.
+ */
+export async function readPublicArticleDirectoryAsyncV3(
+  locale: string,
+): Promise<readonly PublicArticleCatalogItemV3[]> {
+  const remote = createStudioSupabaseContentRepositoryV1();
+  if (remote === null) {
+    return publicArticlesForLocaleV3(readPublicCatalogV3().articles, locale);
+  }
+  const articles: PublicArticleCatalogItemV3[] = [];
+  let cursor: StudioSummaryCursorV1 | null = null;
+  for (let pageIndex = 0; pageIndex < 100; pageIndex += 1) {
+    const page = await remote.listPublicArticles({ limit: 100, cursor });
+    articles.push(...page.items.filter((article) => article.locale === locale));
+    if (page.nextCursor === null) return Object.freeze(articles);
+    cursor = page.nextCursor;
+  }
+  throw new Error("Public Article directory exceeded 10,000 entries");
 }
 
 /** The SSR Home projection is authoritative for its initial client handoff. */
@@ -212,6 +235,7 @@ function localPublicArticleSummaryV3(
     publicSlug: article.articleId,
     locale: article.locale,
     title: article.title,
+    tags: article.tags,
     excerpt: publicArticleExcerptV3(article.blocks),
     // Browser fallback has no publication clock; keep its immutable content
     // usable without manufacturing backend provenance.

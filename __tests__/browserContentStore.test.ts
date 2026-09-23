@@ -213,6 +213,7 @@ function articleV3(
 ): StudioArticleDraftV2 {
   return {
     schemaId: STUDIO_ARTICLE_DRAFT_V2_SCHEMA_ID,
+    tags: [],
     articleId: "article/browser-store",
     draftVersion: input.version ?? 0,
     visibility: "draft",
@@ -512,6 +513,30 @@ describe("browser content store", () => {
 
     expect(() => store.listSnapshots()).toThrow(/schema is invalid/);
     expect(() => store.readArticle("article/browser-store")).toThrow(/schema is invalid/);
+  });
+
+  it("leaves an envelope from before required Article tags inert instead of failing the current store", async () => {
+    const storage = new MemoryStorageV3();
+    const retiredKey = "circleheart.studio.browser-content.v9";
+    const preTagArticle = {
+      schemaId: STUDIO_ARTICLE_DRAFT_V2_SCHEMA_ID, articleId: "article/before-tags",
+      draftVersion: 0, visibility: "draft", locale: "ja", title: "Before tags",
+      blocks: [{ blockId: "p", kind: "paragraph", text: "Saved before tags existed." }],
+    };
+    const retired = JSON.stringify({
+      schemaId: "circleheart-studio-browser-content-v9",
+      experiments: [], snapshots: [], articles: [preTagArticle],
+    });
+    storage.setItem(retiredKey, retired);
+    expect(BROWSER_CONTENT_STORE_KEY).not.toBe(retiredKey);
+    const store = new BrowserContentStore(storage);
+    expect(store.listArticles()).toEqual([]);
+    expect(store.listExperiments()).toEqual([]);
+    expect(store.listSnapshots()).toEqual([]);
+    const experiment = experimentV3();
+    const snapshot = store.saveSnapshotCommit(await admittedCommitV3(experiment, { snapshotId: "snapshot/after-tags" }), experiment.content).snapshot;
+    expect(store.saveArticle(articleV3(snapshot)).tags).toEqual([]);
+    expect(storage.getItem(retiredKey)).toBe(retired);
   });
 
   it("reads prose independently of an unavailable embed but still rejects corrupt snapshots and writes", async () => {

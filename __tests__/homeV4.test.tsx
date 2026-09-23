@@ -6,6 +6,7 @@ import { Home } from "@/components/Home";
 import { HomePageV1 } from "@/components/home/HomePageV1";
 import {
   homeItemsV1,
+  homeTopicsV1,
   selectHomeItemsV1,
   HOME_FILTER_V1,
   readHomeBookmarksV1,
@@ -51,6 +52,7 @@ const bootstrap: StudioPublicHomeBootstrapV1 = {
       title: "一拍を読む",
       locale: "ja",
       excerpt: "前負荷とPVループ",
+      tags: [],
       publicSlug: "read-a-beat",
       publishedAt: course.updatedAt,
       author,
@@ -60,6 +62,7 @@ const bootstrap: StudioPublicHomeBootstrapV1 = {
       title: "Community PV loop",
       locale: "ja",
       excerpt: null,
+      tags: [],
       publicSlug: "community-pv-loop",
       publishedAt: course.updatedAt,
       author: otherAuthor,
@@ -314,5 +317,69 @@ describe("Home discovery", () => {
         description: "",
       }),
     ).toBe("filling");
+  });
+});
+describe("Home topics", () => {
+  const tagged: StudioPublicHomeBootstrapV1 = {
+    ...bootstrap,
+    articles: [
+      { ...bootstrap.articles[0], tags: ["前負荷", "PV loop"] },
+      { ...bootstrap.articles[1], tags: ["pv loop", "心不全"] },
+      {
+        ...bootstrap.articles[1],
+        articleId: "afterload-article",
+        title: "後負荷の読み方",
+        publicSlug: "afterload",
+        tags: ["後負荷"],
+      },
+    ],
+  };
+  it("derives topics from loaded Article tags and groups spellings case-insensitively", () => {
+    const topics = homeTopicsV1(homeItemsV1(tagged), "ja");
+    expect(topics[0]).toMatchObject({ key: "pv loop", count: 2 });
+    expect(topics.map((topic) => topic.key)).toEqual(
+      expect.arrayContaining(["前負荷", "心不全", "後負荷"]),
+    );
+  });
+  it("narrows discovery to tagged Articles, including grouped course chapters", () => {
+    const items = homeItemsV1(tagged);
+    const byTag = selectHomeItemsV1(items, { ...HOME_FILTER_V1, tag: "PV LOOP" });
+    expect(byTag.map((item) => item.id).sort()).toEqual(
+      [course.entries[0].articleId, "community-article"].sort(),
+    );
+    expect(byTag.every((item) => item.kind === "article")).toBe(true);
+    expect(
+      selectHomeItemsV1(items, { ...HOME_FILTER_V1, query: "#心不全" }).map((item) => item.id),
+    ).toEqual(["community-article"]);
+  });
+  it("renders topic and card tags as crawlable tag-page links before the app starts", () => {
+    const html = renderToStaticMarkup(
+      <HomePageV1 locale="ja" data={validateStudioPublicHomeBootstrapV1(tagged)} staticRender />,
+    );
+    expect(html).toContain('class="home-topics"');
+    expect(html).toContain('href="/ja/articles?tag=%E5%BE%8C%E8%B2%A0%E8%8D%B7"');
+    expect(html).toContain("home-card-tags");
+  });
+  it("offers a filtered interactive state with a route to the full tag page", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <HomePageV1
+          locale="ja"
+          data={tagged}
+          filter={{ ...HOME_FILTER_V1, tag: "後負荷" }}
+          onFilter={() => undefined}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).toMatch(/<button[^>]*class="home-topic"[^>]*aria-pressed="true"/);
+    expect(html).toContain("#後負荷 の記事をすべて見る");
+    expect(html).toContain("後負荷の読み方");
+    expect(html).not.toContain("Community PV loop");
+  });
+  it("rejects non-canonical tags in the public Home handoff", () => {
+    expect(() => validateStudioPublicHomeBootstrapV1({
+      ...tagged,
+      articles: [{ ...tagged.articles[0], tags: ["#前負荷"] }],
+    })).toThrow(/tags/);
   });
 });

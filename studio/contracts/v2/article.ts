@@ -132,5 +132,10 @@ export type StudioArticleDraftV2 = Readonly<{
   visibility: StudioArticleVisibilityV2;
   locale: string;
   title: string;
+  /**
+   * Authored discovery tags, stored with this content revision. Publication
+   * exposes them only through the revision its pointer references.
+   */
+  tags: readonly string[];
   blocks: readonly StudioArticleBlockV2[];
 }>;

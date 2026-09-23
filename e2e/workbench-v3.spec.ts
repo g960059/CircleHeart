@@ -434,8 +434,8 @@ test("@desktop @mobile @model-lab @prepared-cycle prepared PV results and saved 
         outputPanes: [], note: { text: "" },
       } },
   };
-  await page.addInitScript(snapshot => localStorage.setItem("circleheart.studio.browser-content.v9", JSON.stringify({
-    schemaId: "circleheart-studio-browser-content-v9", experiments: [], snapshots: [snapshot], articles: [],
+  await page.addInitScript(snapshot => localStorage.setItem("circleheart.studio.browser-content.v10", JSON.stringify({
+    schemaId: "circleheart-studio-browser-content-v10", experiments: [], snapshots: [snapshot], articles: [],
   })), snapshot);
   await page.goto(`/ja/snapshots/${snapshot.snapshotId}`);
   const wave = page.locator('[data-ejection-waveform="true"]').first();

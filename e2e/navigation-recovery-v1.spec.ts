@@ -41,8 +41,8 @@ async function seedManagement(page: Page) {
       { experimentId: "experiment-navigation-draft", title: "前負荷の変化を比べる", publishedSnapshotId: null },
       { experimentId: "experiment-navigation-long", title: "圧と容積の関係から考える、収縮性・後負荷・前負荷の違い", publishedSnapshotId: null },
     ];
-    localStorage.setItem("circleheart.studio.browser-content.v9", JSON.stringify({
-      schemaId: "circleheart-studio-browser-content-v9",
+    localStorage.setItem("circleheart.studio.browser-content.v10", JSON.stringify({
+      schemaId: "circleheart-studio-browser-content-v10",
       experiments: records.map(({ experimentId }) => ({ schemaId: "circleheart-studio-experiment-v2", experimentId, version: 1, content })),
       snapshots: [snapshot], articles: [],
     }));
@@ -134,7 +134,7 @@ test("@desktop @mobile simulation management distinguishes editing from its publ
   page.once("dialog", dialog => dialog.accept());
   await published.getByRole("button", { name: "シミュレーションを削除" }).click();
   await expect(list.getByRole("listitem")).toHaveCount(2);
-  expect(await page.evaluate(id => JSON.parse(localStorage.getItem("circleheart.studio.browser-content.v9")!).snapshots.some((snapshot: { snapshotId: string }) => snapshot.snapshotId === id), snapshotId)).toBe(true);
+  expect(await page.evaluate(id => JSON.parse(localStorage.getItem("circleheart.studio.browser-content.v10")!).snapshots.some((snapshot: { snapshotId: string }) => snapshot.snapshotId === id), snapshotId)).toBe(true);
 });
 
 test("@desktop @mobile Back returns from saved and published simulations to management, including after reload", async ({ page }) => {

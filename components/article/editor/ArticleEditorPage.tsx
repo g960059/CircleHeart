@@ -53,6 +53,12 @@ import {
 } from "@/components/article/editor/ArticleEditorRichBlocksV3";
 import { articleEditorErrorMessageV3 } from "@/components/article/editor/ArticleEditorUtilitiesV3";
 import {
+  ArticleEditorTagsV1,
+  mergeArticleTagSuggestionsV1,
+  type ArticleEditorTagsHandleV1,
+  type ArticleEditorTagSuggestionV1,
+} from "@/components/article/editor/ArticleEditorTagsV1";
+import {
   ARTICLE_EDITOR_PEEK_FRACTION_STORAGE_KEY_V3,
   ARTICLE_EDITOR_PEEK_MAX_FRACTION_V3,
   ARTICLE_EDITOR_PEEK_MIN_FRACTION_V3,
@@ -86,6 +92,7 @@ import {
 } from "@/studio/infrastructure/browser/BrowserContentStore";
 import {
   createStudioSupabaseContentRepositoryV1,
+  listAllMyArticleSummariesV1,
 } from "@/studio/infrastructure/supabase/StudioSupabaseContentRepositoryV1";
 import {
   createArticleExperimentSessionTokenV3,
@@ -188,6 +195,10 @@ export function ArticleEditorPage() {
     initialArticleEditorPeekFractionV3,
   );
   const [peekMaximized, setPeekMaximized] = React.useState(false);
+  const tagFieldRef = React.useRef<ArticleEditorTagsHandleV1 | null>(null);
+  const [tagSuggestions, setTagSuggestions] = React.useState<
+    readonly ArticleEditorTagSuggestionV1[]
+  >([]);
 
   const saveRouteKey = articleEditorRouteKeyV3(routeArticleId);
   React.useLayoutEffect(() => {
@@ -379,6 +390,35 @@ export function ArticleEditorPage() {
     hydratedRouteKey,
     routeArticleId,
   );
+
+  // Suggest the shared public vocabulary of the draft's language plus the
+  // author's own tags, so one topic keeps one spelling across Articles.
+  const draftLocale = draft.locale;
+  React.useEffect(() => {
+    let current = true;
+    const load = async () => {
+      const [publicTags, ownTagLists] = remoteRepository === null
+        ? [[], store.listArticles()
+            .filter((article) => article.locale === draftLocale)
+            .map((article) => article.tags)]
+        : await Promise.all([
+            draftLocale === "ja" || draftLocale === "en"
+              ? remoteRepository.listPublicArticleTags(draftLocale).catch(() => [])
+              : Promise.resolve([]),
+            listAllMyArticleSummariesV1(remoteRepository)
+              .then((items) => items
+                .filter((article) => article.locale === draftLocale)
+                .map((article) => article.tags))
+              .catch(() => []),
+          ]);
+      const merged = mergeArticleTagSuggestionsV1(publicTags, ownTagLists, draftLocale);
+      if (current) setTagSuggestions(merged);
+    };
+    void load();
+    return () => {
+      current = false;
+    };
+  }, [draftLocale, remoteRepository, store]);
 
   React.useLayoutEffect(() => {
     const element = titleRef.current;
@@ -1201,6 +1241,11 @@ export function ArticleEditorPage() {
           open={publishMenuOpen}
           saving={status === "saving"}
           visibility={draft.visibility}
+          tags={draft.tags}
+          onEditTags={() => {
+            setPublishMenuOpen(false);
+            window.requestAnimationFrame(() => tagFieldRef.current?.focus());
+          }}
           onToggleOpen={() => {
             setInsertMenu(null);
             setBlockMenuId(null);
@@ -1262,6 +1307,13 @@ export function ArticleEditorPage() {
             placeholder={t("articleEditor.titlePlaceholder")}
             aria-label={t("articleEditor.title")}
             className="article-title article-editor-title block w-full resize-none overflow-hidden bg-transparent outline-none placeholder:text-wb-subtle"
+          />
+          <ArticleEditorTagsV1
+            ref={tagFieldRef}
+            tags={draft.tags}
+            suggestions={tagSuggestions}
+            disabled={!routeHydrated}
+            onChange={(tags) => updateDraft((current) => ({ ...current, tags }))}
           />
 
           {error !== null && (
