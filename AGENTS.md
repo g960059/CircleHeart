@@ -23,3 +23,8 @@ dependencies and regression coverage required by the current model and Surface.
 Compose model documentation from reusable versioned modules, not per-mint
 page implementations. Preserve self-contained historical documents and
 assessments independently of retired code.
+
+For article-content work only (planning, writing, revising, or reviewing articles
+and their figures or embedded experiments), read [Article authoring](docs/article-authoring.md)
+before starting. Do not load it for unrelated tasks. Follow its further
+references only as needed for the current authoring step.
