@@ -433,7 +433,7 @@ async function typography() {
     { id: "snapshot/dev-typography-two-panes", panes: [{ paneId: "output-baseline", label: "基準" }, { paneId: "output-valves", label: "弁関連", outputs: "valves" }] },
   ];
   const seedVariants = (page) => page.evaluate((variants) => {
-    const key = "circleheart.studio.browser-content.v9";
+    const key = "circleheart.studio.browser-content.v10";
     const store = JSON.parse(localStorage.getItem(key));
     const source = store.snapshots.find((s) => s.snapshotId === "snapshot/dev-article-embed-study-v3");
     const valveItems = source.content.surface.outputPanes.find((p) => p.paneId === "output-valves-tbv-plus-1000").items;

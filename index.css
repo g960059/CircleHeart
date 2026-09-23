@@ -3744,7 +3744,8 @@ button.article-tag-compact[aria-pressed="true"]:hover:not(:disabled) {
   transition: color 150ms, background-color 150ms;
 }
 .article-editor-tag button:hover:not(:disabled) { color: var(--wb-text); background: var(--article-tag-fill-strong); }
-.article-editor-tag button:focus-visible { color: var(--wb-text); outline: 2px solid var(--wb-accent); outline-offset: 1px; }
+/* "Edit tags" may land here after a mouse click, so focus is always shown. */
+.article-editor-tag button:focus { color: var(--wb-text); outline: 2px solid var(--wb-accent); outline-offset: 1px; }
 .article-editor-tag button svg { width: 0.75rem; height: 0.75rem; }
 .article-editor-tag-input { position: relative; flex: 1 1 10rem; min-width: 8rem; }
 .article-editor-tag-input input {

@@ -22,6 +22,7 @@ import {
 import { articleTagHref } from "@/homeLinks";
 import {
   ArticleEditorTagsV1,
+  mergeArticleTagSuggestionsV1,
   selectArticleTagSuggestionsV1,
 } from "@/components/article/editor/ArticleEditorTagsV1";
 import { ArticlePublishMenuV3 } from "@/components/article/editor/ArticleEditorChromeV3";
@@ -1279,6 +1280,19 @@ describe("Article tags", () => {
       .toEqual(["前負荷", "負荷試験", "PV loop"]);
     expect(selectArticleTagSuggestionsV1(suggestions, [], "負荷").map((entry) => entry.tag))
       .toEqual(["負荷試験", "前負荷", "後負荷"]);
+  });
+
+  it("merges public and own tags without double-counting one Article", () => {
+    const merged = mergeArticleTagSuggestionsV1(
+      [{ tag: "PV loop", articleCount: 1 }, { tag: "pv loop", articleCount: 1 }, { tag: "前負荷", articleCount: 3 }],
+      [["PV LOOP"], ["後負荷"]],
+      "ja",
+    );
+    expect(merged).toEqual([
+      { tag: "PV loop", key: "pv loop", publicCount: 1, mine: true },
+      { tag: "前負荷", key: "前負荷", publicCount: 3, mine: false },
+      { tag: "後負荷", key: "後負荷", publicCount: 0, mine: true },
+    ]);
   });
 
   it("renders the tag field and the publication tag summary", async () => {

@@ -54,12 +54,10 @@ import {
 import { articleEditorErrorMessageV3 } from "@/components/article/editor/ArticleEditorUtilitiesV3";
 import {
   ArticleEditorTagsV1,
+  mergeArticleTagSuggestionsV1,
+  type ArticleEditorTagsHandleV1,
   type ArticleEditorTagSuggestionV1,
 } from "@/components/article/editor/ArticleEditorTagsV1";
-import {
-  articleTagKeyV1,
-  countArticleTagsV1,
-} from "@/studio/application/article/StudioArticleTagsV1";
 import {
   ARTICLE_EDITOR_PEEK_FRACTION_STORAGE_KEY_V3,
   ARTICLE_EDITOR_PEEK_MAX_FRACTION_V3,
@@ -196,7 +194,7 @@ export function ArticleEditorPage() {
     initialArticleEditorPeekFractionV3,
   );
   const [peekMaximized, setPeekMaximized] = React.useState(false);
-  const tagInputRef = React.useRef<HTMLInputElement | null>(null);
+  const tagFieldRef = React.useRef<ArticleEditorTagsHandleV1 | null>(null);
   const [tagSuggestions, setTagSuggestions] = React.useState<
     readonly ArticleEditorTagSuggestionV1[]
   >([]);
@@ -412,22 +410,8 @@ export function ArticleEditorPage() {
                 .map((article) => article.tags))
               .catch(() => []),
           ]);
-      const merged = new Map<string, ArticleEditorTagSuggestionV1>();
-      // Public tags arrive most used first, so the first spelling of a key wins.
-      for (const entry of publicTags) {
-        const key = articleTagKeyV1(entry.tag);
-        const existing = merged.get(key);
-        merged.set(key, existing === undefined
-          ? { tag: entry.tag, key, publicCount: entry.articleCount, mine: false }
-          : { ...existing, publicCount: existing.publicCount + entry.articleCount });
-      }
-      for (const entry of countArticleTagsV1(ownTagLists, draftLocale)) {
-        const existing = merged.get(entry.key);
-        merged.set(entry.key, existing === undefined
-          ? { tag: entry.tag, key: entry.key, publicCount: 0, mine: true }
-          : { ...existing, mine: true });
-      }
-      if (current) setTagSuggestions(Object.freeze([...merged.values()]));
+      const merged = mergeArticleTagSuggestionsV1(publicTags, ownTagLists, draftLocale);
+      if (current) setTagSuggestions(merged);
     };
     void load();
     return () => {
@@ -1259,10 +1243,7 @@ export function ArticleEditorPage() {
           tags={draft.tags}
           onEditTags={() => {
             setPublishMenuOpen(false);
-            window.requestAnimationFrame(() => {
-              tagInputRef.current?.focus();
-              tagInputRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
-            });
+            window.requestAnimationFrame(() => tagFieldRef.current?.focus());
           }}
           onToggleOpen={() => {
             setInsertMenu(null);
@@ -1327,7 +1308,7 @@ export function ArticleEditorPage() {
             className="article-title article-editor-title block w-full resize-none overflow-hidden bg-transparent outline-none placeholder:text-wb-subtle"
           />
           <ArticleEditorTagsV1
-            ref={tagInputRef}
+            ref={tagFieldRef}
             tags={draft.tags}
             suggestions={tagSuggestions}
             disabled={!routeHydrated}

@@ -381,6 +381,9 @@ $$;
 
 -- Shared vocabulary for authors choosing tags. It counts only live
 -- publications, so a draft tag never becomes discoverable through it.
+-- Tags are grouped case-insensitively like every public tag surface, and
+-- articleCount is the number of distinct live Articles: one Article tagged
+-- both "PV loop" and "pv loop" counts once, shown in the most used spelling.
 create function public.list_public_article_tags_v1(
   p_locale text,
   p_limit integer default 100
@@ -406,15 +409,17 @@ begin
   ) order by ranked.article_count desc, ranked.tag), '[]'::jsonb)
   into result_body
   from (
-    select tag.value as tag, count(*) as article_count
+    select
+      mode() within group (order by tag.value) as tag,
+      count(distinct p.article_id) as article_count
     from studio.article_publications p
     join studio.articles a on a.article_id = p.article_id
     join studio.article_contents c on c.article_content_id = p.current_content_id
     cross join lateral unnest(c.tags) as tag(value)
     where a.deleted_at is null
       and c.locale = p_locale
-    group by tag.value
-    order by count(*) desc, tag.value
+    group by pg_catalog.lower(tag.value)
+    order by article_count desc, tag
     limit p_limit
   ) ranked;
   return result_body;

@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(27);
+select plan(28);
 insert into auth.users(id,raw_app_meta_data,raw_user_meta_data,is_anonymous) values
  ('e1000000-0000-0000-0000-000000000001','{}','{}',false),
  ('e1000000-0000-0000-0000-000000000002','{}','{}',false);
@@ -47,6 +47,17 @@ select is(public.list_public_article_tags_v1('ja'),'[{"tag":"PV loop","articleCo
 select is(public.list_public_article_tags_v1('en'),'[]'::jsonb,'Tag vocabulary is locale scoped');
 select throws_ok($$select public.list_public_article_tags_v1('fr')$$,'22023',null,'Unsupported tag locale is rejected');
 reset role;
+
+-- One Article may carry two spellings of one tag; the vocabulary counts Articles.
+select set_config('request.jwt.claims','{"sub":"e1000000-0000-0000-0000-000000000001","role":"authenticated","is_anonymous":false}',true);
+insert into tag_test values('variants',public.save_article_v1(gen_random_uuid(),null,null,'ja','Variants','[{"kind":"paragraph","blockId":"p","text":"Loops"}]',array['pv loop','PV loop','前負荷']));
+select public.publish_article_v1(gen_random_uuid(),((select value->>'articleId' from tag_test where key='variants'))::uuid,0,'tagged-variants');
+select set_config('request.jwt.claims','{}',true);
+set local role anon;
+select is(public.list_public_article_tags_v1('ja'),'[{"tag":"PV loop","articleCount":2},{"tag":"前負荷","articleCount":2}]'::jsonb,'Vocabulary counts distinct Articles per case-insensitive tag');
+reset role;
+select set_config('request.jwt.claims','{"sub":"e1000000-0000-0000-0000-000000000001","role":"authenticated","is_anonymous":false}',true);
+select public.unpublish_article_v1(gen_random_uuid(),((select value->>'articleId' from tag_test where key='variants'))::uuid,0);
 
 select set_config('request.jwt.claims','{"sub":"e1000000-0000-0000-0000-000000000001","role":"authenticated","is_anonymous":false}',true);
 select public.unpublish_article_v1(gen_random_uuid(),((select value->>'articleId' from tag_test where key='saved'))::uuid,1);

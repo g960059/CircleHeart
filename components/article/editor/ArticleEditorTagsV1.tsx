@@ -8,6 +8,7 @@ import {
   articleHasTagV1,
   articleTagKeyV1,
   articleTagLengthV1,
+  countArticleTagsV1,
   normalizeArticleTagV1,
 } from "@/studio/application/article/StudioArticleTagsV1";
 import { articleEditorInputIsComposingV3 } from "@/components/article/editor/ArticleEditorPolicy";
@@ -23,6 +24,38 @@ export type ArticleEditorTagSuggestionV1 = Readonly<{
 }>;
 
 const SUGGESTION_LIMIT_V1 = 8;
+
+/** Moves the author to the tag field, including when it is at the tag limit. */
+export type ArticleEditorTagsHandleV1 = Readonly<{ focus: () => void }>;
+
+/**
+ * Joins the public vocabulary (distinct live Articles per case-insensitive
+ * tag) with the author's own tags. Should a key still repeat (database and
+ * browser lowercasing can differ for rare scripts), counts are not additive:
+ * one Article may carry both spellings. The first (most used) spelling and
+ * the larger count win.
+ */
+export function mergeArticleTagSuggestionsV1(
+  publicTags: readonly Readonly<{ tag: string; articleCount: number }>[],
+  ownTagLists: Iterable<readonly string[]>,
+  locale: string,
+): readonly ArticleEditorTagSuggestionV1[] {
+  const merged = new Map<string, ArticleEditorTagSuggestionV1>();
+  for (const entry of publicTags) {
+    const key = articleTagKeyV1(entry.tag);
+    const existing = merged.get(key);
+    merged.set(key, existing === undefined
+      ? { tag: entry.tag, key, publicCount: entry.articleCount, mine: false }
+      : { ...existing, publicCount: Math.max(existing.publicCount, entry.articleCount) });
+  }
+  for (const entry of countArticleTagsV1(ownTagLists, locale)) {
+    const existing = merged.get(entry.key);
+    merged.set(entry.key, existing === undefined
+      ? { tag: entry.tag, key: entry.key, publicCount: 0, mine: true }
+      : { ...existing, mine: true });
+  }
+  return Object.freeze([...merged.values()]);
+}
 
 export function selectArticleTagSuggestionsV1(
   suggestions: readonly ArticleEditorTagSuggestionV1[],
@@ -47,7 +80,7 @@ export function selectArticleTagSuggestionsV1(
  * the same publication pointer as the rest of the Article.
  */
 export const ArticleEditorTagsV1 = React.forwardRef<
-  HTMLInputElement,
+  ArticleEditorTagsHandleV1,
   Readonly<{
     tags: readonly string[];
     suggestions: readonly ArticleEditorTagSuggestionV1[];
@@ -65,6 +98,26 @@ export const ArticleEditorTagsV1 = React.forwardRef<
   const [navigated, setNavigated] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
   const full = tags.length >= STUDIO_ARTICLE_TAG_LIMIT_V1;
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const focusInputAfterRemoveRef = React.useRef(false);
+  // At the limit there is no input; the last tag's remove control is the
+  // next editing step, so "edit tags" always lands on something actionable.
+  React.useImperativeHandle(ref, () => ({
+    focus: () => {
+      const target = inputRef.current
+        ?? rootRef.current?.querySelector<HTMLButtonElement>(".article-editor-tag:last-child button")
+        ?? null;
+      rootRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+      target?.focus({ preventScroll: true });
+    },
+  }), []);
+  React.useEffect(() => {
+    // Removing a chip unmounts its focused button; continue in the input.
+    if (!focusInputAfterRemoveRef.current) return;
+    focusInputAfterRemoveRef.current = false;
+    inputRef.current?.focus();
+  }, [tags]);
   const normalizedText = normalizeArticleTagV1(text);
   const tooLong = articleTagLengthV1(normalizedText) > STUDIO_ARTICLE_TAG_MAX_LENGTH_V1;
   const matches = selectArticleTagSuggestionsV1(suggestions, tags, text);
@@ -108,12 +161,14 @@ export const ArticleEditorTagsV1 = React.forwardRef<
     setText(value);
   };
   const remove = (tag: string) => {
+    focusInputAfterRemoveRef.current = true;
     onChange(Object.freeze(tags.filter((candidate) => candidate !== tag)));
     setMessage(null);
   };
 
   return (
     <div
+      ref={rootRef}
       className="article-editor-tags"
       data-testid="article-editor-tags"
       onBlur={(event) => {
@@ -147,7 +202,7 @@ export const ArticleEditorTagsV1 = React.forwardRef<
       ) : (
         <div className="article-editor-tag-input">
           <input
-            ref={ref}
+            ref={inputRef}
             type="text"
             role="combobox"
             value={text}
