@@ -36,6 +36,9 @@ export function successorBackupFixtureV1(): AuthoredModelBackupV1 {
   };
 }
 
+// Local database container for the opt-in SQL round trips; CI keeps the default.
+const SUCCESSOR_SQL_CONTAINER_V1 = process.env.CIRCLEHEART_TEST_SUCCESSOR_SQL_CONTAINER ?? "supabase_db_circleheart";
+
 describe("explicit authored-state model succession", () => {
   it.skipIf(process.env.CIRCLEHEART_TEST_SUCCESSOR_SQL !== "1")("round-trips the generated transaction on local PostgreSQL and rejects stale rollback", async () => {
     const backup = successorBackupFixtureV1();
@@ -44,7 +47,8 @@ describe("explicit authored-state model succession", () => {
       : Array.isArray(value) ? `[${value.map(jsonbText).join(", ")}]`
         : `{${Object.entries(value).map(([key, v]) => `${JSON.stringify(key)}: ${jsonbText(v)}`).join(", ")}}`;
     for (const row of backup.contents) row.content_size_bytes = Buffer.byteLength(jsonbText(row.content));
-    for (const row of backup.articleContents) row.content_size_bytes = Buffer.byteLength(jsonbText(row.blocks) + row.title + row.locale);
+    // Mirrors studio.set_jsonb_size_v1, including the JSON-encoded tags.
+    for (const row of backup.articleContents) row.content_size_bytes = Buffer.byteLength(jsonbText(row.blocks) + row.title + row.locale + jsonbText(row.tags));
     const plan = await prepareAuthoredModelSuccessorV1({ backup, fromModelId: "model/successor-before", toModelId: "model/successor-after", admit: async () => {} });
     const sql = authoredModelSuccessorSqlV1(plan, "a".repeat(64));
     const quote = (value: string) => {
@@ -108,7 +112,7 @@ rollback;`;
     const directory = mkdtempSync(join(tmpdir(), "circleheart-successor-sql-")), path = join(directory, "test.sql");
     writeFileSync(path, script, { mode: 0o600 });
     for (const strings of ["on", "off"]) expect(() => execFileSync("docker", ["exec", "-i", "-e",
-      `PGOPTIONS=-c statement_timeout=120000 -c standard_conforming_strings=${strings}`, "supabase_db_circleheart", "psql", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1"],
+      `PGOPTIONS=-c statement_timeout=120000 -c standard_conforming_strings=${strings}`, SUCCESSOR_SQL_CONTAINER_V1, "psql", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1"],
     { input: script, maxBuffer: 1024 * 1024, encoding: "utf8" })).not.toThrow();
   }, 90_000);
 
@@ -116,7 +120,7 @@ rollback;`;
     const sql = authoredSuccessorSingleStatementV1("begin;\nselect pg_sleep(0.1);\ncommit;\n");
     let failure: any;
     try {
-      execFileSync("docker", ["exec", "-i", "-e", "PGOPTIONS=-c statement_timeout=10", "supabase_db_circleheart", "psql", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1"],
+      execFileSync("docker", ["exec", "-i", "-e", "PGOPTIONS=-c statement_timeout=10", SUCCESSOR_SQL_CONTAINER_V1, "psql", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1"],
         { input: sql, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
     } catch (error) { failure = error; }
     expect(failure?.stderr).toContain("canceling statement due to statement timeout");
