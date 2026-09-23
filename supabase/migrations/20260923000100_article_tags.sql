@@ -428,3 +428,118 @@ $$;
 
 revoke all on function public.list_public_article_tags_v1(text, integer) from public;
 grant execute on function public.list_public_article_tags_v1(text, integer) to anon, authenticated;
+
+-- Tags are persisted Article revision bytes. Both the per-revision size and
+-- the anonymous storage quota measure them with the same JSON encoding as
+-- blocks, so neither ceiling can be exceeded by the tag payload.
+CREATE OR REPLACE FUNCTION "studio"."set_jsonb_size_v1"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    SET "search_path" TO ''
+    AS $$
+begin
+  if tg_table_name = 'experiment_contents' then
+    new.content_size_bytes := octet_length(new.content::text);
+  elsif tg_table_name = 'article_contents' then
+    new.content_size_bytes := octet_length(new.blocks::text)
+      + octet_length(new.title)
+      + octet_length(new.locale)
+      + octet_length(to_jsonb(new.tags)::text);
+  else
+    raise exception 'unsupported JSONB size trigger target %', tg_table_name;
+  end if;
+  return new;
+end;
+$$;
+
+CREATE OR REPLACE FUNCTION "studio"."enforce_anonymous_storage_quota_v1"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO ''
+    AS $$
+declare
+  actor uuid;
+  row_data jsonb := pg_catalog.to_jsonb(new);
+  experiment_content_count bigint;
+  article_content_count bigint;
+  snapshot_count bigint;
+  live_experiment_count bigint;
+  live_article_count bigint;
+  stored_bytes bigint;
+  incoming_bytes bigint := 0;
+begin
+  if not coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false) then
+    return new;
+  end if;
+
+  actor := coalesce(
+    nullif(row_data ->> 'created_by', '')::uuid,
+    nullif(row_data ->> 'owner_id', '')::uuid
+  );
+  if actor is null then
+    raise exception 'Anonymous storage quota row has no owner'
+      using errcode = '23502';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      'studio:anonymous-storage-quota:' || actor::text,
+      0
+    )
+  );
+
+  select count(*), coalesce(sum(content_size_bytes), 0)
+  into experiment_content_count, stored_bytes
+  from studio.experiment_contents
+  where created_by = actor;
+  select count(*), stored_bytes + coalesce(sum(content_size_bytes), 0)
+  into article_content_count, stored_bytes
+  from studio.article_contents
+  where owner_id = actor;
+  select count(*), stored_bytes + coalesce(sum(pg_catalog.octet_length(reader_preview::text)), 0)
+  into snapshot_count, stored_bytes
+  from studio.experiment_snapshots
+  where owner_id = actor;
+  select count(*) into live_experiment_count
+  from studio.experiments
+  where owner_id = actor and deleted_at is null;
+  select count(*) into live_article_count
+  from studio.articles
+  where owner_id = actor and deleted_at is null;
+
+  if tg_table_name = 'experiment_contents' then
+    incoming_bytes := pg_catalog.octet_length((row_data -> 'content')::text);
+    if experiment_content_count >= 200 then
+      raise exception 'Anonymous Experiment revision limit reached. Sign in to keep saving.'
+        using errcode = '54000';
+    end if;
+  elsif tg_table_name = 'article_contents' then
+    incoming_bytes := pg_catalog.octet_length((row_data -> 'blocks')::text)
+      + pg_catalog.octet_length(row_data ->> 'title')
+      + pg_catalog.octet_length(row_data ->> 'locale')
+      + pg_catalog.octet_length((row_data -> 'tags')::text);
+    if article_content_count >= 200 then
+      raise exception 'Anonymous Article revision limit reached. Sign in to keep saving.'
+        using errcode = '54000';
+    end if;
+  elsif tg_table_name = 'experiment_snapshots' then
+    incoming_bytes := coalesce(pg_catalog.octet_length(
+      nullif(row_data -> 'reader_preview', 'null'::jsonb)::text
+    ), 0);
+    if snapshot_count >= 100 then
+      raise exception 'Anonymous Snapshot limit reached. Sign in to keep saving.'
+        using errcode = '54000';
+    end if;
+  elsif tg_table_name = 'experiments' and live_experiment_count >= 20 then
+    raise exception 'Anonymous Experiment limit reached. Sign in to keep saving.'
+      using errcode = '54000';
+  elsif tg_table_name = 'articles' and live_article_count >= 20 then
+    raise exception 'Anonymous Article limit reached. Sign in to keep saving.'
+      using errcode = '54000';
+  end if;
+
+  if stored_bytes + incoming_bytes > 67108864 then
+    raise exception 'Anonymous storage limit reached. Sign in to keep saving.'
+      using errcode = '54000';
+  end if;
+  return new;
+end;
+$$;

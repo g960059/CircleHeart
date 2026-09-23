@@ -22,9 +22,7 @@ import {
 } from "@/studio/infrastructure/browser/BrowserContentStore";
 import {
   createStudioSupabaseContentRepositoryV1,
-  type StudioRemoteArticleSummaryV1,
-  type StudioSummaryCursorV1,
-  type StudioSupabaseContentRepositoryV1,
+  listAllMyArticleSummariesV1,
 } from "@/studio/infrastructure/supabase/StudioSupabaseContentRepositoryV1";
 import {
   articleHasTagV1,
@@ -94,21 +92,6 @@ export function selectArticleLibraryItemsV3(
       .includes(query)));
 }
 
-/** Management needs every owned Article to count and filter tags honestly. */
-async function listAllMyArticlesV3(
-  repository: Pick<StudioSupabaseContentRepositoryV1, "listMyArticles">,
-): Promise<readonly StudioRemoteArticleSummaryV1[]> {
-  const items: StudioRemoteArticleSummaryV1[] = [];
-  let cursor: StudioSummaryCursorV1 | null = null;
-  for (let pageIndex = 0; pageIndex < 100; pageIndex += 1) {
-    const page = await repository.listMyArticles({ limit: 100, cursor });
-    items.push(...page.items);
-    if (page.nextCursor === null) return items;
-    cursor = page.nextCursor;
-  }
-  throw new Error("Article management exceeded 10,000 entries");
-}
-
 type ArticleLibraryStateV3 =
   | Readonly<{ kind: "loading" }>
   | Readonly<{ kind: "ready"; items: readonly ArticleLibraryItemV3[] }>
@@ -152,7 +135,7 @@ export function ArticleLibraryPage() {
           tags: article.tags,
           updatedAt: null,
         }))
-      : (await listAllMyArticlesV3(remoteRepository)).map((resource) =>
+      : (await listAllMyArticleSummariesV1(remoteRepository)).map((resource) =>
           Object.freeze({
             articleId: resource.articleId,
             version: resource.version,

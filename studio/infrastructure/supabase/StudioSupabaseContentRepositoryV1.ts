@@ -121,6 +121,24 @@ export type StudioPublicArticleTagCountV1 = Readonly<{
   articleCount: number;
 }>;
 
+/**
+ * Every Article owned by the signed-in author. Management filters and the
+ * editor's own-tag vocabulary must see older Articles too, not one page.
+ */
+export async function listAllMyArticleSummariesV1(
+  repository: Pick<StudioSupabaseContentRepositoryV1, "listMyArticles">,
+): Promise<readonly StudioRemoteArticleSummaryV1[]> {
+  const items: StudioRemoteArticleSummaryV1[] = [];
+  let cursor: StudioSummaryCursorV1 | null = null;
+  for (let pageIndex = 0; pageIndex < 100; pageIndex += 1) {
+    const page = await repository.listMyArticles({ limit: 100, cursor });
+    items.push(...page.items);
+    if (page.nextCursor === null) return Object.freeze(items);
+    cursor = page.nextCursor;
+  }
+  throw new Error("Owned Article listing exceeded 10,000 entries");
+}
+
 export function createStudioSupabaseContentRepositoryV1():
   StudioSupabaseContentRepositoryV1 | null {
   const client = studioSupabaseClientV1();

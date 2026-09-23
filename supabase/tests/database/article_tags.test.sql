@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(28);
+select plan(31);
 insert into auth.users(id,raw_app_meta_data,raw_user_meta_data,is_anonymous) values
  ('e1000000-0000-0000-0000-000000000001','{}','{}',false),
  ('e1000000-0000-0000-0000-000000000002','{}','{}',false);
@@ -65,5 +65,25 @@ select set_config('request.jwt.claims','{}',true);
 set local role anon;
 select is(public.list_public_article_tags_v1('ja'),'[]'::jsonb,'Unpublishing removes tags from public vocabulary');
 reset role;
+
+-- Tags are persisted bytes: per-revision size and the anonymous quota count them.
+select set_config('request.jwt.claims','{"sub":"e1000000-0000-0000-0000-000000000001","role":"authenticated","is_anonymous":false}',true);
+select is(
+  (select content_size_bytes from studio.article_contents c join studio.articles a on a.current_draft_content_id = c.article_content_id
+    where a.article_id = ((select value->>'articleId' from tag_test where key='saved'))::uuid),
+  (select octet_length(c.blocks::text) + octet_length(c.title) + octet_length(c.locale) + octet_length(to_jsonb(c.tags)::text)
+    from studio.article_contents c join studio.articles a on a.current_draft_content_id = c.article_content_id
+    where a.article_id = ((select value->>'articleId' from tag_test where key='saved'))::uuid)::bigint,
+  'Revision size includes the encoded tags');
+insert into auth.users(id,raw_app_meta_data,raw_user_meta_data,is_anonymous) values
+ ('e1000000-0000-0000-0000-000000000003','{}','{}',true);
+-- 32 revisions of 2,097,000 bytes leave exactly 4,864 bytes of the 64 MiB budget.
+insert into studio.article_contents(owner_id,locale,title,blocks)
+select 'e1000000-0000-0000-0000-000000000003','ja','F',jsonb_build_array(repeat('x',2096991)) from generate_series(1,32);
+select set_config('request.jwt.claims','{"sub":"e1000000-0000-0000-0000-000000000003","role":"authenticated","is_anonymous":true}',true);
+-- 4,855 + 4 (blocks) + 1 (title) + 2 (locale) + 2 ("[]") = 4,864: a tagless revision fits exactly.
+select throws_ok($$insert into studio.article_contents(owner_id,locale,title,blocks,tags) values('e1000000-0000-0000-0000-000000000003','ja','T',jsonb_build_array(repeat('x',4855)),array['a'])$$,'54000','Anonymous storage limit reached. Sign in to keep saving.','Anonymous quota counts tag bytes');
+select lives_ok($$insert into studio.article_contents(owner_id,locale,title,blocks,tags) values('e1000000-0000-0000-0000-000000000003','ja','T',jsonb_build_array(repeat('x',4855)),'{}')$$,'The same revision without tags fits the quota exactly');
+select set_config('request.jwt.claims','{}',true);
 select * from finish();
 rollback;

@@ -98,12 +98,24 @@ export function PublicArticleDirectoryPage() {
         index < DIRECTORY_TAG_PREVIEW_LIMIT_V1 || index === activeIndex)
     : tagCounts;
 
+  // The server renders the same titles. Both states set one explicitly, so
+  // clearing a tag never leaves the previous tag page's title behind.
+  const directoryTitle = `${t("management.articles")} | CircleHeart`;
+  const pageTitle = activeTag === null
+    ? directoryTitle
+    : `${t("articleTags.pageTitle", { tag: activeTag })} | CircleHeart`;
+  const entryRef = React.useRef({ title: "", enteredOnTag: tag !== null, directoryTitle });
+  entryRef.current.directoryTitle = directoryTitle;
+  // Declared first so it records the title from before this page set one.
   React.useEffect(() => {
-    if (activeTag === null) return undefined;
-    const previous = document.title;
-    document.title = `${t("articleTags.pageTitle", { tag: activeTag })} | CircleHeart`;
-    return () => { document.title = previous; };
-  }, [activeTag, t]);
+    const entry = entryRef.current;
+    // Entered on a tag URL, the prior title is that tag page's own.
+    entry.title = entry.enteredOnTag ? "" : document.title;
+    return () => { document.title = entry.title || entry.directoryTitle; };
+  }, []);
+  React.useEffect(() => {
+    document.title = pageTitle;
+  }, [pageTitle]);
 
   return (
     <div

@@ -92,6 +92,7 @@ import {
 } from "@/studio/infrastructure/browser/BrowserContentStore";
 import {
   createStudioSupabaseContentRepositoryV1,
+  listAllMyArticleSummariesV1,
 } from "@/studio/infrastructure/supabase/StudioSupabaseContentRepositoryV1";
 import {
   createArticleExperimentSessionTokenV3,
@@ -404,8 +405,8 @@ export function ArticleEditorPage() {
             draftLocale === "ja" || draftLocale === "en"
               ? remoteRepository.listPublicArticleTags(draftLocale).catch(() => [])
               : Promise.resolve([]),
-            remoteRepository.listMyArticles({ limit: 100 })
-              .then((page) => page.items
+            listAllMyArticleSummariesV1(remoteRepository)
+              .then((items) => items
                 .filter((article) => article.locale === draftLocale)
                 .map((article) => article.tags))
               .catch(() => []),

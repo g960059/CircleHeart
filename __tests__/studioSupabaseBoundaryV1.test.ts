@@ -15,6 +15,7 @@ import {
 } from "@/studio/infrastructure/supabase/StudioSupabaseClientV1";
 import {
   StudioSupabaseContentRepositoryV1,
+  listAllMyArticleSummariesV1,
   StudioSupabaseMutationAcknowledgedErrorV1,
 } from "@/studio/infrastructure/supabase/StudioSupabaseContentRepositoryV1";
 import {
@@ -902,6 +903,23 @@ describe("Studio Supabase boundary V1", () => {
       expectedVersion: 4,
       article: { ...draft, tags: ["#前負荷"] },
     })).rejects.toThrow(/tags/);
+  });
+
+  it("pages through every owned Article for management and tag vocabulary", async () => {
+    const summary = (index: number) => Object.freeze({
+      articleId: `article-${index}`, version: 0, visibility: "draft" as const, locale: "ja",
+      title: `Article ${index}`, tags: index === 150 ? Object.freeze(["古いタグ"]) : Object.freeze([]),
+      createdAt: "2026-08-12T00:00:00.000Z", updatedAt: "2026-08-12T00:00:00.000Z", publicSlug: null,
+    });
+    const cursor = { timestamp: "2026-08-12T00:00:00.000Z", id: "a1000000-0000-4000-8000-000000000001" };
+    const listMyArticles = vi.fn()
+      .mockResolvedValueOnce({ items: Array.from({ length: 100 }, (_, i) => summary(i)), nextCursor: cursor })
+      .mockResolvedValueOnce({ items: Array.from({ length: 60 }, (_, i) => summary(100 + i)), nextCursor: null });
+    const items = await listAllMyArticleSummariesV1({ listMyArticles });
+    expect(items).toHaveLength(160);
+    expect(items.some((item) => item.tags.includes("古いタグ"))).toBe(true);
+    expect(listMyArticles).toHaveBeenNthCalledWith(1, { limit: 100, cursor: null });
+    expect(listMyArticles).toHaveBeenNthCalledWith(2, { limit: 100, cursor });
   });
 
   it("uploads immutable Article images below the signed-in owner's folder", async () => {
