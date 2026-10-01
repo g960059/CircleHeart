@@ -95,7 +95,13 @@ export class CardiorespiratorySessionV1 {
       fixture.hemodynamicResearchInputs, 1, fixture.mechanismResearchInputs);
     const cold = this.#coldState();
     if (restored) assertFixedShape(restored.state.cardiorespiratory, cold.cardiorespiratory, "cardiorespiratory checkpoint");
-    const initial = deepFreeze(restored ? restoreNumericalArrays(restored.state, cold) as Composite : cold);
+    const restoredState = restored ? restoreNumericalArrays(restored.state, cold) as Composite : null;
+    // Admit serialized device bindings before choosing the manifest's immutable
+    // roots. Later live candidates reuse these runtime-owned roots; retaining
+    // checkpoint clones here would force a canonical comparison at every step.
+    const initial = deepFreeze(restoredState === null ? cold : { ...restoredState,
+      dynamicMechanicalSupport: restoreDynamicMechanicalSupportAcceptedStateV1(restoredState.dynamicMechanicalSupport,
+        this.#runtime.cold.acceptedState.dynamicMechanicalSupport) });
     const arrays: string[] = [];
     const visit = (v: unknown, path: string) => {
       if (Array.isArray(v)) arrays.push(path);

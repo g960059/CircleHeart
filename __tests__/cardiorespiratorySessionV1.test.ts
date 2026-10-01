@@ -15,6 +15,7 @@ import { createCardiorespiratoryDevReleaseV1 } from '../studio/integrations/card
 import * as pulmonaryExchange from '../engine/cardiorespiratory/PulmonaryGasExchangeV1';
 import * as bloodGasChemistry from '../engine/cardiorespiratory/BloodGasChemistryV1';
 import * as respiratoryMechanics from '../engine/cardiorespiratory/RespiratoryMechanicsV1';
+import { TransactionalTypedStateImageV1 } from '../engine/vnext/TransactionalTypedStateImageV1';
 
 function total(state: CardiorespiratoryStateV1) {
   return [...Object.values(state.blood), ...state.respiratory.unitGasMol, state.respiratory.conductingGasMol, state.systemic.amount, state.myocardium.amount]
@@ -70,6 +71,46 @@ describe('development cardiorespiratory exact session', () => {
     copied.advanceToPresentationTime(0.03);
     expect(copied.snapshotAcceptedStateBytes()).toEqual(original.snapshotAcceptedStateBytes());
     expect(copied.checkpoint()).toEqual(original.checkpoint());
+  });
+  it('binds restored immutable device roots to the runtime-owned roots before repeated accepted staging', () => {
+    const original = run(.002, .006);
+    const checkpoint = JSON.parse(JSON.stringify(original.checkpoint()));
+    const stage = TransactionalTypedStateImageV1.prototype.stage;
+    const matches: { identity: number; canonical: number }[] = [];
+    const monitor = vi.spyOn(TransactionalTypedStateImageV1.prototype, 'stage').mockImplementation(function (
+      this: TransactionalTypedStateImageV1<unknown>, candidate: unknown,
+    ) {
+      const before = this.report();
+      stage.call(this, candidate);
+      const after = this.report();
+      matches.push({ identity: after.externalImmutableIdentityMatchCount - before.externalImmutableIdentityMatchCount,
+        canonical: after.externalImmutableCanonicalMatchCount - before.externalImmutableCanonicalMatchCount });
+    });
+    try {
+      const restored = CardiorespiratorySessionV1.restore(original.fixture, checkpoint);
+      matches.length = 0;
+      restored.advanceToPresentationTime(.016);
+      expect(matches.length).toBeGreaterThanOrEqual(5);
+      expect(matches.every(match => match.identity > 0 && match.canonical === 0), JSON.stringify(matches)).toBe(true);
+      original.advanceToPresentationTime(.016);
+      expect(restored.checkpoint()).toEqual(original.checkpoint());
+    } finally { monitor.mockRestore(); }
+  });
+  it('rejects modified nested device bindings before rebinding a restored checkpoint to trusted runtime roots', () => {
+    const original = run(.002, .006);
+    const checkpoint = () => JSON.parse(JSON.stringify(original.checkpoint()));
+    const alteredInertance = checkpoint();
+    const inertance = alteredInertance.state.dynamicMechanicalSupport.inertanceProfileSnapshot.inertanceByDevice.LVAD;
+    const inertanceKey = Object.keys(inertance).find(key => typeof inertance[key] === 'number')!;
+    expect(inertanceKey).toBeDefined();
+    inertance[inertanceKey] += 1;
+    expect(() => CardiorespiratorySessionV1.restore(original.fixture, alteredInertance)).toThrow(/inertance|profile/i);
+    const alteredHydraulics = checkpoint();
+    alteredHydraulics.state.dynamicMechanicalSupport.structuralHydraulicProjection.byDevice.LVAD.maximumReverseFlowLMin += 1;
+    expect(() => CardiorespiratorySessionV1.restore(original.fixture, alteredHydraulics)).toThrow(/structural|hydraulic/i);
+    const surplus = checkpoint();
+    surplus.state.dynamicMechanicalSupport.structuralHydraulicProjection.byDevice.LVAD.hiddenResistance = 1;
+    expect(() => CardiorespiratorySessionV1.restore(original.fixture, surplus)).toThrow();
   });
   it('preserves all primitive selected outputs immediately after JSON restore and on continuation', () => {
     const outputIds = createCardiorespiratoryDevReleaseV1().manifest.primitiveSignalCatalog.map(output => output.outputId);

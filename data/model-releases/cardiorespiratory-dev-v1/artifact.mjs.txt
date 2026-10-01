@@ -47451,7 +47451,14 @@ var CardiorespiratorySessionV1 = class _CardiorespiratorySessionV1 {
     );
     const cold = this.#coldState();
     if (restored) assertFixedShape(restored.state.cardiorespiratory, cold.cardiorespiratory, "cardiorespiratory checkpoint");
-    const initial = deepFreeze21(restored ? restoreNumericalArrays(restored.state, cold) : cold);
+    const restoredState = restored ? restoreNumericalArrays(restored.state, cold) : null;
+    const initial = deepFreeze21(restoredState === null ? cold : {
+      ...restoredState,
+      dynamicMechanicalSupport: restoreDynamicMechanicalSupportAcceptedStateV1(
+        restoredState.dynamicMechanicalSupport,
+        this.#runtime.cold.acceptedState.dynamicMechanicalSupport
+      )
+    });
     const arrays = [];
     const visit2 = (v, path) => {
       if (Array.isArray(v)) arrays.push(path);
