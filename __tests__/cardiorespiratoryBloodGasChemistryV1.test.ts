@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_BLOOD_GAS_CHEMISTRY_V1,
   bloodGasAmountsFromPressuresV1,
+  bloodGasCo2PressureBoundsV1,
   bloodGasContentsFromPressuresV1,
   bloodGasPressuresFromAmountsV1,
   bloodGasPressuresFromContentsV1,
   oxygenSaturationFromPressureAndPHV1,
+  validateBloodGasContentsV1,
 } from '../engine/cardiorespiratory/BloodGasChemistryV1';
 
 describe('reduced fixed-buffer blood chemistry', () => {
@@ -39,6 +41,65 @@ describe('reduced fixed-buffer blood chemistry', () => {
         const inverse = bloodGasPressuresFromContentsV1(forward, parameters);
         expect(inverse.o2MmHg).toBeCloseTo(o2MmHg, 5);
         expect(inverse.co2MmHg).toBeCloseTo(co2MmHg, 6);
+      }
+    }
+  });
+  it('preserves inversion accuracy across the complete buffer domain and near both pressure bounds', () => {
+    // Includes initial Newton guesses outside the feasible interval and O2 values
+    // requiring the safeguarded search near either end of its pressure bracket.
+    for (const hemoglobinGPerDl of [3, 7.5, 15, 22]) for (const baseExcessMmolPerL of [-10, 0, 10]) {
+      const parameters = { hemoglobinGPerDl, baseExcessMmolPerL };
+      const bounds = bloodGasCo2PressureBoundsV1(parameters);
+      for (const fraction of [0, 1e-12, 1e-7, 0.001, 0.25, 0.75, 1 - 1e-12, 1]) {
+        const co2MmHg = bounds.minimumMmHg + fraction * (bounds.maximumMmHg - bounds.minimumMmHg);
+        for (const o2MmHg of [0, 1e-12, 1e-8, 0.0001, 3, 40, 100, 1000, 2000 - 1e-8, 2000]) {
+          const forward = bloodGasContentsFromPressuresV1({ o2MmHg, co2MmHg }, parameters);
+          const inverse = bloodGasPressuresFromContentsV1(forward, parameters);
+          expect(Math.abs(inverse.o2MmHg - o2MmHg)).toBeLessThanOrEqual(8e-9);
+          expect(Math.abs(inverse.co2MmHg - co2MmHg)).toBeLessThanOrEqual(2e-7);
+          expect(Math.abs(inverse.o2MolPerL - forward.o2MolPerL)).toBeLessThanOrEqual(1.01e-14);
+          expect(Math.abs(inverse.co2MolPerL - forward.co2MolPerL)).toBeLessThanOrEqual(1.01e-14);
+        }
+      }
+    }
+  });
+  it('restricts the inverse search at the O2 ceiling without admitting or clipping impossible inventories', () => {
+    for (const hemoglobinGPerDl of [3, 15, 22]) for (const baseExcessMmolPerL of [-10, 0, 10]) {
+      const parameters = { hemoglobinGPerDl, baseExcessMmolPerL };
+      const bounded = bloodGasContentsFromPressuresV1({ o2MmHg: 2000, co2MmHg: 40 }, parameters);
+      const inverse = bloodGasPressuresFromContentsV1(bounded, parameters);
+      expect(inverse.o2MmHg).toBe(2000);
+      expect(inverse.co2MmHg).toBeCloseTo(40, 7);
+      const withinResidualTolerance = { o2MolPerL: bounded.o2MolPerL, co2MolPerL: bounded.co2MolPerL + 5e-15 };
+      expect(() => validateBloodGasContentsV1(withinResidualTolerance, parameters)).not.toThrow();
+      const near = bloodGasPressuresFromContentsV1(withinResidualTolerance, parameters);
+      expect(near.o2MmHg).toBe(2000);
+      expect(near.co2MmHg).toBeCloseTo(40, 6);
+      // At saturation the representable maximum-O2 content is a small plateau;
+      // stay beyond it as well as beyond the existing CO2 residual tolerance.
+      const impossible = { o2MolPerL: bounded.o2MolPerL, co2MolPerL: bounded.co2MolPerL + 1e-9 };
+      expect(() => validateBloodGasContentsV1(impossible, parameters)).toThrow(RangeError);
+      expect(() => bloodGasPressuresFromContentsV1(impossible, parameters)).toThrow(RangeError);
+      // The global O2 ceiling remains strict, even inside the O2 solver's residual tolerance.
+      const maximum = bloodGasContentsFromPressuresV1({ o2MmHg: 2000, co2MmHg: bloodGasCo2PressureBoundsV1(parameters).minimumMmHg }, parameters);
+      expect(() => bloodGasPressuresFromContentsV1({ o2MolPerL: maximum.o2MolPerL + 5e-15, co2MolPerL: maximum.co2MolPerL }, parameters)).toThrow(RangeError);
+    }
+  });
+  it('retains the declared CO2 endpoint residual tolerance and strict finite-input checks', () => {
+    const parameters = DEFAULT_BLOOD_GAS_CHEMISTRY_V1;
+    const bounds = bloodGasCo2PressureBoundsV1(parameters);
+    for (const [co2MmHg, direction] of [[bounds.minimumMmHg, -1], [bounds.maximumMmHg, 1]]) {
+      const endpoint = bloodGasContentsFromPressuresV1({ o2MmHg: 0, co2MmHg }, parameters);
+      const near = { o2MolPerL: 0, co2MolPerL: endpoint.co2MolPerL + direction * 5e-15 };
+      expect(bloodGasPressuresFromContentsV1(near, parameters)).toEqual(endpoint);
+      const outside = { o2MolPerL: 0, co2MolPerL: endpoint.co2MolPerL + direction * 2e-14 };
+      expect(() => bloodGasPressuresFromContentsV1(outside, parameters)).toThrow(RangeError);
+      expect(() => validateBloodGasContentsV1(outside, parameters)).toThrow(RangeError);
+    }
+    for (const invalid of [-1, NaN, Infinity, -Infinity]) {
+      for (const contents of [{ o2MolPerL: invalid, co2MolPerL: 0.02 }, { o2MolPerL: 0.008, co2MolPerL: invalid }]) {
+        expect(() => bloodGasPressuresFromContentsV1(contents)).toThrow(RangeError);
+        expect(() => validateBloodGasContentsV1(contents)).toThrow(RangeError);
       }
     }
   });

@@ -2,7 +2,7 @@
   "schemaId": "circleheart-local-dev-model-bundle-v1",
   "stage": "dev",
   "ephemeral": true,
-  "sourceTreeHash": "061b1c65f9fa2129a98cb17836d894fb9331bb22e4a0ee9cb6ee58bb007593f0",
+  "sourceTreeHash": "2073c0cd4a4675c741da2fc2e453c61797da3bdfa7143f6358c19053f04fe519",
   "sourceInputs": [
     {
       "path": "analysis/methods/mainWire/MainWireFixedToneSettlementV2.ts",
@@ -38,7 +38,7 @@
     },
     {
       "path": "engine/cardiorespiratory/BloodGasChemistryV1.ts",
-      "sha256": "bfb41992b32fa52e4f741006d29892ebe4a84a678dcef76696c62fbb005a0674"
+      "sha256": "369475c66e620ae78c6bd40266ec4897eec43bea7321aa4f1e410506e07d9149"
     },
     {
       "path": "engine/cardiorespiratory/CardiorespiratoryBloodNetworkV1.ts",
@@ -62,7 +62,7 @@
     },
     {
       "path": "engine/cardiorespiratory/CardiorespiratorySessionV1.ts",
-      "sha256": "fb8ba606968a7347f92c44bdaab7cf7632cc7c0b73b79b95380208f6c858f350"
+      "sha256": "35cc81b08f0ba0e4ff85bbbeec630cb5ddae03bf4c4132d0a789e1a24f13bb7f"
     },
     {
       "path": "engine/cardiorespiratory/ConservativeGasTransportV1.ts",
@@ -218,11 +218,11 @@
     },
     {
       "path": "engine/integrity/canonicalJson.ts",
-      "sha256": "49538b32bdef56eedb260473e235ab2b72bb3738f8fdc437b39da4d5702a448a"
+      "sha256": "48842316674594bf029860ef00b294d3428e680faa951fefeb11072f3c0e5d98"
     },
     {
       "path": "engine/integrity/immutableCanonicalJsonV1.ts",
-      "sha256": "6f981a67e4c007b944cb4268411f1296b97f2dadab6ac011666ec3612cb50057"
+      "sha256": "bea00a48227dab76631cc8e85d8e81f09686e1c4bd346b58802205cf05251081"
     },
     {
       "path": "engine/integrity/index.ts",
@@ -782,7 +782,7 @@
     },
     {
       "path": "studio/integrations/cardiorespiratoryV1/CardiorespiratoryExactModelV1.ts",
-      "sha256": "e44b841188b007869474bfda7f47c765323d8fce6e2bb470f19775e8ea8f6576"
+      "sha256": "df28aa30ac3d77027c9daeb0bcebc20f0b3d4ecb2f1e6861e08a33d1d564b563"
     },
     {
       "path": "studio/integrations/mainWireIntegratedV3/MainWireIntegratedExecutionPlanV1.generated.json",
@@ -821,7 +821,7 @@
       "sha256": "b9343d9ec2469940cb9c972c549165cdea1ade9a90828544599a675ba5eec1b5"
     }
   ],
-  "artifactRevisionId": "ec773c669ebab76cd29957bc2dc7af0cfba086919ecefa1ff5ccea0c57910440",
+  "artifactRevisionId": "e60895184b7a067c72a57ea8ac1bba01ad01ba8898b005e510e06281cd2621a5",
   "manifest": {
     "schemaId": "circleheart-studio-exact-model-kernel-v3",
     "modelId": "circleheart.cardiorespiratory-dev-v1",
@@ -844,6 +844,7 @@
     "runtime": {
       "numericalSessionId": "cardiorespiratory-session-v1",
       "presentationDtSec": 0.002,
+      "hotPathIntegrityTier": "hot-path-lean",
       "acceptedBoundaryCapture": true,
       "scope": "local-development-no-publication",
       "fixtureChangeSemantics": "atomic-warm-edit-anatomy-blood-chemistry-or-respiratory-capacity-cold-restart"

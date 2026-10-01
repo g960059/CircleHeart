@@ -7,6 +7,31 @@ const initialMode = validationStampModeV1();
 afterEach(() => { selectValidationStampModeV1(initialMode); vi.restoreAllMocks(); });
 
 describe("candidate immutable canonical encoding", () => {
+  it("reuses shared immutable settings without trusting new enclosing state", () => {
+    const settings = original.deepFreezeCanonicalJson({ nested: { source: "心臓", coefficients: [1, 2, 3] } });
+    for (const value of [{ tick: 1, settings }, { settings, tick: 2 }, { left: settings, right: settings }]) {
+      expect(cached(value)).toBe(original.canonicalJsonStringify(value));
+    }
+    const enclosing: { settings: typeof settings; tick: number } = { settings, tick: 3 };
+    expect(cached(enclosing)).toBe(original.canonicalJsonStringify(enclosing));
+    enclosing.tick = NaN;
+    expect(() => cached(enclosing)).toThrow('numbers must be finite');
+  });
+
+  it("does not reuse a shallow encoding past the canonical nesting bound", () => {
+    const branch = original.deepFreezeCanonicalJson({ a: { b: 1 } });
+    cached(branch);
+    let nested: unknown = branch;
+    for (let i = 0; i < 254; i++) nested = Object.freeze({ child: nested });
+    expect(cached(nested)).toBe(original.canonicalJsonStringify(nested));
+    const tooDeep = Object.freeze({ child: nested });
+    const errorOf = (encode: (value: unknown) => string) => {
+      try { encode(tooDeep); } catch (error) { return (error as Error).message; }
+      throw new Error("Expected nesting rejection");
+    };
+    expect(errorOf(cached)).toBe(errorOf(original.canonicalJsonStringify));
+  });
+
   it("reuses only a successful immutable encoding and retains a full audit mode", () => {
     selectValidationStampModeV1("validation-stamps-enabled");
     const value = original.deepFreezeCanonicalJson({ z: [null, -0, true, "心臓", 1e-12], a: { b: 42 } });

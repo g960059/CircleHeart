@@ -15,6 +15,7 @@ import type { BoundExecutionPlanV1 } from "@/runtime/executionPlan/BoundExecutio
 import { studioCanonicalJsonStringify } from "@/domain/json/CanonicalJson";
 
 export const CARDIORESPIRATORY_CHECKPOINT_CODEC_ID_V1 = "circleheart-cardiorespiratory-checkpoint-codec-v1";
+export const CARDIORESPIRATORY_HOT_PATH_INTEGRITY_TIER_V1 = "hot-path-lean";
 const checkpointCodecId = CARDIORESPIRATORY_CHECKPOINT_CODEC_ID_V1;
 const snapshotGateId = STUDIO_COMMON_SNAPSHOT_ADMISSION_ID_V1;
 const dt = .002;
@@ -51,14 +52,14 @@ class CardiorespiratoryRuntimeHostV1 {
       const plan = plans?.get(input.scenarioId);
       if (plans && !plan) throw new Error("Missing scenario execution plan");
       const session = input.checkpoint ? CardiorespiratorySessionV1.restore(fixture, input.checkpoint.payload, plan) : CardiorespiratorySessionV1.create(fixture, plan);
-      const state = session.currentAcceptedState();
+      const state = session.currentAcceptedClock();
       if (input.checkpoint && (state.revision !== input.checkpoint.acceptedRevision || state.acceptedTimeSec !== input.checkpoint.acceptedTimeSec)) throw new Error("Checkpoint accepted clock mismatch");
       owned.set(input.scenarioId, { session, inputEpoch: 0, presentationAnchor: state.acceptedTimeSec, presentationOrdinal: 0 });
     }
     this.sessions.set(runtimeSessionId, owned);
   }
   frame(runtimeSessionId: string, scenarioId: string): StudioSimulationFrameV2 {
-    const scenario = this.get(runtimeSessionId, scenarioId), state = scenario.session.currentAcceptedState();
+    const scenario = this.get(runtimeSessionId, scenarioId), state = scenario.session.currentAcceptedClock();
     return Object.freeze({ modelId, runtimeSessionId, scenarioId, inputEpoch: scenario.inputEpoch,
       acceptedRevision: state.revision, acceptedTimeSec: state.acceptedTimeSec, outputs: Object.freeze(scenario.session.projectValues(this.outputIds)) });
   }
@@ -83,7 +84,7 @@ class CardiorespiratoryRuntimeHostV1 {
     const scenario = this.get(runtimeSessionId, scenarioId);
     for (let row = 0; row < stepCount; row++) {
       this.advanceAccepted(runtimeSessionId, scenarioId);
-      const state = scenario.session.currentAcceptedState(), values = scenario.session.projectValues(selectedIds);
+      const state = scenario.session.currentAcceptedClock(), values = scenario.session.projectValues(selectedIds);
       acceptedRevisions[row] = state.revision; acceptedTimesSec[row] = state.acceptedTimeSec;
       selectedIds.forEach((id, column) => { const output = values[id]!, offset = row * selectedIds.length + column;
         outputStates[offset] = output.availability !== "available" || typeof output.value !== "number" ? 2 : output.quality === "authoritative-state" ? 0 : 1;
@@ -93,7 +94,7 @@ class CardiorespiratoryRuntimeHostV1 {
   }
   replace(runtimeSessionId: string, scenarioId: string, fixture: unknown) {
     const current = this.get(runtimeSessionId, scenarioId), next = current.session.reconfigure(validateAndOwnCardiorespiratoryFixtureV1(fixture));
-    current.session = next; current.inputEpoch++; current.presentationAnchor = next.currentAcceptedState().acceptedTimeSec; current.presentationOrdinal = 0; return current.inputEpoch;
+    current.session = next; current.inputEpoch++; current.presentationAnchor = next.currentAcceptedClock().acceptedTimeSec; current.presentationOrdinal = 0; return current.inputEpoch;
   }
 }
 
@@ -105,7 +106,9 @@ export function createCardiorespiratoryDevReleaseV1(): Readonly<{ manifest: Exac
   const signals = Object.freeze([...inherited.primitiveSignalCatalog, ...CARDIORESPIRATORY_PRIMITIVE_SIGNALS_V1]);
   const manifest: ExactModelKernelManifestV3 = Object.freeze({ ...inherited, modelId,
     equations: Object.freeze({ ...inherited.equations, respiratoryOwner: "two-unit-respiratory-mechanics-v1", gasOwner: "conservative-cardiorespiratory-gas-v1", transactionId: "cardiorespiratory-atomic-composite-v1" }),
-    runtime: Object.freeze({ numericalSessionId: "cardiorespiratory-session-v1", presentationDtSec: dt, acceptedBoundaryCapture: true, scope: "local-development-no-publication", fixtureChangeSemantics: "atomic-warm-edit-anatomy-blood-chemistry-or-respiratory-capacity-cold-restart" }),
+    runtime: Object.freeze({ numericalSessionId: "cardiorespiratory-session-v1", presentationDtSec: dt,
+      hotPathIntegrityTier: CARDIORESPIRATORY_HOT_PATH_INTEGRITY_TIER_V1,
+      acceptedBoundaryCapture: true, scope: "local-development-no-publication", fixtureChangeSemantics: "atomic-warm-edit-anatomy-blood-chemistry-or-respiratory-capacity-cold-restart" }),
     solver: Object.freeze({ candidateSemantics: "atomic-composite-hemodynamics-respiratory-gas-tissue", acceptedStateMutation: false, failureRollback: "previous-accepted-composite" }),
     fixtureSchema: Object.freeze({ fixtureSchemaId, definition: Object.freeze({ schemaId: fixtureSchemaId, validationOwner: "CardiorespiratoryFixtureV1" }) }),
     checkpointCodec: Object.freeze({ checkpointCodecId, definition: Object.freeze({ checkpointId: "circleheart-cardiorespiratory-checkpoint-v1", schemaVersion: 1, restoreSemantics: "exact-composite-including-gas-inventory-ledgers-and-breath-clock" }) }),
@@ -137,7 +140,7 @@ export function createCardiorespiratoryDevReleaseV1(): Readonly<{ manifest: Exac
   const captureAdapter: RegisteredModelExecutableBundleV2["captureAdapter"] = Object.freeze({ modelId, fixtureSchemaId, checkpointCodecId,
     validateFixture({ model, fixture }) { assertModel(model); validateAndOwnCardiorespiratoryFixtureV1(fixture); return undefined; },
     async validateCapture({ model, capture }) { assertModel(model); const fixture = validateAndOwnCardiorespiratoryFixtureV1(capture.fixture);
-      const restored = CardiorespiratorySessionV1.restore(fixture, capture.checkpoint.payload); const state = restored.currentAcceptedState();
+      const restored = CardiorespiratorySessionV1.restore(fixture, capture.checkpoint.payload); const state = restored.currentAcceptedClock();
       if (state.revision !== capture.checkpoint.acceptedRevision || state.acceptedTimeSec !== capture.checkpoint.acceptedTimeSec || studioCanonicalJsonStringify(json(restored.checkpoint())) !== studioCanonicalJsonStringify(capture.checkpoint.payload)) throw new Error("Cardiorespiratory checkpoint round trip mismatch"); },
   });
   const executables: RegisteredModelExecutableBundleV2 = Object.freeze({ modelId, fixtureSchemaId, checkpointCodecId, snapshotGateId, fixtureAdapter, simulationAdapter, captureAdapter,
@@ -148,7 +151,7 @@ export function createCardiorespiratoryDevReleaseV1(): Readonly<{ manifest: Exac
         const correlation = input.correlation.scenarios[index], current = host.get(input.correlation.runtimeSessionId, desired.scenarioId);
         if (correlation?.scenarioId !== desired.scenarioId || correlation.expectedInputEpoch !== current.inputEpoch
           || studioCanonicalJsonStringify(desired.fixture) !== studioCanonicalJsonStringify(json(current.session.fixture))) throw new Error("Stale cardiorespiratory capture");
-        const state = current.session.currentAcceptedState();
+        const state = current.session.currentAcceptedClock();
         return { scenarioId: desired.scenarioId, label: desired.label, capture: { fixture: json(current.session.fixture), checkpoint: {
           acceptedRevision: state.revision, acceptedTimeSec: state.acceptedTimeSec, payload: json(current.session.checkpoint()) } } };
       });

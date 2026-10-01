@@ -1,3 +1,5 @@
+import { isTransitivelyFrozenPlainDataV1, validationStampReuseEligibleV1 } from "../validationStampModeV1";
+
 export const CANONICAL_JSON_ALGORITHM_V1 =
   "rfc8785-compatible-canonical-json-v1" as const;
 
@@ -12,6 +14,10 @@ export type CanonicalJsonValue =
   | CanonicalJsonObject;
 
 const MAXIMUM_CANONICAL_JSON_DEPTH = 256;
+// Only complete successful encodings of immutable subtrees enter this cache.
+// Remember the deepest validated placement: reusing at a shallower depth is
+// safe, but a deeper placement must still enforce the nesting bound.
+const immutableSubtrees = new WeakMap<object, { text: string; validatedAtDepth: number }>();
 
 export class CanonicalJsonError extends Error {
   readonly path: string;
@@ -32,8 +38,9 @@ export class CanonicalJsonError extends Error {
  * instances, and symbol properties) are rejected rather than changing an
  * integrity digest invisibly.
  */
-export function canonicalJsonStringify(value: unknown): string {
-  return serializeCanonicalJson(value, "$", new Set<object>(), 0);
+export function canonicalJsonStringify(value: unknown, reuseImmutableSubtrees = false): string {
+  return serializeCanonicalJson(value, "$", new Set<object>(), 0,
+    reuseImmutableSubtrees && validationStampReuseEligibleV1());
 }
 
 /** Creates a detached, recursively frozen snapshot of canonical JSON data. */
@@ -61,6 +68,7 @@ function serializeCanonicalJson(
   path: string,
   ancestors: Set<object>,
   depth: number,
+  reuseImmutableSubtrees: boolean,
 ): string {
   if (depth > MAXIMUM_CANONICAL_JSON_DEPTH) {
     throw new CanonicalJsonError(
@@ -90,23 +98,32 @@ function serializeCanonicalJson(
   if (ancestors.has(value)) {
     throw new CanonicalJsonError(path, "cyclic references are not allowed");
   }
+  const cached = reuseImmutableSubtrees ? immutableSubtrees.get(value) : undefined;
+  if (cached && depth <= cached.validatedAtDepth) return cached.text;
+  const remember = (text: string): string => {
+    if (reuseImmutableSubtrees && Object.isFrozen(value) && isTransitivelyFrozenPlainDataV1(value)) {
+      immutableSubtrees.set(value, { text, validatedAtDepth: depth });
+    }
+    return text;
+  };
   ancestors.add(value);
   try {
     if (Array.isArray(value)) {
       assertCanonicalArrayShape(value, path);
-      return `[${value.map((child, index) =>
+      return remember(`[${value.map((child, index) =>
         serializeCanonicalJson(
           child,
           `${path}[${index}]`,
           ancestors,
           depth + 1,
-        )).join(",")}]`;
+          reuseImmutableSubtrees,
+        )).join(",")}]`);
     }
 
     assertPlainDataObject(value, path);
     const descriptors = Object.getOwnPropertyDescriptors(value);
     const keys = Object.keys(descriptors).sort();
-    return `{${keys.map((key) => {
+    return remember(`{${keys.map((key) => {
       assertUnicodeScalarSequence(key, `${path} property name`);
       const descriptor = descriptors[key];
       if (!descriptor.enumerable) {
@@ -126,8 +143,9 @@ function serializeCanonicalJson(
         propertyPath(path, key),
         ancestors,
         depth + 1,
+        reuseImmutableSubtrees,
       )}`;
-    }).join(",")}}`;
+    }).join(",")}}`);
   } finally {
     ancestors.delete(value);
   }

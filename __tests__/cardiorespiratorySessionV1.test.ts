@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
+import { hotPathIntegrityTierV1, selectHotPathIntegrityTierV1, type HotPathIntegrityTierV1 } from '../engine/hotPathIntegrityTierV1';
+import { validationStampModeV1, selectValidationStampModeV1, type ValidationStampModeV1 } from '../engine/validationStampModeV1';
 import { CardiorespiratorySessionV1, type CardiorespiratoryStateV1 } from '../engine/cardiorespiratory/CardiorespiratorySessionV1';
 import { DEFAULT_CARDIORESPIRATORY_FIXTURE_V1, validateAndOwnCardiorespiratoryFixtureV1 } from '../engine/cardiorespiratory/CardiorespiratoryFixtureV1';
 import { cardiorespiratoryPhysicalBloodVolumesV1, cardiorespiratoryAcceptedBloodTransfersV1 } from '../engine/cardiorespiratory/CardiorespiratoryBloodNetworkV1';
@@ -10,6 +13,8 @@ import { createMainWireFiveWallCoupledNewtonShadowWorkspaceV1 } from '../engine/
 import { createMainWireFiveWallCoupledResidualWorkspaceV1 } from '../engine/myocardium/MainWireFiveWallCoronaryTransactionV2';
 import { createCardiorespiratoryDevReleaseV1 } from '../studio/integrations/cardiorespiratoryV1/CardiorespiratoryExactModelV1';
 import * as pulmonaryExchange from '../engine/cardiorespiratory/PulmonaryGasExchangeV1';
+import * as bloodGasChemistry from '../engine/cardiorespiratory/BloodGasChemistryV1';
+import * as respiratoryMechanics from '../engine/cardiorespiratory/RespiratoryMechanicsV1';
 
 function total(state: CardiorespiratoryStateV1) {
   return [...Object.values(state.blood), ...state.respiratory.unitGasMol, state.respiratory.conductingGasMol, state.systemic.amount, state.myocardium.amount]
@@ -80,6 +85,134 @@ describe('development cardiorespiratory exact session', () => {
     expect(restored.projectValues(outputIds)).toEqual(original.projectValues(outputIds));
     expect(restored.checkpoint()).toEqual(original.checkpoint());
   });
+  it('projects each primitive independently with identical values at cold, accepted and warm-edited boundaries', () => {
+    const outputIds = createCardiorespiratoryDevReleaseV1().manifest.primitiveSignalCatalog.map(output => output.outputId);
+    const session = CardiorespiratorySessionV1.create();
+    const check = (current: CardiorespiratorySessionV1) => {
+      const bytes = current.snapshotAcceptedStateBytes();
+      const full = current.projectValues(outputIds);
+      for (const id of outputIds) expect(current.projectValues([id]), id).toEqual({ [id]: full[id] });
+      expect(current.projectValues([])).toEqual({});
+      expect(current.snapshotAcceptedStateBytes()).toEqual(bytes);
+    };
+    check(session);
+    session.advanceToPresentationTime(.006);
+    check(session);
+    check(session.reconfigure({ ...session.fixture,
+      cardiorespiratory: { ...session.fixture.cardiorespiratory, systemicDemandMlMin: 200 } }));
+  });
+  it('evaluates gas inversions and respiratory mechanics only for selected signal families', () => {
+    const session = run(.002, .006);
+    const chemistry = vi.spyOn(bloodGasChemistry, 'bloodGasPressuresFromAmountsV1');
+    const mechanics = vi.spyOn(respiratoryMechanics, 'evaluateRespiratoryMechanicsV1');
+    try {
+      session.projectValues(['hemodynamics.pressure.absolute.Ao', 'cardiorespiratory.oxygen.demand']);
+      expect(chemistry).not.toHaveBeenCalled();
+      expect(mechanics).not.toHaveBeenCalled();
+      session.projectValues(['cardiorespiratory.pressure.airway', 'cardiorespiratory.volume.lung']);
+      expect(mechanics).toHaveBeenCalledTimes(1);
+      expect(chemistry).not.toHaveBeenCalled();
+      session.projectValues(['cardiorespiratory.gas.pressure.arterial-o2', 'cardiorespiratory.gas.ph.arterial']);
+      expect(chemistry).toHaveBeenCalledTimes(1);
+      session.projectValues(['cardiorespiratory.gas.pressure.mixed-venous-co2', 'cardiorespiratory.gas.saturation.mixed-venous-o2']);
+      expect(chemistry).toHaveBeenCalledTimes(2);
+      expect(mechanics).toHaveBeenCalledTimes(1);
+    } finally { chemistry.mockRestore(); mechanics.mockRestore(); }
+  });
+  it('returns detached scalar clocks and state snapshots while retaining the private accepted authority', () => {
+    const session = run(.002, .006), reference = run(.002, .006);
+    const clock = session.currentAcceptedClock(), hemo = session.currentAcceptedState();
+    expect(clock).toEqual({ acceptedTimeSec: hemo.acceptedTimeSec, revision: hemo.revision });
+    const bytes = session.snapshotAcceptedStateBytes();
+    Object.assign(clock, { acceptedTimeSec: 10, revision: 999 });
+    expect(() => Object.assign(hemo.coronary.circulation.nodeVolumesMl, { Ao: 0 })).toThrow(TypeError);
+    const gas = session.cardiorespiratoryState();
+    expect(() => Object.assign(gas.blood.Ao, { o2Mol: 0 })).toThrow(TypeError);
+    expect(() => Object.assign(gas.respiratory.conductingGasMol, { co2Mol: 10 })).toThrow(TypeError);
+    expect(session.snapshotAcceptedStateBytes()).toEqual(bytes);
+    expect(session.currentAcceptedClock()).toEqual(reference.currentAcceptedClock());
+    session.advanceToPresentationTime(.008);
+    reference.advanceToPresentationTime(.008);
+    expect(session.checkpoint()).toEqual(reference.checkpoint());
+  });
+  it('keeps the unpredicted coupled path byte-identical across integrity tiers and disabled validation stamps', () => {
+    const previousTier = hotPathIntegrityTierV1(), previousStamps = validationStampModeV1();
+    const outputIds = createCardiorespiratoryDevReleaseV1().manifest.primitiveSignalCatalog.map(output => output.outputId);
+    const bytesHash = (session: CardiorespiratorySessionV1) => {
+      const hash = createHash('sha256');
+      for (const [key, array] of Object.entries(session.snapshotAcceptedStateBytes())) {
+        hash.update(key);
+        hash.update(new Uint8Array(array.buffer, array.byteOffset, array.byteLength));
+      }
+      return hash.digest('hex');
+    };
+    const runTier = (tier: HotPathIntegrityTierV1, stamps: ValidationStampModeV1) => {
+      selectHotPathIntegrityTierV1(tier);
+      selectValidationStampModeV1(stamps);
+      let session = CardiorespiratorySessionV1.create();
+      const trace: unknown[] = [], rhythmEventSteps: number[] = [];
+      let previousCaptures = 0;
+      for (let ordinal = 1; ordinal <= 700; ordinal++) {
+        const target = ordinal * .002;
+        if (ordinal === 257) {
+          session = session.reconfigure({ ...session.fixture,
+            cardiorespiratory: { ...session.fixture.cardiorespiratory, systemicDemandMlMin: 200 } });
+          expect(session.cardiorespiratoryState().hemodynamicReadback.available).toBe(false);
+        }
+        if (ordinal === 451) {
+          const checkpoint = JSON.parse(JSON.stringify(session.checkpoint()));
+          const before = session.projectValues(outputIds);
+          session = CardiorespiratorySessionV1.restore(session.fixture, checkpoint);
+          expect(session.projectValues(outputIds)).toEqual(before);
+          const malformed = JSON.parse(JSON.stringify(checkpoint));
+          malformed.state.cardiorespiratory.blood.Ao.o2Mol = -1;
+          expect(() => CardiorespiratorySessionV1.restore(session.fixture, malformed)).toThrow(/blood gas inventory/);
+        }
+        if (ordinal === 501) {
+          const before = session.checkpoint(), acceptedBytes = bytesHash(session), values = session.projectValues(outputIds);
+          const failure = vi.spyOn(pulmonaryExchange, 'exchangePerfusedBloodWithAlveolarGasV1')
+            .mockImplementation(() => { throw new Error('tier qualification post-hemodynamic rejection'); });
+          try { expect(() => session.advanceToPresentationTime(target)).toThrow('tier qualification post-hemodynamic rejection'); }
+          finally { failure.mockRestore(); }
+          expect(session.checkpoint()).toEqual(before);
+          expect(bytesHash(session)).toBe(acceptedBytes);
+          expect(session.projectValues(outputIds)).toEqual(values);
+        }
+        const result = session.advanceToPresentationTime(target);
+        const values = session.projectValues(outputIds);
+        const rhythm = session.currentAcceptedState().composedRhythm;
+        const captures = rhythm.acceptedAtrialCaptureCount + rhythm.acceptedVentricularCaptureCount;
+        if (captures !== previousCaptures) rhythmEventSteps.push(ordinal);
+        previousCaptures = captures;
+        trace.push({ result, state: bytesHash(session), values,
+          rhythmRevision: rhythm.revision, captures, deposits: rhythm.deliveredCalciumDepositCount });
+      }
+      expect(rhythmEventSteps.length).toBeGreaterThan(1);
+      expect(trace.some(item => (item as { result: { internalAcceptedSubstepCount: number } }).result.internalAcceptedSubstepCount > 1)).toBe(true);
+      const checkpoint = session.checkpoint();
+      const respiratory = session.fixture.cardiorespiratory.respiratory;
+      const restarted = session.reconfigure({ ...session.fixture, cardiorespiratory: { ...session.fixture.cardiorespiratory,
+        respiratory: { ...respiratory, conductingDeadspaceVolumeL: respiratory.conductingDeadspaceVolumeL + .01 } } });
+      expect(restarted.currentAcceptedClock()).toEqual({ acceptedTimeSec: 0, revision: 0 });
+      expect(restarted.cardiorespiratoryState().hemodynamicReadback.available).toBe(false);
+      restarted.advanceToPresentationTime(.02);
+      return { trace, rhythmEventSteps, checkpoint, restart: { checkpoint: restarted.checkpoint(),
+        values: restarted.projectValues(outputIds), state: bytesHash(restarted) } };
+    };
+    try {
+      const full = runTier('full-invariant', 'validation-stamps-enabled');
+      for (const stamps of ['validation-stamps-enabled', 'validation-stamps-disabled'] as const) {
+        const lean = runTier('hot-path-lean', stamps);
+        for (let i = 0; i < full.trace.length; i++) expect(lean.trace[i], `${stamps}, step ${i + 1}`).toEqual(full.trace[i]);
+        expect(lean.rhythmEventSteps).toEqual(full.rhythmEventSteps);
+        expect(lean.checkpoint).toEqual(full.checkpoint);
+        expect(lean.restart).toEqual(full.restart);
+      }
+    } finally {
+      selectValidationStampModeV1(previousStamps);
+      selectHotPathIntegrityTierV1(previousTier);
+    }
+  }, 60_000);
   it('rejects stale or malformed numerical readback and invalidates it across a warm fixture edit', () => {
     const original = run(.002, .006);
     for (const mutation of [

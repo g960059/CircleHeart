@@ -12,7 +12,9 @@ export function canonicalJsonStringify(value: unknown): string {
   if (!validationStampReuseEligibleV1() || value === null || typeof value !== "object") return serialize(value);
   const cached = serialized.get(value);
   if (cached !== undefined) return cached;
-  const result = serialize(value);
+  // Accepted candidates have new outer identities but share admitted immutable
+  // settings. Reuse those complete subtree encodings as well as whole roots.
+  const result = serialize(value, true);
   if (Object.isFrozen(value) && isTransitivelyFrozenPlainDataV1(value)) serialized.set(value, result);
   return result;
 }

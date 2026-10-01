@@ -37,7 +37,7 @@ import { DEFAULT_CARDIORESPIRATORY_FIXTURE_V1, CARDIORESPIRATORY_DEMAND_LIMITS_M
   from "./CardiorespiratoryFixtureV1";
 import { studioCanonicalJsonStringify } from "@/domain/json/CanonicalJson";
 import { bindCardiorespiratoryExecutionPlanV1, prepareCardiorespiratoryExecutionPlanV1 } from "./CardiorespiratoryExecutionPlanV1";
-import { bindExecutionPlanAcceptedTypedStateV1 } from "@/engine/vnext/ExecutionPlanAcceptedTypedStateBindingV1";
+import { bindExecutionPlanAcceptedTypedStateV1, resolveExecutionPlanAcceptedTypedStateSlotV1 } from "@/engine/vnext/ExecutionPlanAcceptedTypedStateBindingV1";
 import type { BoundExecutionPlanV1 } from "@/runtime/executionPlan/BoundExecutionPlanV1";
 
 type Hemo = MainWireIntegratedModelAcceptedStateV3<MainWireNormalAdultFiveWallMechanicsStateV1>;
@@ -83,6 +83,8 @@ export class CardiorespiratorySessionV1 {
   readonly #image: TransactionalTypedStateImageV1<Composite>;
   readonly #workspace: ReturnType<typeof createMainWireFiveWallCoupledNewtonShadowWorkspaceV1>;
   readonly #baseTickSec: number;
+  readonly #acceptedTimeSlot: number;
+  readonly #revisionSlot: number;
   readonly #residualWorkspace = createMainWireFiveWallCoupledResidualWorkspaceV1();
   #beats = new MainWireIntegratedModelBeatAccumulatorV3();
   #completedBeat: MainWireIntegratedModelCompletedBeatMetricsV3 | null = null;
@@ -106,7 +108,9 @@ export class CardiorespiratorySessionV1 {
     const plan = suppliedPlan ?? bindCardiorespiratoryExecutionPlanV1();
     if (usedExecutionPlans.has(plan)) throw new Error("Execution plan workspace already belongs to another exact session");
     const prepared = prepareCardiorespiratoryExecutionPlanV1(plan);
-    bindExecutionPlanAcceptedTypedStateV1(plan, manifest);
+    const stateBinding = bindExecutionPlanAcceptedTypedStateV1(plan, manifest);
+    this.#acceptedTimeSlot = resolveExecutionPlanAcceptedTypedStateSlotV1(stateBinding, "accepted.timeSec").authoritySlotIndex;
+    this.#revisionSlot = resolveExecutionPlanAcceptedTypedStateSlotV1(stateBinding, "accepted.revision").authoritySlotIndex;
     this.#workspace = prepared.workspace;
     this.#baseTickSec = prepared.updateSchedule.baseTickSec;
     this.#validate(initial);
@@ -143,6 +147,11 @@ export class CardiorespiratorySessionV1 {
       { configuration: this.#runtime.rhythm.configuration }, this.#runtime.profile, this.#runtime.config);
   }
   currentAcceptedState(): Hemo { return this.#ownHemo(this.#image.rehydrateCurrent()); }
+  /** Scalar clock reads do not reconstruct or expose the accepted object graph. */
+  currentAcceptedClock() {
+    const cursor = this.#image.currentCursor();
+    return { acceptedTimeSec: cursor.readContinuous(this.#acceptedTimeSlot), revision: cursor.readContinuous(this.#revisionSlot) };
+  }
   cardiorespiratoryState() { return this.#image.rehydrateCurrent().cardiorespiratory; }
   respiratoryOutput() { return evaluateRespiratoryMechanicsV1(this.fixture.cardiorespiratory.respiratory, this.cardiorespiratoryState().respiratory); }
   checkpoint(): CardiorespiratoryCheckpointV1 {
@@ -153,24 +162,24 @@ export class CardiorespiratorySessionV1 {
   snapshotAcceptedStateBytes() { return this.#image.snapshot(); }
 
   advanceToPresentationTime(targetTimeSec: number) {
-    let current = this.currentAcceptedState();
+    let current = this.currentAcceptedClock();
     if (!Number.isFinite(targetTimeSec) || targetTimeSec < current.acceptedTimeSec) throw new Error("Invalid cardiorespiratory target time");
     const previousRevision = current.revision;
     while (current.acceptedTimeSec < targetTimeSec) {
       // Integer-indexed 2-ms boundaries prevent accumulated clock drift.
       const nextGrid = (Math.floor(current.acceptedTimeSec / this.#baseTickSec + 1e-9) + 1) * this.#baseTickSec;
       this.#advanceWithRecovery(Math.min(targetTimeSec, nextGrid), 0);
-      current = this.currentAcceptedState();
+      current = this.currentAcceptedClock();
     }
     return { status: current.revision === previousRevision ? "already-at-target" as const : "advanced" as const,
       acceptedTimeSec: current.acceptedTimeSec, acceptedRevision: current.revision,
       internalAcceptedSubstepCount: current.revision - previousRevision };
   }
   #advanceWithRecovery(target: number, depth: number): void {
-    const before = this.currentAcceptedState();
+    const accepted = this.#image.rehydrateCurrent(), before = this.#ownHemo(accepted);
     const limit = limitMainWireIntegratedModelCandidateTimeV3(before, target,
       { configuration: this.#runtime.rhythm.configuration, externalAfNextBoundaryTimeSec: null }, this.#runtime.profile, this.#runtime.config);
-    try { this.#step(limit.candidateTimeSec); }
+    try { this.#step(limit.candidateTimeSec, accepted, before); }
     catch (error) {
       if (depth >= 5 || limit.candidateTimeSec - before.acceptedTimeSec < 0.0000625) throw error;
       this.#advanceWithRecovery((before.acceptedTimeSec + limit.candidateTimeSec) / 2, depth + 1);
@@ -178,8 +187,8 @@ export class CardiorespiratorySessionV1 {
     }
     if (limit.candidateTimeSec < target) this.#advanceWithRecovery(target, depth);
   }
-  #step(target: number) {
-    const accepted = this.#image.rehydrateCurrent(), before = this.#ownHemo(accepted), old = accepted.cardiorespiratory;
+  #step(target: number, accepted: Composite, before: Hemo) {
+    const old = accepted.cardiorespiratory;
     const c = this.fixture.cardiorespiratory, dt = target - before.acceptedTimeSec;
     const ventilation = stepRespiratoryMechanicsV1(c.respiratory, old.respiratory, dt);
     const ro = ventilation.output;
@@ -368,27 +377,41 @@ export class CardiorespiratorySessionV1 {
       beatAccumulator: new MainWireIntegratedModelBeatAccumulatorV3().checkpoint() });
   }
   projectValues(outputIds: readonly string[]) {
-    const hemo = this.currentAcceptedState(), cr = this.cardiorespiratoryState(), ro = this.respiratoryOutput();
+    const accepted = this.#image.rehydrateCurrent(), cr = accepted.cardiorespiratory;
+    // Available readback was admitted atomically with this private typed image.
+    // Projection only reads its detached scalars; admission remains mandatory
+    // in #validate, and the cold/warm unavailable fallback still owns its graph.
+    const hemo = cr.hemodynamicReadback.available ? accepted : this.#ownHemo(accepted);
     const inherited = outputIds.filter(id => !id.startsWith("cardiorespiratory.")) as MainWireIntegratedModelStandard70OutputIdV1[];
-    const p70 = partition70(inherited), p68 = partition68(p70.standard68OutputIds);
-    const common = { completedBeatMetrics: this.#completedBeat, mechanismResearchInputs: this.fixture.mechanismResearchInputs,
-      runtimeSignals: { pleuralPressureMmHg: cr.readback.appliedPleuralPressureMmHg, alveolarPressureMmHg: cr.readback.appliedAlveolarPressureMmHg } };
-    const rhythm = hemo.composedRhythm.regularAtrialSourceState;
-    if (rhythm === null) throw new Error("Cardiorespiratory regular sinus projection is unavailable");
-    const base = cr.hemodynamicReadback.available
-      ? projectMainWireIntegratedModelSelectedValuesFromNumericalReadbackV1({ ...common, acceptedTimeSec: hemo.acceptedTimeSec,
-        regularSinusCycleLengthSec: rhythm.configuration.cycleLengthSec,
-        regularSinusNextActivationTimeSec: rhythm.nextActivationTimeSec,
-        dynamicMechanicalSupportLvadFlowMlPerSec: hemo.dynamicMechanicalSupport.acceptedFlowMlPerSec.LVAD,
-        acceptedNumericalReadback: Float64Array.from(cr.hemodynamicReadback.values) }, p68.baseOutputIds)
-      : projectMainWireIntegratedModelSelectedValuesV3({ ...common, source: "standard-exact-checkpoint-restore", acceptedState: hemo,
-        lastAcceptedStep: null }, p68.baseOutputIds);
-    const inheritedValues = merge70({ outputIds: inherited, completedBeatMetrics: this.#completedBeat,
-      standard68Values: merge68({ outputIds: p70.standard68OutputIds, baseValues: base, completedBeatMetrics: this.#completedBeat }) });
-    const values: Record<string, { outputId: string; value: number | null; availability: "available" | "not-evaluated-at-accepted-state"; quality: "authoritative-state" | "accepted-derived" | "not-assessed" }> = { ...inheritedValues };
-    const volumes = cardiorespiratoryPhysicalBloodVolumesV1(hemo);
-    const art = bloodGasPressuresFromAmountsV1(cr.blood.Ao, volumes.Ao, this.fixture.cardiorespiratory.bloodGas);
-    const ven = bloodGasPressuresFromAmountsV1(cr.blood.PA, volumes.PA, this.fixture.cardiorespiratory.bloodGas);
+    const values: Record<string, { outputId: string; value: number | null; availability: "available" | "not-evaluated-at-accepted-state"; quality: "authoritative-state" | "accepted-derived" | "not-assessed" }> = {};
+    if (inherited.length > 0) {
+      const p70 = partition70(inherited), p68 = partition68(p70.standard68OutputIds);
+      const common = { completedBeatMetrics: this.#completedBeat, mechanismResearchInputs: this.fixture.mechanismResearchInputs,
+        runtimeSignals: { pleuralPressureMmHg: cr.readback.appliedPleuralPressureMmHg, alveolarPressureMmHg: cr.readback.appliedAlveolarPressureMmHg } };
+      const rhythm = hemo.composedRhythm.regularAtrialSourceState;
+      if (rhythm === null) throw new Error("Cardiorespiratory regular sinus projection is unavailable");
+      const base = cr.hemodynamicReadback.available
+        ? projectMainWireIntegratedModelSelectedValuesFromNumericalReadbackV1({ ...common, acceptedTimeSec: hemo.acceptedTimeSec,
+          regularSinusCycleLengthSec: rhythm.configuration.cycleLengthSec,
+          regularSinusNextActivationTimeSec: rhythm.nextActivationTimeSec,
+          dynamicMechanicalSupportLvadFlowMlPerSec: hemo.dynamicMechanicalSupport.acceptedFlowMlPerSec.LVAD,
+          acceptedNumericalReadback: Float64Array.from(cr.hemodynamicReadback.values) }, p68.baseOutputIds)
+        : projectMainWireIntegratedModelSelectedValuesV3({ ...common, source: "standard-exact-checkpoint-restore", acceptedState: hemo,
+          lastAcceptedStep: null }, p68.baseOutputIds);
+      Object.assign(values, merge70({ outputIds: inherited, completedBeatMetrics: this.#completedBeat,
+        standard68Values: merge68({ outputIds: p70.standard68OutputIds, baseValues: base, completedBeatMetrics: this.#completedBeat }) }));
+    }
+    const selected = outputIds.filter(id => id.startsWith("cardiorespiratory.")).map(id => id.slice("cardiorespiratory.".length));
+    if (selected.length === 0) return values;
+    const needsRespiratory = selected.some(key => key.startsWith("pressure.") || key.startsWith("volume.")
+      || key.startsWith("flow.unit.") || key.startsWith("lung.open.") || key.startsWith("gas.pressure.alveolar-")
+      || key === "flow.airway" || key === "ventilator.pressure-limited");
+    const ro = needsRespiratory ? evaluateRespiratoryMechanicsV1(this.fixture.cardiorespiratory.respiratory, cr.respiratory) : null;
+    const needsArterial = selected.some(key => key.startsWith("gas.") && key.includes("arterial"));
+    const needsVenous = selected.some(key => key.startsWith("gas.") && key.includes("mixed-venous"));
+    const art = needsArterial ? bloodGasPressuresFromAmountsV1(cr.blood.Ao, hemo.coronary.circulation.nodeVolumesMl.Ao, this.fixture.cardiorespiratory.bloodGas) : null;
+    const ven = needsVenous ? bloodGasPressuresFromAmountsV1(cr.blood.PA, hemo.coronary.circulation.nodeVolumesMl.PA, this.fixture.cardiorespiratory.bloodGas) : null;
+    const inventory = selected.some(key => key.startsWith("inventory.")) ? totalGas(cr) : null;
     const c = this.fixture.cardiorespiratory, demand = c.systemicDemandMlMin + c.myocardialDemandMlMin;
     const consumption = cr.readback.systemicConsumptionMlMin + cr.readback.myocardialConsumptionMlMin;
     // Warm edits preserve the previous interval's numerical record, but it was
@@ -400,30 +423,30 @@ export class CardiorespiratorySessionV1 {
         ? respiratoryMuscleCycleTimeSecV1(c.respiratory, hemo.acceptedTimeSec) / (60 / c.respiratory.muscle.respiratoryRatePerMin)
         : cr.respiratory.ventilatorCycleTimeSec / (60 / c.respiratory.ventilator.respiratoryRatePerMin),
       "breath-index": cr.respiratory.completedBreaths,
-      "pressure.airway": ro.airwayPressureCmH2O, "pressure.pleural": ro.pleuralPressureCmH2O, "pressure.muscle": ro.musclePressureCmH2O,
-      "volume.lung": ro.totalLungVolumeL, "flow.airway": ro.airwayFlowLPerSec,
-      "gas.pressure.arterial-o2": art.o2MmHg, "gas.pressure.arterial-co2": art.co2MmHg,
-      "gas.pressure.mixed-venous-o2": ven.o2MmHg, "gas.pressure.mixed-venous-co2": ven.co2MmHg,
-      "gas.saturation.arterial-o2": art.saturation01, "gas.saturation.mixed-venous-o2": ven.saturation01,
-      "gas.ph.arterial": art.pH, "gas.ph.mixed-venous": ven.pH,
-      "gas.content.arterial-o2": art.o2MolPerL * MOLAR_GAS_VOLUME_STPD_L_PER_MOL_V1 * 100,
-      "gas.content.mixed-venous-o2": ven.o2MolPerL * MOLAR_GAS_VOLUME_STPD_L_PER_MOL_V1 * 100,
+      "pressure.airway": ro?.airwayPressureCmH2O ?? null, "pressure.pleural": ro?.pleuralPressureCmH2O ?? null, "pressure.muscle": ro?.musclePressureCmH2O ?? null,
+      "volume.lung": ro?.totalLungVolumeL ?? null, "flow.airway": ro?.airwayFlowLPerSec ?? null,
+      "gas.pressure.arterial-o2": art?.o2MmHg ?? null, "gas.pressure.arterial-co2": art?.co2MmHg ?? null,
+      "gas.pressure.mixed-venous-o2": ven?.o2MmHg ?? null, "gas.pressure.mixed-venous-co2": ven?.co2MmHg ?? null,
+      "gas.saturation.arterial-o2": art?.saturation01 ?? null, "gas.saturation.mixed-venous-o2": ven?.saturation01 ?? null,
+      "gas.ph.arterial": art?.pH ?? null, "gas.ph.mixed-venous": ven?.pH ?? null,
+      "gas.content.arterial-o2": art === null ? null : art.o2MolPerL * MOLAR_GAS_VOLUME_STPD_L_PER_MOL_V1 * 100,
+      "gas.content.mixed-venous-o2": ven === null ? null : ven.o2MolPerL * MOLAR_GAS_VOLUME_STPD_L_PER_MOL_V1 * 100,
       "flow.perfusion.1": intervalValue(cr.readback.pulmonaryFlow1MlSec), "flow.perfusion.2": intervalValue(cr.readback.pulmonaryFlow2MlSec),
-      "lung.open.1": Number(ro.airwayOpenByUnit[0]), "lung.open.2": Number(ro.airwayOpenByUnit[1]),
+      "lung.open.1": Number(cr.respiratory.airwayOpenByUnit[0]), "lung.open.2": Number(cr.respiratory.airwayOpenByUnit[1]),
       "tissue.oxygen-pressure.systemic": cr.systemic.amount.o2Mol / DEFAULT_TISSUE_GAS_PARAMETERS_V1.systemic.o2CapacityMolPerMmHg,
       "tissue.oxygen-pressure.myocardium": cr.myocardium.amount.o2Mol / DEFAULT_TISSUE_GAS_PARAMETERS_V1.myocardium.o2CapacityMolPerMmHg,
-      "inventory.oxygen": totalGas(cr).o2Mol, "inventory.carbon-dioxide": totalGas(cr).co2Mol,
+      "inventory.oxygen": inventory?.o2Mol ?? null, "inventory.carbon-dioxide": inventory?.co2Mol ?? null,
       "balance.oxygen": cr.readback.oxygenBalanceResidualMol, "balance.carbon-dioxide": cr.readback.co2BalanceResidualMol,
       "oxygen.delivery": intervalValue(cr.readback.aorticOxygenFluxMolPerSec * mlMinPerMolSec),
       "oxygen.demand": demand, "oxygen.consumption": intervalValue(consumption),
       "oxygen.demand-met-fraction": demand === 0 ? null : intervalValue(consumption / demand),
       "oxygen.myocardial-demand": c.myocardialDemandMlMin, "oxygen.myocardial-consumption": intervalValue(cr.readback.myocardialConsumptionMlMin),
-      "ventilator.pressure-limited": Number(ro.pressureLimited), "ventilator.controlled": Number(c.respiratory.ventilator.mode !== "spontaneous"), "muscle.active": Number(c.respiratory.muscle.amplitudeCmH2O > 0),
+      "ventilator.pressure-limited": ro === null ? null : Number(ro.pressureLimited), "ventilator.controlled": Number(c.respiratory.ventilator.mode !== "spontaneous"), "muscle.active": Number(c.respiratory.muscle.amplitudeCmH2O > 0),
     };
     // The delivery signal is the accepted signed upwind O2 transfer at AoV,
     // using the actual donor concentration on reversal. Window means belong
     // to the Surface's analysis methods.
-    for (const i of [0, 1] as const) {
+    if (ro !== null) for (const i of [0, 1] as const) {
       const n = i + 1;
       signals[`pressure.alveolar.${n}`] = ro.alveolarPressureCmH2OByUnit[i];
       signals[`pressure.transpulmonary.${n}`] = ro.transpulmonaryPressureCmH2OByUnit[i];
@@ -431,8 +454,8 @@ export class CardiorespiratorySessionV1 {
       signals[`gas.pressure.alveolar-o2.${n}`] = ro.oxygenPartialPressureMmHgByUnit[i];
       signals[`gas.pressure.alveolar-co2.${n}`] = ro.co2PartialPressureMmHgByUnit[i];
     }
-    for (const outputId of outputIds.filter(id => id.startsWith("cardiorespiratory."))) {
-      const key = outputId.slice("cardiorespiratory.".length);
+    for (const key of selected) {
+      const outputId = `cardiorespiratory.${key}`;
       if (!(key in signals)) throw new Error(`Unknown cardiorespiratory output ${outputId}`);
       const value = signals[key];
       values[outputId] = { outputId, value, availability: value === null ? "not-evaluated-at-accepted-state" : "available",

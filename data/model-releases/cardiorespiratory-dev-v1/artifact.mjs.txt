@@ -1386,7 +1386,7 @@ var DEFAULT_HOT_PATH_INTEGRITY_TIER_V1 = "full-invariant";
 function environmentTierV1() {
   let raw;
   try {
-    raw = import.meta.env?.VITE_CIRCLEHEART_HOT_PATH_INTEGRITY;
+    raw = "hot-path-lean";
   } catch {
     raw = void 0;
   }
@@ -10255,6 +10255,7 @@ function resolveMainWireVentricularCalciumMatchedAlphaExactPersistenceV1(heartRa
 
 // engine/integrity/canonicalJson.ts
 var MAXIMUM_CANONICAL_JSON_DEPTH = 256;
+var immutableSubtrees = /* @__PURE__ */ new WeakMap();
 var CanonicalJsonError = class extends Error {
   constructor(path, message) {
     super(`canonical JSON rejected ${path}: ${message}`);
@@ -10262,10 +10263,16 @@ var CanonicalJsonError = class extends Error {
     this.path = path;
   }
 };
-function canonicalJsonStringify(value) {
-  return serializeCanonicalJson(value, "$", /* @__PURE__ */ new Set(), 0);
+function canonicalJsonStringify(value, reuseImmutableSubtrees = false) {
+  return serializeCanonicalJson(
+    value,
+    "$",
+    /* @__PURE__ */ new Set(),
+    0,
+    reuseImmutableSubtrees && validationStampReuseEligibleV1()
+  );
 }
-function serializeCanonicalJson(value, path, ancestors, depth) {
+function serializeCanonicalJson(value, path, ancestors, depth, reuseImmutableSubtrees) {
   if (depth > MAXIMUM_CANONICAL_JSON_DEPTH) {
     throw new CanonicalJsonError(
       path,
@@ -10293,21 +10300,30 @@ function serializeCanonicalJson(value, path, ancestors, depth) {
   if (ancestors.has(value)) {
     throw new CanonicalJsonError(path, "cyclic references are not allowed");
   }
+  const cached = reuseImmutableSubtrees ? immutableSubtrees.get(value) : void 0;
+  if (cached && depth <= cached.validatedAtDepth) return cached.text;
+  const remember = (text) => {
+    if (reuseImmutableSubtrees && Object.isFrozen(value) && isTransitivelyFrozenPlainDataV1(value)) {
+      immutableSubtrees.set(value, { text, validatedAtDepth: depth });
+    }
+    return text;
+  };
   ancestors.add(value);
   try {
     if (Array.isArray(value)) {
       assertCanonicalArrayShape(value, path);
-      return `[${value.map((child, index) => serializeCanonicalJson(
+      return remember(`[${value.map((child, index) => serializeCanonicalJson(
         child,
         `${path}[${index}]`,
         ancestors,
-        depth + 1
-      )).join(",")}]`;
+        depth + 1,
+        reuseImmutableSubtrees
+      )).join(",")}]`);
     }
     assertPlainDataObject(value, path);
     const descriptors = Object.getOwnPropertyDescriptors(value);
     const keys = Object.keys(descriptors).sort();
-    return `{${keys.map((key) => {
+    return remember(`{${keys.map((key) => {
       assertUnicodeScalarSequence(key, `${path} property name`);
       const descriptor = descriptors[key];
       if (!descriptor.enumerable) {
@@ -10326,9 +10342,10 @@ function serializeCanonicalJson(value, path, ancestors, depth) {
         descriptor.value,
         propertyPath(path, key),
         ancestors,
-        depth + 1
+        depth + 1,
+        reuseImmutableSubtrees
       )}`;
-    }).join(",")}}`;
+    }).join(",")}}`);
   } finally {
     ancestors.delete(value);
   }
@@ -10393,7 +10410,7 @@ function canonicalJsonStringify2(value) {
   if (!validationStampReuseEligibleV1() || value === null || typeof value !== "object") return canonicalJsonStringify(value);
   const cached = serialized.get(value);
   if (cached !== void 0) return cached;
-  const result = canonicalJsonStringify(value);
+  const result = canonicalJsonStringify(value, true);
   if (Object.isFrozen(value) && isTransitivelyFrozenPlainDataV1(value)) serialized.set(value, result);
   return result;
 }
@@ -40135,6 +40152,13 @@ function bindExecutionPlanAcceptedTypedStateV1(bound, manifest) {
   }));
   return binding;
 }
+function resolveExecutionPlanAcceptedTypedStateSlotV1(binding, stateId) {
+  const slot2 = requiredStorageV1(binding).slotByStateId.get(stateId);
+  if (slot2 === void 0) {
+    throw new Error(`Execution plan accepted state ${stateId} is unavailable`);
+  }
+  return slot2;
+}
 function listExecutionPlanAcceptedTypedStateSlotsV1(binding) {
   return requiredStorageV1(binding).slots;
 }
@@ -46623,25 +46647,31 @@ function bufferTerms(parameters) {
     offset: parameters.baseExcessMmolPerL / (1 - hbMmolPerL / 43)
   };
 }
-function co2AtPH(pH, parameters) {
-  const { beta, offset } = bufferTerms(parameters);
+function co2AtPH(pH, beta, offset) {
   const bicarbonate = HCO3_REFERENCE + offset - beta * (pH - 7.4);
   if (!(bicarbonate > 0)) throw new RangeError("buffer closure has nonpositive bicarbonate");
   return bicarbonate / (ALPHA_CO2_MMOL_PER_L_PER_MMHG * 10 ** (pH - PK));
 }
-function bloodGasCo2PressureBoundsV1(parameters) {
-  validateBloodGasChemistryV1(parameters);
+function fixedBufferTerms(parameters) {
   const { beta, offset } = bufferTerms(parameters);
   const upperPH = Math.min(7.8, 7.4 + (HCO3_REFERENCE + offset - 0.1) / beta);
-  return { minimumMmHg: co2AtPH(upperPH, parameters), maximumMmHg: co2AtPH(6.6, parameters) };
+  return {
+    beta,
+    offset,
+    upperPH,
+    minimumMmHg: co2AtPH(upperPH, beta, offset),
+    maximumMmHg: co2AtPH(6.6, beta, offset)
+  };
 }
 function respiratoryPHFromCo2V1(co2MmHg, parameters) {
   validateBloodGasChemistryV1(parameters);
-  const bounds = bloodGasCo2PressureBoundsV1(parameters);
-  finiteRange(co2MmHg, bounds.minimumMmHg, bounds.maximumMmHg, "co2MmHg");
-  const { beta, offset } = bufferTerms(parameters);
+  return respiratoryPHAtFixedBuffer(co2MmHg, fixedBufferTerms(parameters));
+}
+function respiratoryPHAtFixedBuffer(co2MmHg, terms) {
+  finiteRange(co2MmHg, terms.minimumMmHg, terms.maximumMmHg, "co2MmHg");
+  const { beta, offset } = terms;
   let low = 6.6;
-  let high = Math.min(7.8, 7.4 + (HCO3_REFERENCE + offset - 0.1) / beta);
+  let high = terms.upperPH;
   let pH = (low + high) / 2;
   for (let i = 0; i < BISECTION_ITERATIONS; i += 1) {
     const bicarbonate = ALPHA_CO2_MMOL_PER_L_PER_MMHG * co2MmHg * 10 ** (pH - PK);
@@ -46663,6 +46693,9 @@ function oxygenSaturationFromPressureAndPHV1(o2MmHg, pH) {
 }
 function bloodGasContentsFromPressuresV1(pressures, parameters = DEFAULT_BLOOD_GAS_CHEMISTRY_V1) {
   const pH = respiratoryPHFromCo2V1(pressures.co2MmHg, parameters);
+  return bloodGasContentsAtResolvedPH(pressures, parameters, pH);
+}
+function bloodGasContentsAtResolvedPH(pressures, parameters, pH) {
   const saturation01 = oxygenSaturationFromPressureAndPHV1(pressures.o2MmHg, pH);
   const o2MlPerDl = 1.34 * parameters.hemoglobinGPerDl * saturation01 + 31e-4 * pressures.o2MmHg;
   const bicarbonateMmolPerL = ALPHA_CO2_MMOL_PER_L_PER_MMHG * pressures.co2MmHg * 10 ** (pH - PK);
@@ -46677,10 +46710,6 @@ function bloodGasContentsFromPressuresV1(pressures, parameters = DEFAULT_BLOOD_G
     o2MolPerL: o2MlPerDl * 0.01 / MOLAR_GAS_VOLUME_STPD_L_PER_MOL_V1,
     co2MolPerL: plasmaCo2MmolPerL * wholeBloodCorrection / 1e3
   };
-}
-function oxygenPressureAtContentAndCo2(o2MolPerL, co2MmHg, parameters) {
-  const pH = respiratoryPHFromCo2V1(co2MmHg, parameters);
-  return oxygenPressureAtContentAndPH(o2MolPerL, pH, parameters);
 }
 function oxygenPressureAtContentAndPH(o2MolPerL, pH, parameters) {
   const shift = 10 ** (0.48 * (7.4 - pH));
@@ -46713,31 +46742,36 @@ function bloodGasInverseDomain(contents, parameters) {
   validateBloodGasChemistryV1(parameters);
   finiteRange(contents.o2MolPerL, 0, Number.MAX_VALUE, "o2MolPerL");
   finiteRange(contents.co2MolPerL, 0, Number.MAX_VALUE, "co2MolPerL");
-  const bounds = bloodGasCo2PressureBoundsV1(parameters);
-  let low = bounds.minimumMmHg;
-  let high = bounds.maximumMmHg;
-  const maximumO2At = (co2MmHg) => bloodGasContentsFromPressuresV1({ o2MmHg: 2e3, co2MmHg }, parameters).o2MolPerL;
-  finiteRange(contents.o2MolPerL, 0, maximumO2At(low), "o2MolPerL (chemical domain)");
-  if (contents.o2MolPerL > maximumO2At(high)) {
+  const terms = fixedBufferTerms(parameters);
+  const low = terms.minimumMmHg;
+  let high = terms.maximumMmHg;
+  const lowPH = respiratoryPHAtFixedBuffer(low, terms);
+  let highPH = respiratoryPHAtFixedBuffer(high, terms);
+  const maximumO2At = (co2MmHg, pH) => bloodGasContentsAtResolvedPH({ o2MmHg: 2e3, co2MmHg }, parameters, pH).o2MolPerL;
+  finiteRange(contents.o2MolPerL, 0, maximumO2At(low, lowPH), "o2MolPerL (chemical domain)");
+  if (contents.o2MolPerL > maximumO2At(high, highPH)) {
     let allowed = low;
     let excluded = high;
     for (let i = 0; i < BISECTION_ITERATIONS; i += 1) {
       const middle = (allowed + excluded) / 2;
-      if (maximumO2At(middle) >= contents.o2MolPerL) allowed = middle;
+      if (maximumO2At(middle, respiratoryPHAtFixedBuffer(middle, terms)) >= contents.o2MolPerL) allowed = middle;
       else excluded = middle;
     }
     high = allowed;
+    highPH = respiratoryPHAtFixedBuffer(high, terms);
   }
-  const at = (co2MmHg) => bloodGasContentsFromPressuresV1({
-    o2MmHg: oxygenPressureAtContentAndCo2(contents.o2MolPerL, co2MmHg, parameters),
+  const atPH = (co2MmHg, pH) => bloodGasContentsAtResolvedPH({
+    o2MmHg: oxygenPressureAtContentAndPH(contents.o2MolPerL, pH, parameters),
     co2MmHg
-  }, parameters);
-  const minimum = at(low).co2MolPerL;
-  const maximum = at(high).co2MolPerL;
+  }, parameters, pH);
+  const at = (co2MmHg) => atPH(co2MmHg, respiratoryPHAtFixedBuffer(co2MmHg, terms));
+  const minimumValue = atPH(low, lowPH), maximumValue = atPH(high, highPH);
+  const minimum = minimumValue.co2MolPerL;
+  const maximum = maximumValue.co2MolPerL;
   if (contents.co2MolPerL < minimum - 1e-14 || contents.co2MolPerL > maximum + 1e-14) {
     throw new RangeError(`co2MolPerL outside fixed-buffer chemical domain [${minimum}, ${maximum}]`);
   }
-  return { low, high, at, minimum, maximum };
+  return { low, high, at, minimum, maximum, minimumValue, maximumValue, beta: terms.beta };
 }
 function validateBloodGasContentsV1(contents, parameters = DEFAULT_BLOOD_GAS_CHEMISTRY_V1) {
   bloodGasInverseDomain(contents, parameters);
@@ -46745,13 +46779,33 @@ function validateBloodGasContentsV1(contents, parameters = DEFAULT_BLOOD_GAS_CHE
 function bloodGasPressuresFromContentsV1(contents, parameters = DEFAULT_BLOOD_GAS_CHEMISTRY_V1) {
   const domain = bloodGasInverseDomain(contents, parameters);
   let { low, high } = domain;
-  const { at, minimum, maximum } = domain;
-  if (Math.abs(contents.co2MolPerL - minimum) <= 1e-14) return at(low);
-  if (Math.abs(contents.co2MolPerL - maximum) <= 1e-14) return at(high);
+  const { at, minimum, maximum, beta } = domain;
+  if (Math.abs(contents.co2MolPerL - minimum) <= 1e-14) return domain.minimumValue;
+  if (Math.abs(contents.co2MolPerL - maximum) <= 1e-14) return domain.maximumValue;
+  const oxygenCapacityMlPerDl = 1.34 * parameters.hemoglobinGPerDl;
+  const hbCorrection = 0.0289 * parameters.hemoglobinGPerDl;
+  let co2MmHg = 40 > low && 40 < high ? 40 : (low + high) / 2;
   for (let i = 0; i < BISECTION_ITERATIONS; i += 1) {
-    const middle = (low + high) / 2;
-    if (at(middle).co2MolPerL > contents.co2MolPerL) high = middle;
-    else low = middle;
+    const value = at(co2MmHg);
+    const residual = value.co2MolPerL - contents.co2MolPerL;
+    if (residual === 0) return value;
+    if (residual > 0) high = co2MmHg;
+    else low = co2MmHg;
+    const pHDCo2 = -value.bicarbonateMmolPerL / (co2MmHg * (Math.LN10 * value.bicarbonateMmolPerL + beta));
+    const shift = 10 ** (0.48 * (7.4 - value.pH));
+    const x = value.o2MmHg / shift;
+    const n = x * x * x + 150 * x;
+    const saturationDO2 = 23400 * (3 * x * x + 150) / ((n + 23400) ** 2 * shift);
+    const saturationDPH = saturationDO2 * value.o2MmHg * (0.48 * Math.LN10) * 31e-4 / (oxygenCapacityMlPerDl * saturationDO2 + 31e-4);
+    const saturationFactor = 3.352 - 0.456 * value.saturation01;
+    const pHFactor = 8.142 - value.pH;
+    const correctionLoss = hbCorrection / (saturationFactor * pHFactor);
+    const correctionDCo2 = -correctionLoss * (0.456 * saturationDPH / saturationFactor + 1 / pHFactor) * pHDCo2;
+    const plasmaCo2 = value.bicarbonateMmolPerL + ALPHA_CO2_MMOL_PER_L_PER_MMHG * co2MmHg;
+    const derivative = ((ALPHA_CO2_MMOL_PER_L_PER_MMHG - beta * pHDCo2) * (1 - correctionLoss) + plasmaCo2 * correctionDCo2) / 1e3;
+    const candidate = co2MmHg - residual / derivative;
+    if (candidate === co2MmHg) return value;
+    co2MmHg = candidate > low && candidate < high ? candidate : (low + high) / 2;
   }
   return at((low + high) / 2);
 }
@@ -47382,6 +47436,8 @@ var CardiorespiratorySessionV1 = class _CardiorespiratorySessionV1 {
   #image;
   #workspace;
   #baseTickSec;
+  #acceptedTimeSlot;
+  #revisionSlot;
   #residualWorkspace = createMainWireFiveWallCoupledResidualWorkspaceV1();
   #beats = new MainWireIntegratedModelBeatAccumulatorV3();
   #completedBeat = null;
@@ -47410,7 +47466,9 @@ var CardiorespiratorySessionV1 = class _CardiorespiratorySessionV1 {
     const plan = suppliedPlan ?? bindCardiorespiratoryExecutionPlanV1();
     if (usedExecutionPlans.has(plan)) throw new Error("Execution plan workspace already belongs to another exact session");
     const prepared = prepareCardiorespiratoryExecutionPlanV1(plan);
-    bindExecutionPlanAcceptedTypedStateV1(plan, manifest);
+    const stateBinding = bindExecutionPlanAcceptedTypedStateV1(plan, manifest);
+    this.#acceptedTimeSlot = resolveExecutionPlanAcceptedTypedStateSlotV1(stateBinding, "accepted.timeSec").authoritySlotIndex;
+    this.#revisionSlot = resolveExecutionPlanAcceptedTypedStateSlotV1(stateBinding, "accepted.revision").authoritySlotIndex;
     this.#workspace = prepared.workspace;
     this.#baseTickSec = prepared.updateSchedule.baseTickSec;
     this.#validate(initial);
@@ -47458,6 +47516,11 @@ var CardiorespiratorySessionV1 = class _CardiorespiratorySessionV1 {
   currentAcceptedState() {
     return this.#ownHemo(this.#image.rehydrateCurrent());
   }
+  /** Scalar clock reads do not reconstruct or expose the accepted object graph. */
+  currentAcceptedClock() {
+    const cursor = this.#image.currentCursor();
+    return { acceptedTimeSec: cursor.readContinuous(this.#acceptedTimeSlot), revision: cursor.readContinuous(this.#revisionSlot) };
+  }
   cardiorespiratoryState() {
     return this.#image.rehydrateCurrent().cardiorespiratory;
   }
@@ -47477,13 +47540,13 @@ var CardiorespiratorySessionV1 = class _CardiorespiratorySessionV1 {
     return this.#image.snapshot();
   }
   advanceToPresentationTime(targetTimeSec) {
-    let current = this.currentAcceptedState();
+    let current = this.currentAcceptedClock();
     if (!Number.isFinite(targetTimeSec) || targetTimeSec < current.acceptedTimeSec) throw new Error("Invalid cardiorespiratory target time");
     const previousRevision = current.revision;
     while (current.acceptedTimeSec < targetTimeSec) {
       const nextGrid = (Math.floor(current.acceptedTimeSec / this.#baseTickSec + 1e-9) + 1) * this.#baseTickSec;
       this.#advanceWithRecovery(Math.min(targetTimeSec, nextGrid), 0);
-      current = this.currentAcceptedState();
+      current = this.currentAcceptedClock();
     }
     return {
       status: current.revision === previousRevision ? "already-at-target" : "advanced",
@@ -47493,7 +47556,7 @@ var CardiorespiratorySessionV1 = class _CardiorespiratorySessionV1 {
     };
   }
   #advanceWithRecovery(target, depth) {
-    const before = this.currentAcceptedState();
+    const accepted = this.#image.rehydrateCurrent(), before = this.#ownHemo(accepted);
     const limit = limitMainWireIntegratedModelCandidateTimeV3(
       before,
       target,
@@ -47502,7 +47565,7 @@ var CardiorespiratorySessionV1 = class _CardiorespiratorySessionV1 {
       this.#runtime.config
     );
     try {
-      this.#step(limit.candidateTimeSec);
+      this.#step(limit.candidateTimeSec, accepted, before);
     } catch (error) {
       if (depth >= 5 || limit.candidateTimeSec - before.acceptedTimeSec < 625e-7) throw error;
       this.#advanceWithRecovery((before.acceptedTimeSec + limit.candidateTimeSec) / 2, depth + 1);
@@ -47510,8 +47573,8 @@ var CardiorespiratorySessionV1 = class _CardiorespiratorySessionV1 {
     }
     if (limit.candidateTimeSec < target) this.#advanceWithRecovery(target, depth);
   }
-  #step(target) {
-    const accepted = this.#image.rehydrateCurrent(), before = this.#ownHemo(accepted), old = accepted.cardiorespiratory;
+  #step(target, accepted, before) {
+    const old = accepted.cardiorespiratory;
     const c = this.fixture.cardiorespiratory, dt2 = target - before.acceptedTimeSec;
     const ventilation = stepRespiratoryMechanicsV1(c.respiratory, old.respiratory, dt2);
     const ro = ventilation.output;
@@ -47745,67 +47808,76 @@ var CardiorespiratorySessionV1 = class _CardiorespiratorySessionV1 {
     });
   }
   projectValues(outputIds) {
-    const hemo = this.currentAcceptedState(), cr = this.cardiorespiratoryState(), ro = this.respiratoryOutput();
+    const accepted = this.#image.rehydrateCurrent(), cr = accepted.cardiorespiratory;
+    const hemo = cr.hemodynamicReadback.available ? accepted : this.#ownHemo(accepted);
     const inherited = outputIds.filter((id) => !id.startsWith("cardiorespiratory."));
-    const p70 = partitionMainWireIntegratedModelStandard70OutputIdsV1(inherited), p68 = partitionMainWireIntegratedModelStandard68OutputIdsV1(p70.standard68OutputIds);
-    const common = {
-      completedBeatMetrics: this.#completedBeat,
-      mechanismResearchInputs: this.fixture.mechanismResearchInputs,
-      runtimeSignals: { pleuralPressureMmHg: cr.readback.appliedPleuralPressureMmHg, alveolarPressureMmHg: cr.readback.appliedAlveolarPressureMmHg }
-    };
-    const rhythm = hemo.composedRhythm.regularAtrialSourceState;
-    if (rhythm === null) throw new Error("Cardiorespiratory regular sinus projection is unavailable");
-    const base2 = cr.hemodynamicReadback.available ? projectMainWireIntegratedModelSelectedValuesFromNumericalReadbackV1({
-      ...common,
-      acceptedTimeSec: hemo.acceptedTimeSec,
-      regularSinusCycleLengthSec: rhythm.configuration.cycleLengthSec,
-      regularSinusNextActivationTimeSec: rhythm.nextActivationTimeSec,
-      dynamicMechanicalSupportLvadFlowMlPerSec: hemo.dynamicMechanicalSupport.acceptedFlowMlPerSec.LVAD,
-      acceptedNumericalReadback: Float64Array.from(cr.hemodynamicReadback.values)
-    }, p68.baseOutputIds) : projectMainWireIntegratedModelSelectedValuesV3({
-      ...common,
-      source: "standard-exact-checkpoint-restore",
-      acceptedState: hemo,
-      lastAcceptedStep: null
-    }, p68.baseOutputIds);
-    const inheritedValues = mergeMainWireIntegratedModelStandard70SelectedValuesV1({
-      outputIds: inherited,
-      completedBeatMetrics: this.#completedBeat,
-      standard68Values: mergeMainWireIntegratedModelStandard68SelectedValuesV1({ outputIds: p70.standard68OutputIds, baseValues: base2, completedBeatMetrics: this.#completedBeat })
-    });
-    const values3 = { ...inheritedValues };
-    const volumes = cardiorespiratoryPhysicalBloodVolumesV1(hemo);
-    const art = bloodGasPressuresFromAmountsV1(cr.blood.Ao, volumes.Ao, this.fixture.cardiorespiratory.bloodGas);
-    const ven = bloodGasPressuresFromAmountsV1(cr.blood.PA, volumes.PA, this.fixture.cardiorespiratory.bloodGas);
+    const values3 = {};
+    if (inherited.length > 0) {
+      const p70 = partitionMainWireIntegratedModelStandard70OutputIdsV1(inherited), p68 = partitionMainWireIntegratedModelStandard68OutputIdsV1(p70.standard68OutputIds);
+      const common = {
+        completedBeatMetrics: this.#completedBeat,
+        mechanismResearchInputs: this.fixture.mechanismResearchInputs,
+        runtimeSignals: { pleuralPressureMmHg: cr.readback.appliedPleuralPressureMmHg, alveolarPressureMmHg: cr.readback.appliedAlveolarPressureMmHg }
+      };
+      const rhythm = hemo.composedRhythm.regularAtrialSourceState;
+      if (rhythm === null) throw new Error("Cardiorespiratory regular sinus projection is unavailable");
+      const base2 = cr.hemodynamicReadback.available ? projectMainWireIntegratedModelSelectedValuesFromNumericalReadbackV1({
+        ...common,
+        acceptedTimeSec: hemo.acceptedTimeSec,
+        regularSinusCycleLengthSec: rhythm.configuration.cycleLengthSec,
+        regularSinusNextActivationTimeSec: rhythm.nextActivationTimeSec,
+        dynamicMechanicalSupportLvadFlowMlPerSec: hemo.dynamicMechanicalSupport.acceptedFlowMlPerSec.LVAD,
+        acceptedNumericalReadback: Float64Array.from(cr.hemodynamicReadback.values)
+      }, p68.baseOutputIds) : projectMainWireIntegratedModelSelectedValuesV3({
+        ...common,
+        source: "standard-exact-checkpoint-restore",
+        acceptedState: hemo,
+        lastAcceptedStep: null
+      }, p68.baseOutputIds);
+      Object.assign(values3, mergeMainWireIntegratedModelStandard70SelectedValuesV1({
+        outputIds: inherited,
+        completedBeatMetrics: this.#completedBeat,
+        standard68Values: mergeMainWireIntegratedModelStandard68SelectedValuesV1({ outputIds: p70.standard68OutputIds, baseValues: base2, completedBeatMetrics: this.#completedBeat })
+      }));
+    }
+    const selected = outputIds.filter((id) => id.startsWith("cardiorespiratory.")).map((id) => id.slice("cardiorespiratory.".length));
+    if (selected.length === 0) return values3;
+    const needsRespiratory = selected.some((key) => key.startsWith("pressure.") || key.startsWith("volume.") || key.startsWith("flow.unit.") || key.startsWith("lung.open.") || key.startsWith("gas.pressure.alveolar-") || key === "flow.airway" || key === "ventilator.pressure-limited");
+    const ro = needsRespiratory ? evaluateRespiratoryMechanicsV1(this.fixture.cardiorespiratory.respiratory, cr.respiratory) : null;
+    const needsArterial = selected.some((key) => key.startsWith("gas.") && key.includes("arterial"));
+    const needsVenous = selected.some((key) => key.startsWith("gas.") && key.includes("mixed-venous"));
+    const art = needsArterial ? bloodGasPressuresFromAmountsV1(cr.blood.Ao, hemo.coronary.circulation.nodeVolumesMl.Ao, this.fixture.cardiorespiratory.bloodGas) : null;
+    const ven = needsVenous ? bloodGasPressuresFromAmountsV1(cr.blood.PA, hemo.coronary.circulation.nodeVolumesMl.PA, this.fixture.cardiorespiratory.bloodGas) : null;
+    const inventory = selected.some((key) => key.startsWith("inventory.")) ? totalGas2(cr) : null;
     const c = this.fixture.cardiorespiratory, demand = c.systemicDemandMlMin + c.myocardialDemandMlMin;
     const consumption = cr.readback.systemicConsumptionMlMin + cr.readback.myocardialConsumptionMlMin;
     const intervalValue = (value) => cr.hemodynamicReadback.available ? value : null;
     const signals = {
       phase: c.respiratory.ventilator.mode === "spontaneous" ? respiratoryMuscleCycleTimeSecV1(c.respiratory, hemo.acceptedTimeSec) / (60 / c.respiratory.muscle.respiratoryRatePerMin) : cr.respiratory.ventilatorCycleTimeSec / (60 / c.respiratory.ventilator.respiratoryRatePerMin),
       "breath-index": cr.respiratory.completedBreaths,
-      "pressure.airway": ro.airwayPressureCmH2O,
-      "pressure.pleural": ro.pleuralPressureCmH2O,
-      "pressure.muscle": ro.musclePressureCmH2O,
-      "volume.lung": ro.totalLungVolumeL,
-      "flow.airway": ro.airwayFlowLPerSec,
-      "gas.pressure.arterial-o2": art.o2MmHg,
-      "gas.pressure.arterial-co2": art.co2MmHg,
-      "gas.pressure.mixed-venous-o2": ven.o2MmHg,
-      "gas.pressure.mixed-venous-co2": ven.co2MmHg,
-      "gas.saturation.arterial-o2": art.saturation01,
-      "gas.saturation.mixed-venous-o2": ven.saturation01,
-      "gas.ph.arterial": art.pH,
-      "gas.ph.mixed-venous": ven.pH,
-      "gas.content.arterial-o2": art.o2MolPerL * MOLAR_GAS_VOLUME_STPD_L_PER_MOL_V1 * 100,
-      "gas.content.mixed-venous-o2": ven.o2MolPerL * MOLAR_GAS_VOLUME_STPD_L_PER_MOL_V1 * 100,
+      "pressure.airway": ro?.airwayPressureCmH2O ?? null,
+      "pressure.pleural": ro?.pleuralPressureCmH2O ?? null,
+      "pressure.muscle": ro?.musclePressureCmH2O ?? null,
+      "volume.lung": ro?.totalLungVolumeL ?? null,
+      "flow.airway": ro?.airwayFlowLPerSec ?? null,
+      "gas.pressure.arterial-o2": art?.o2MmHg ?? null,
+      "gas.pressure.arterial-co2": art?.co2MmHg ?? null,
+      "gas.pressure.mixed-venous-o2": ven?.o2MmHg ?? null,
+      "gas.pressure.mixed-venous-co2": ven?.co2MmHg ?? null,
+      "gas.saturation.arterial-o2": art?.saturation01 ?? null,
+      "gas.saturation.mixed-venous-o2": ven?.saturation01 ?? null,
+      "gas.ph.arterial": art?.pH ?? null,
+      "gas.ph.mixed-venous": ven?.pH ?? null,
+      "gas.content.arterial-o2": art === null ? null : art.o2MolPerL * MOLAR_GAS_VOLUME_STPD_L_PER_MOL_V1 * 100,
+      "gas.content.mixed-venous-o2": ven === null ? null : ven.o2MolPerL * MOLAR_GAS_VOLUME_STPD_L_PER_MOL_V1 * 100,
       "flow.perfusion.1": intervalValue(cr.readback.pulmonaryFlow1MlSec),
       "flow.perfusion.2": intervalValue(cr.readback.pulmonaryFlow2MlSec),
-      "lung.open.1": Number(ro.airwayOpenByUnit[0]),
-      "lung.open.2": Number(ro.airwayOpenByUnit[1]),
+      "lung.open.1": Number(cr.respiratory.airwayOpenByUnit[0]),
+      "lung.open.2": Number(cr.respiratory.airwayOpenByUnit[1]),
       "tissue.oxygen-pressure.systemic": cr.systemic.amount.o2Mol / DEFAULT_TISSUE_GAS_PARAMETERS_V1.systemic.o2CapacityMolPerMmHg,
       "tissue.oxygen-pressure.myocardium": cr.myocardium.amount.o2Mol / DEFAULT_TISSUE_GAS_PARAMETERS_V1.myocardium.o2CapacityMolPerMmHg,
-      "inventory.oxygen": totalGas2(cr).o2Mol,
-      "inventory.carbon-dioxide": totalGas2(cr).co2Mol,
+      "inventory.oxygen": inventory?.o2Mol ?? null,
+      "inventory.carbon-dioxide": inventory?.co2Mol ?? null,
       "balance.oxygen": cr.readback.oxygenBalanceResidualMol,
       "balance.carbon-dioxide": cr.readback.co2BalanceResidualMol,
       "oxygen.delivery": intervalValue(cr.readback.aorticOxygenFluxMolPerSec * mlMinPerMolSec),
@@ -47814,11 +47886,11 @@ var CardiorespiratorySessionV1 = class _CardiorespiratorySessionV1 {
       "oxygen.demand-met-fraction": demand === 0 ? null : intervalValue(consumption / demand),
       "oxygen.myocardial-demand": c.myocardialDemandMlMin,
       "oxygen.myocardial-consumption": intervalValue(cr.readback.myocardialConsumptionMlMin),
-      "ventilator.pressure-limited": Number(ro.pressureLimited),
+      "ventilator.pressure-limited": ro === null ? null : Number(ro.pressureLimited),
       "ventilator.controlled": Number(c.respiratory.ventilator.mode !== "spontaneous"),
       "muscle.active": Number(c.respiratory.muscle.amplitudeCmH2O > 0)
     };
-    for (const i of [0, 1]) {
+    if (ro !== null) for (const i of [0, 1]) {
       const n = i + 1;
       signals[`pressure.alveolar.${n}`] = ro.alveolarPressureCmH2OByUnit[i];
       signals[`pressure.transpulmonary.${n}`] = ro.transpulmonaryPressureCmH2OByUnit[i];
@@ -47827,8 +47899,8 @@ var CardiorespiratorySessionV1 = class _CardiorespiratorySessionV1 {
       signals[`gas.pressure.alveolar-o2.${n}`] = ro.oxygenPartialPressureMmHgByUnit[i];
       signals[`gas.pressure.alveolar-co2.${n}`] = ro.co2PartialPressureMmHgByUnit[i];
     }
-    for (const outputId of outputIds.filter((id) => id.startsWith("cardiorespiratory."))) {
-      const key = outputId.slice("cardiorespiratory.".length);
+    for (const key of selected) {
+      const outputId = `cardiorespiratory.${key}`;
       if (!(key in signals)) throw new Error(`Unknown cardiorespiratory output ${outputId}`);
       const value = signals[key];
       values3[outputId] = {
@@ -59340,6 +59412,7 @@ function patchCardiorespiratoryControlV1(config, controlId, value) {
 
 // studio/integrations/cardiorespiratoryV1/CardiorespiratoryExactModelV1.ts
 var CARDIORESPIRATORY_CHECKPOINT_CODEC_ID_V1 = "circleheart-cardiorespiratory-checkpoint-codec-v1";
+var CARDIORESPIRATORY_HOT_PATH_INTEGRITY_TIER_V1 = "hot-path-lean";
 var checkpointCodecId = CARDIORESPIRATORY_CHECKPOINT_CODEC_ID_V1;
 var snapshotGateId = STUDIO_COMMON_SNAPSHOT_ADMISSION_ID_V1;
 var dt = 2e-3;
@@ -59378,14 +59451,14 @@ var CardiorespiratoryRuntimeHostV1 = class {
       const plan = plans?.get(input.scenarioId);
       if (plans && !plan) throw new Error("Missing scenario execution plan");
       const session = input.checkpoint ? CardiorespiratorySessionV1.restore(fixture, input.checkpoint.payload, plan) : CardiorespiratorySessionV1.create(fixture, plan);
-      const state = session.currentAcceptedState();
+      const state = session.currentAcceptedClock();
       if (input.checkpoint && (state.revision !== input.checkpoint.acceptedRevision || state.acceptedTimeSec !== input.checkpoint.acceptedTimeSec)) throw new Error("Checkpoint accepted clock mismatch");
       owned.set(input.scenarioId, { session, inputEpoch: 0, presentationAnchor: state.acceptedTimeSec, presentationOrdinal: 0 });
     }
     this.sessions.set(runtimeSessionId, owned);
   }
   frame(runtimeSessionId, scenarioId) {
-    const scenario = this.get(runtimeSessionId, scenarioId), state = scenario.session.currentAcceptedState();
+    const scenario = this.get(runtimeSessionId, scenarioId), state = scenario.session.currentAcceptedClock();
     return Object.freeze({
       modelId: CARDIORESPIRATORY_DEV_MODEL_ID_V1,
       runtimeSessionId,
@@ -59413,7 +59486,7 @@ var CardiorespiratoryRuntimeHostV1 = class {
     const scenario = this.get(runtimeSessionId, scenarioId);
     for (let row = 0; row < stepCount; row++) {
       this.advanceAccepted(runtimeSessionId, scenarioId);
-      const state = scenario.session.currentAcceptedState(), values3 = scenario.session.projectValues(selectedIds);
+      const state = scenario.session.currentAcceptedClock(), values3 = scenario.session.projectValues(selectedIds);
       acceptedRevisions[row] = state.revision;
       acceptedTimesSec[row] = state.acceptedTimeSec;
       selectedIds.forEach((id, column) => {
@@ -59428,7 +59501,7 @@ var CardiorespiratoryRuntimeHostV1 = class {
     const current = this.get(runtimeSessionId, scenarioId), next = current.session.reconfigure(validateAndOwnCardiorespiratoryFixtureV1(fixture));
     current.session = next;
     current.inputEpoch++;
-    current.presentationAnchor = next.currentAcceptedState().acceptedTimeSec;
+    current.presentationAnchor = next.currentAcceptedClock().acceptedTimeSec;
     current.presentationOrdinal = 0;
     return current.inputEpoch;
   }
@@ -59441,7 +59514,14 @@ function createCardiorespiratoryDevReleaseV1() {
     ...inherited,
     modelId: CARDIORESPIRATORY_DEV_MODEL_ID_V1,
     equations: Object.freeze({ ...inherited.equations, respiratoryOwner: "two-unit-respiratory-mechanics-v1", gasOwner: "conservative-cardiorespiratory-gas-v1", transactionId: "cardiorespiratory-atomic-composite-v1" }),
-    runtime: Object.freeze({ numericalSessionId: "cardiorespiratory-session-v1", presentationDtSec: dt, acceptedBoundaryCapture: true, scope: "local-development-no-publication", fixtureChangeSemantics: "atomic-warm-edit-anatomy-blood-chemistry-or-respiratory-capacity-cold-restart" }),
+    runtime: Object.freeze({
+      numericalSessionId: "cardiorespiratory-session-v1",
+      presentationDtSec: dt,
+      hotPathIntegrityTier: CARDIORESPIRATORY_HOT_PATH_INTEGRITY_TIER_V1,
+      acceptedBoundaryCapture: true,
+      scope: "local-development-no-publication",
+      fixtureChangeSemantics: "atomic-warm-edit-anatomy-blood-chemistry-or-respiratory-capacity-cold-restart"
+    }),
     solver: Object.freeze({ candidateSemantics: "atomic-composite-hemodynamics-respiratory-gas-tissue", acceptedStateMutation: false, failureRollback: "previous-accepted-composite" }),
     fixtureSchema: Object.freeze({ fixtureSchemaId: CARDIORESPIRATORY_FIXTURE_SCHEMA_ID_V1, definition: Object.freeze({ schemaId: CARDIORESPIRATORY_FIXTURE_SCHEMA_ID_V1, validationOwner: "CardiorespiratoryFixtureV1" }) }),
     checkpointCodec: Object.freeze({ checkpointCodecId, definition: Object.freeze({ checkpointId: "circleheart-cardiorespiratory-checkpoint-v1", schemaVersion: 1, restoreSemantics: "exact-composite-including-gas-inventory-ledgers-and-breath-clock" }) }),
@@ -59513,7 +59593,7 @@ function createCardiorespiratoryDevReleaseV1() {
       assertModel(model);
       const fixture = validateAndOwnCardiorespiratoryFixtureV1(capture.fixture);
       const restored = CardiorespiratorySessionV1.restore(fixture, capture.checkpoint.payload);
-      const state = restored.currentAcceptedState();
+      const state = restored.currentAcceptedClock();
       if (state.revision !== capture.checkpoint.acceptedRevision || state.acceptedTimeSec !== capture.checkpoint.acceptedTimeSec || studioCanonicalJsonStringify(json(restored.checkpoint())) !== studioCanonicalJsonStringify(capture.checkpoint.payload)) throw new Error("Cardiorespiratory checkpoint round trip mismatch");
     }
   });
@@ -59532,7 +59612,7 @@ function createCardiorespiratoryDevReleaseV1() {
       const scenarios = input.desiredContent.scenarios.map((desired, index) => {
         const correlation = input.correlation.scenarios[index], current = host.get(input.correlation.runtimeSessionId, desired.scenarioId);
         if (correlation?.scenarioId !== desired.scenarioId || correlation.expectedInputEpoch !== current.inputEpoch || studioCanonicalJsonStringify(desired.fixture) !== studioCanonicalJsonStringify(json(current.session.fixture))) throw new Error("Stale cardiorespiratory capture");
-        const state = current.session.currentAcceptedState();
+        const state = current.session.currentAcceptedClock();
         return { scenarioId: desired.scenarioId, label: desired.label, capture: { fixture: json(current.session.fixture), checkpoint: {
           acceptedRevision: state.revision,
           acceptedTimeSec: state.acceptedTimeSec,

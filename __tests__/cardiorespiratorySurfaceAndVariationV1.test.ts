@@ -7,7 +7,7 @@ import { CARDIORESPIRATORY_PRIMITIVE_SIGNALS_V1, CARDIORESPIRATORY_PRIMITIVE_CON
 import { resolveStudioItemPresentationV1 } from "@/studio/presentation/StudioItemPresentationCatalogV1";
 import { CardiorespiratoryVariationCollectorV1, CARDIORESPIRATORY_VARIATION_REQUIRED_IDS_V1, evaluateCardiorespiratoryVariationV1, CARDIORESPIRATORY_VARIATION_OUTPUT_IDS_V1 as ids, type CardiorespiratoryVariationSampleV1 as Sample } from "@/analysis/methods/cardiorespiratory/CardiorespiratoryVariationV1";
 import type { RegisteredModelPresentationBatchV2, StudioSimulationAnalysisV2 } from "@/studio/contracts/v2/simulation";
-import { genericXYSegmentsV1 } from "@/components/workbench/presentation/GenericXYGraphV1";
+import { genericXYDisplayPathV1, genericXYSegmentsV1 } from "@/components/workbench/presentation/GenericXYGraphV1";
 const samples = (): Sample[] => Array.from({ length: 10001 }, (_, i) => {
   const t = i * .002, cardiacPhase = i % 500 / 500, amplitude = [40, 50, 60, 50, 40][Math.floor(i / 500) % 5]!;
   return { inputEpoch: 0, acceptedRevision: i, acceptedTimeSec: t, values: {
@@ -60,6 +60,26 @@ describe("qualified three-breath PPV/SVV", () => {
 it("generic XY uses simultaneous observations and breaks gaps, phases and epochs without closing or filling", () => {
   const observations = [0, .002, .004, .02, .022, .024].map((time, i) => ({ inputEpoch: i === 5 ? 1 : 0, acceptedRevision: i, acceptedTimeSec: time, presentationTimeSec: time, values: { x: i, y: i + 10, phase: i === 2 ? .1 : .5 } }));
   expect(genericXYSegmentsV1({ id: "t", label: "t", color: "red", samples: observations, xOutputId: "x", yOutputId: "y", cyclePhaseOutputId: "phase" })).toEqual([[[0, 10], [1, 11]], [[2, 12]], [[3, 13], [4, 14]], [[5, 15]]]);
+});
+
+it("XY display coalescing retains paired coordinate extrema and chronology inside each subpixel run", () => {
+  const points: readonly (readonly [number, number])[] = Object.freeze([
+    [.3, .3], [.31, .31], [.1, .2], [.2, .1], [.6, .4], [.4, .65], [.42, .42], [.4, .4],
+  ].map(p => Object.freeze(p) as readonly [number, number]));
+  expect(genericXYDisplayPathV1(points, x => x, y => y)).toBe("M0.30,0.30 L0.10,0.20 L0.20,0.10 L0.60,0.40 L0.40,0.65 L0.40,0.40");
+  expect(points).toHaveLength(8);
+  expect(genericXYDisplayPathV1([[.1, .1], [1, .1], [.2, .2]], x => x, y => y)).toBe("M0.10,0.10 L1.00,0.10 L0.20,0.20");
+});
+
+it("XY display coalescing bounds a dense subpixel path without reducing its source or joining missing-data gaps", () => {
+  const points: readonly [number, number][] = Array.from({ length: 10000 }, (_, i) => [i / 9999 * .5, .2]);
+  expect(genericXYDisplayPathV1(points, x => x, y => y)).toBe("M0.00,0.20 L0.50,0.20");
+  expect(points).toHaveLength(10000);
+  const samples = [0, 1, 2].map(i => ({ inputEpoch: 0, acceptedRevision: i, acceptedTimeSec: i * .002, presentationTimeSec: i * .002,
+    values: { x: i, y: i === 1 ? NaN : i, phase: .5 } }));
+  const paths = genericXYSegmentsV1({ id: "t", label: "t", color: "red", samples, xOutputId: "x", yOutputId: "y", cyclePhaseOutputId: "phase" })
+    .map(segment => genericXYDisplayPathV1(segment, x => x, y => y));
+  expect(paths).toEqual(["M0.00,0.00", "M2.00,2.00"]);
 });
 
 it("PPV/SVV collector is batch-partition invariant and invalidates a broken stream immediately", () => {

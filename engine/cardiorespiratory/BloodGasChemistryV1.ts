@@ -64,29 +64,35 @@ function bufferTerms(parameters: BloodGasChemistryParametersV1): { beta: number;
     offset: parameters.baseExcessMmolPerL / (1 - hbMmolPerL / 43),
   };
 }
-function co2AtPH(pH: number, parameters: BloodGasChemistryParametersV1): number {
-  const { beta, offset } = bufferTerms(parameters);
+function co2AtPH(pH: number, beta: number, offset: number): number {
   const bicarbonate = HCO3_REFERENCE + offset - beta * (pH - 7.4);
   if (!(bicarbonate > 0)) throw new RangeError('buffer closure has nonpositive bicarbonate');
   return bicarbonate / (ALPHA_CO2_MMOL_PER_L_PER_MMHG * 10 ** (pH - PK));
+}
+function fixedBufferTerms(parameters: BloodGasChemistryParametersV1) {
+  // Low BE/high Hb can exhaust bicarbonate before the nominal upper pH bound.
+  // Keep an explicit strictly positive bicarbonate margin; never clamp input state.
+  const { beta, offset } = bufferTerms(parameters);
+  const upperPH = Math.min(7.8, 7.4 + (HCO3_REFERENCE + offset - 0.1) / beta);
+  return { beta, offset, upperPH,
+    minimumMmHg: co2AtPH(upperPH, beta, offset), maximumMmHg: co2AtPH(6.6, beta, offset) };
 }
 export function bloodGasCo2PressureBoundsV1(parameters: BloodGasChemistryParametersV1): Readonly<{
   minimumMmHg: number; maximumMmHg: number;
 }> {
   validateBloodGasChemistryV1(parameters);
-  // Low BE/high Hb can exhaust bicarbonate before the nominal upper pH bound.
-  // Keep an explicit strictly positive bicarbonate margin; never clamp input state.
-  const { beta, offset } = bufferTerms(parameters);
-  const upperPH = Math.min(7.8, 7.4 + (HCO3_REFERENCE + offset - 0.1) / beta);
-  return { minimumMmHg: co2AtPH(upperPH, parameters), maximumMmHg: co2AtPH(6.6, parameters) };
+  const { minimumMmHg, maximumMmHg } = fixedBufferTerms(parameters);
+  return { minimumMmHg, maximumMmHg };
 }
 export function respiratoryPHFromCo2V1(co2MmHg: number, parameters: BloodGasChemistryParametersV1): number {
   validateBloodGasChemistryV1(parameters);
-  const bounds = bloodGasCo2PressureBoundsV1(parameters);
-  finiteRange(co2MmHg, bounds.minimumMmHg, bounds.maximumMmHg, 'co2MmHg');
-  const { beta, offset } = bufferTerms(parameters);
+  return respiratoryPHAtFixedBuffer(co2MmHg, fixedBufferTerms(parameters));
+}
+function respiratoryPHAtFixedBuffer(co2MmHg: number, terms: ReturnType<typeof fixedBufferTerms>): number {
+  finiteRange(co2MmHg, terms.minimumMmHg, terms.maximumMmHg, 'co2MmHg');
+  const { beta, offset } = terms;
   let low = 6.6;
-  let high = Math.min(7.8, 7.4 + (HCO3_REFERENCE + offset - 0.1) / beta);
+  let high = terms.upperPH;
   let pH = (low + high) / 2;
   for (let i = 0; i < BISECTION_ITERATIONS; i += 1) {
     const bicarbonate = ALPHA_CO2_MMOL_PER_L_PER_MMHG * co2MmHg * 10 ** (pH - PK);
@@ -111,6 +117,11 @@ export function bloodGasContentsFromPressuresV1(
   parameters: BloodGasChemistryParametersV1 = DEFAULT_BLOOD_GAS_CHEMISTRY_V1,
 ): BloodGasEvaluationV1 {
   const pH = respiratoryPHFromCo2V1(pressures.co2MmHg, parameters);
+  return bloodGasContentsAtResolvedPH(pressures, parameters, pH);
+}
+function bloodGasContentsAtResolvedPH(
+  pressures: BloodGasPressureV1, parameters: BloodGasChemistryParametersV1, pH: number,
+): BloodGasEvaluationV1 {
   const saturation01 = oxygenSaturationFromPressureAndPHV1(pressures.o2MmHg, pH);
   const o2MlPerDl = 1.34 * parameters.hemoglobinGPerDl * saturation01 + 0.0031 * pressures.o2MmHg;
   const bicarbonateMmolPerL = ALPHA_CO2_MMOL_PER_L_PER_MMHG * pressures.co2MmHg * 10 ** (pH - PK);
@@ -126,12 +137,6 @@ export function bloodGasContentsFromPressuresV1(
     o2MolPerL: o2MlPerDl * 0.01 / MOLAR_GAS_VOLUME_STPD_L_PER_MOL_V1,
     co2MolPerL: plasmaCo2MmolPerL * wholeBloodCorrection / 1000,
   };
-}
-function oxygenPressureAtContentAndCo2(
-  o2MolPerL: number, co2MmHg: number, parameters: BloodGasChemistryParametersV1,
-): number {
-  const pH = respiratoryPHFromCo2V1(co2MmHg, parameters);
-  return oxygenPressureAtContentAndPH(o2MolPerL, pH, parameters);
 }
 function oxygenPressureAtContentAndPH(
   o2MolPerL: number, pH: number, parameters: BloodGasChemistryParametersV1,
@@ -169,31 +174,38 @@ function bloodGasInverseDomain(contents: BloodGasContentV1, parameters: BloodGas
   validateBloodGasChemistryV1(parameters);
   finiteRange(contents.o2MolPerL, 0, Number.MAX_VALUE, 'o2MolPerL');
   finiteRange(contents.co2MolPerL, 0, Number.MAX_VALUE, 'co2MolPerL');
-  const bounds = bloodGasCo2PressureBoundsV1(parameters);
-  let low = bounds.minimumMmHg;
-  let high = bounds.maximumMmHg;
+  // Per-call fixed coefficients only: mutable caller parameter objects are never
+  // cached, and identical equations/domain checks serve validation and inversion.
+  const terms = fixedBufferTerms(parameters);
+  const low = terms.minimumMmHg;
+  let high = terms.maximumMmHg;
+  const lowPH = respiratoryPHAtFixedBuffer(low, terms);
+  let highPH = respiratoryPHAtFixedBuffer(high, terms);
   // The finite PO2 ceiling makes the feasible PCO2 interval content-dependent.
   // Restrict the SEARCH interval, never the accepted inventory or returned state.
-  const maximumO2At = (co2MmHg: number) => bloodGasContentsFromPressuresV1({ o2MmHg: 2000, co2MmHg }, parameters).o2MolPerL;
-  finiteRange(contents.o2MolPerL, 0, maximumO2At(low), 'o2MolPerL (chemical domain)');
-  if (contents.o2MolPerL > maximumO2At(high)) {
+  const maximumO2At = (co2MmHg: number, pH: number) => bloodGasContentsAtResolvedPH({ o2MmHg: 2000, co2MmHg }, parameters, pH).o2MolPerL;
+  finiteRange(contents.o2MolPerL, 0, maximumO2At(low, lowPH), 'o2MolPerL (chemical domain)');
+  if (contents.o2MolPerL > maximumO2At(high, highPH)) {
     let allowed = low;
     let excluded = high;
     for (let i = 0; i < BISECTION_ITERATIONS; i += 1) {
       const middle = (allowed + excluded) / 2;
-      if (maximumO2At(middle) >= contents.o2MolPerL) allowed = middle; else excluded = middle;
+      if (maximumO2At(middle, respiratoryPHAtFixedBuffer(middle, terms)) >= contents.o2MolPerL) allowed = middle; else excluded = middle;
     }
     high = allowed;
+    highPH = respiratoryPHAtFixedBuffer(high, terms);
   }
-  const at = (co2MmHg: number) => bloodGasContentsFromPressuresV1({
-    o2MmHg: oxygenPressureAtContentAndCo2(contents.o2MolPerL, co2MmHg, parameters), co2MmHg,
-  }, parameters);
-  const minimum = at(low).co2MolPerL;
-  const maximum = at(high).co2MolPerL;
+  const atPH = (co2MmHg: number, pH: number) => bloodGasContentsAtResolvedPH({
+    o2MmHg: oxygenPressureAtContentAndPH(contents.o2MolPerL, pH, parameters), co2MmHg,
+  }, parameters, pH);
+  const at = (co2MmHg: number) => atPH(co2MmHg, respiratoryPHAtFixedBuffer(co2MmHg, terms));
+  const minimumValue = atPH(low, lowPH), maximumValue = atPH(high, highPH);
+  const minimum = minimumValue.co2MolPerL;
+  const maximum = maximumValue.co2MolPerL;
   if (contents.co2MolPerL < minimum - 1e-14 || contents.co2MolPerL > maximum + 1e-14) {
     throw new RangeError(`co2MolPerL outside fixed-buffer chemical domain [${minimum}, ${maximum}]`);
   }
-  return { low, high, at, minimum, maximum };
+  return { low, high, at, minimum, maximum, minimumValue, maximumValue, beta: terms.beta };
 }
 export function validateBloodGasContentsV1(
   contents: BloodGasContentV1,
@@ -201,19 +213,47 @@ export function validateBloodGasContentsV1(
 ): void {
   bloodGasInverseDomain(contents, parameters);
 }
-/** Bounded nested inversion; impossible contents fail instead of changing inventory. */
+/** Bounded coupled inversion; impossible contents fail instead of changing inventory. */
 export function bloodGasPressuresFromContentsV1(
   contents: BloodGasContentV1,
   parameters: BloodGasChemistryParametersV1 = DEFAULT_BLOOD_GAS_CHEMISTRY_V1,
 ): BloodGasEvaluationV1 {
   const domain = bloodGasInverseDomain(contents, parameters);
   let { low, high } = domain;
-  const { at, minimum, maximum } = domain;
-  if (Math.abs(contents.co2MolPerL - minimum) <= 1e-14) return at(low);
-  if (Math.abs(contents.co2MolPerL - maximum) <= 1e-14) return at(high);
+  const { at, minimum, maximum, beta } = domain;
+  if (Math.abs(contents.co2MolPerL - minimum) <= 1e-14) return domain.minimumValue;
+  if (Math.abs(contents.co2MolPerL - maximum) <= 1e-14) return domain.maximumValue;
+  const oxygenCapacityMlPerDl = 1.34 * parameters.hemoglobinGPerDl;
+  const hbCorrection = 0.0289 * parameters.hemoglobinGPerDl;
+  let co2MmHg = 40 > low && 40 < high ? 40 : (low + high) / 2;
   for (let i = 0; i < BISECTION_ITERATIONS; i += 1) {
-    const middle = (low + high) / 2;
-    if (at(middle).co2MolPerL > contents.co2MolPerL) high = middle; else low = middle;
+    const value = at(co2MmHg);
+    const residual = value.co2MolPerL - contents.co2MolPerL;
+    if (residual === 0) return value;
+    if (residual > 0) high = co2MmHg; else low = co2MmHg;
+
+    // Differentiate total CO2 ALONG constant total O2, including Bohr/Haldane
+    // coupling. The pH derivative follows the same fixed-buffer closure.
+    const pHDCo2 = -value.bicarbonateMmolPerL
+      / (co2MmHg * (Math.LN10 * value.bicarbonateMmolPerL + beta));
+    const shift = 10 ** (0.48 * (7.4 - value.pH));
+    const x = value.o2MmHg / shift;
+    const n = x * x * x + 150 * x;
+    const saturationDO2 = 23_400 * (3 * x * x + 150) / ((n + 23_400) ** 2 * shift);
+    const saturationDPH = saturationDO2 * value.o2MmHg * (0.48 * Math.LN10)
+      * 0.0031 / (oxygenCapacityMlPerDl * saturationDO2 + 0.0031);
+    const saturationFactor = 3.352 - 0.456 * value.saturation01;
+    const pHFactor = 8.142 - value.pH;
+    const correctionLoss = hbCorrection / (saturationFactor * pHFactor);
+    const correctionDCo2 = -correctionLoss * (0.456 * saturationDPH / saturationFactor + 1 / pHFactor) * pHDCo2;
+    const plasmaCo2 = value.bicarbonateMmolPerL + ALPHA_CO2_MMOL_PER_L_PER_MMHG * co2MmHg;
+    const derivative = ((ALPHA_CO2_MMOL_PER_L_PER_MMHG - beta * pHDCo2) * (1 - correctionLoss)
+      + plasmaCo2 * correctionDCo2) / 1000;
+    const candidate = co2MmHg - residual / derivative;
+    // Stop only at an exact content match or floating-point pressure stagnation,
+    // rather than relaxing the former bisection's content/pressure accuracy.
+    if (candidate === co2MmHg) return value;
+    co2MmHg = candidate > low && candidate < high ? candidate : (low + high) / 2;
   }
   return at((low + high) / 2);
 }
