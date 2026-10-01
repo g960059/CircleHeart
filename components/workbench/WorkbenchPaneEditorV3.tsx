@@ -207,6 +207,7 @@ export function workbenchGraphDisplaySettingsAvailableV3(
 ): boolean {
   return (
     renderer === "sweep" ||
+    renderer === "xy" ||
     renderer === "pressure-volume" ||
     renderer === "structural-return"
   );
@@ -413,7 +414,7 @@ export function resolveGraphSeriesPresentationV3(
   );
   if (binding === undefined) return undefined;
   const outputId =
-    "outputId" in binding ? binding.outputId : binding.pressureOutputId;
+    "outputId" in binding ? binding.outputId : binding.kind === "xy" ? binding.yOutputId : binding.pressureOutputId;
   const presentation = resolveWorkbenchGraphSeriesPresentationV3({
     definition: input.contract.outputCatalog.find(
       (output) => output.outputId === outputId,

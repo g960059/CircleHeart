@@ -88,7 +88,7 @@ export type WorkbenchScenarioPresentationStoreOptionsV3 =
  */
 export class WorkbenchScenarioPresentationSampleStoreV3 {
   #options: WorkbenchPresentationBufferOptionsV3;
-  readonly #exactOrbitOptions: WorkbenchExactOrbitBufferOptionsV3;
+  #exactOrbitOptions: WorkbenchExactOrbitBufferOptionsV3;
   readonly #sweepListeners = new Set<() => void>();
   readonly #pressureVolumeListeners = new Set<() => void>();
   readonly #clocks = new Map<string, WorkbenchScenarioPresentationClockV3>();
@@ -129,6 +129,13 @@ export class WorkbenchScenarioPresentationSampleStoreV3 {
         ? {}
         : { windowSec: exactOrbitWindowSec }),
     });
+  }
+
+  /** A respiratory XY orbit may span longer than a cardiac cycle. */
+  ensureExactOrbitWindowSec(seconds: number): void {
+    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 30) return;
+    this.#exactOrbitOptions = Object.freeze({ windowSec: Math.max(seconds, this.#exactOrbitOptions.windowSec ?? 4),
+      capacity: Math.max(Math.ceil(seconds / .002) + 24, this.#exactOrbitOptions.capacity ?? 2048) });
   }
 
   /** The Model Surface supplies the phase identity; never infer it from a name. */

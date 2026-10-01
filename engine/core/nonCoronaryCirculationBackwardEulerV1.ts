@@ -1,3 +1,4 @@
+import { evaluateParallelPulmonaryPathsV1 } from "./ParallelPulmonaryPathsV1";
 import {
   buildAuthoritativeCirculationGraphV1,
   downstreamEffectivePressureAndDerivativeV1,
@@ -242,6 +243,8 @@ export type NonCoronaryCirculationRuntimeParamsV1 = Readonly<{
   vascular: VascularPvRuntimeParameterViewV1;
   losses: BaseEdgeLossRuntimeParameterViewV1;
   respiratory: RespiratoryPressureParameterViewV1;
+  /** New exact owners only; omission preserves the published circulation. */
+  parallelPulmonaryPaths?: import("./ParallelPulmonaryPathsV1").ParallelPulmonaryPathsV1;
   /** Explicit even for normal, so numeric identity and provenance cannot diverge. */
   valveResearchInput: MainWireFourValveDiseaseResearchInputV1;
 }>;
@@ -2720,6 +2723,12 @@ function evaluateCandidate<TEvaluation, TCompanionTrial = never>(
       flows[edgeIndex] = evaluation.flowMlPerSec;
       continue;
     }
+    if (name === "PCap_PVen" && input.runtime.parallelPulmonaryPaths !== undefined) {
+      flows[edgeIndex] = evaluateParallelPulmonaryPathsV1(
+        input.runtime.parallelPulmonaryPaths, upstreamPressure, downstreamPressure,
+      ).totalFlowMlPerSec;
+      continue;
+    }
     const edgeExternalPressureMmHg = respiratoryExternalPressureFromFrameV1(
       respiratoryKind(edge.ext),
       respiratoryExternalPressures,
@@ -3061,6 +3070,11 @@ function analyticEdgeFlowPressureDerivativesV1<
     ]!;
   let upstreamMlPerSecPerMmHg: number;
   let downstreamMlPerSecPerMmHg: number;
+
+  if (edgeName === "PCap_PVen" && input.runtime.parallelPulmonaryPaths !== undefined) {
+    return evaluateParallelPulmonaryPathsV1(input.runtime.parallelPulmonaryPaths,
+      upstreamPressureMmHg, downstreamPressureMmHg);
+  }
 
   if (edge.kind === "valve") {
     const evaluation = current.valveEvaluations[

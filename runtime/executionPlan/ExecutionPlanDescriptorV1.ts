@@ -40,7 +40,7 @@ export type ExecutionPlanUpdateGroupV1 = Readonly<{
   periodTicks: number;
   phaseTicks: number;
   effectiveStepSec: number;
-  integration: "fixed-step-backward-euler";
+  integration: "fixed-step-backward-euler" | "fixed-step-conservative-partitioned";
   solveGroupId: string;
   solveGroupIndex: number;
 }>;

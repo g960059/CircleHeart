@@ -188,6 +188,18 @@ export const prSmokeTests = [
 ] as const;
 
 export const regressionTests = [
+  "__tests__/cardiorespiratoryPulmonaryHydraulicsV1.test.ts",
+  "__tests__/cardiorespiratoryDevCompositionV1.test.ts",
+  "__tests__/cardiorespiratoryBreathMetricsV1.test.ts",
+  "__tests__/cardiorespiratorySurfaceAndVariationV1.test.ts",
+  "__tests__/cardiorespiratoryBloodGasChemistryV1.test.ts",
+  "__tests__/cardiorespiratoryConservativeGasTransportV1.test.ts",
+  "__tests__/cardiorespiratoryTissueGasExchangeV1.test.ts",
+  "__tests__/cardiorespiratoryPulmonaryGasExchangeV1.test.ts",
+  "engine/__tests__/respiratoryMechanicsV1.test.ts",
+  "engine/__tests__/cardiorespiratoryExecutionPlanV1.test.ts",
+  "__tests__/cardiorespiratoryStudioAdapterV1.test.ts",
+  "__tests__/cardiorespiratorySessionV1.test.ts",
   "__tests__/authoredModelSuccessorV1.test.ts",
   "__tests__/immutableCanonicalJsonV1.test.ts",
   "__tests__/immutableValidationProofV1.test.ts",

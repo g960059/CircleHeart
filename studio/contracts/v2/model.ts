@@ -39,8 +39,21 @@ export type PressureVolumeGraphSeriesDefinitionV2 = Readonly<{
   cyclePhaseOutputId: string;
 }>;
 
+export type XYGraphSeriesDefinitionV2 = Readonly<{
+  kind: "xy";
+  seriesId: string;
+  xOutputId: string;
+  yOutputId: string;
+  cyclePhaseOutputId: string;
+}>;
+export type XYGraphDefinitionV2 = Readonly<{
+  graphId: string;
+  renderer: "xy";
+  seriesCatalog: readonly XYGraphSeriesDefinitionV2[];
+  defaultSeriesIds: readonly string[];
+}>;
 export type GraphSeriesDefinitionV2 =
-  ScalarGraphSeriesDefinitionV2 | PressureVolumeGraphSeriesDefinitionV2;
+  ScalarGraphSeriesDefinitionV2 | PressureVolumeGraphSeriesDefinitionV2 | XYGraphSeriesDefinitionV2;
 
 export type SweepGraphDefinitionV2 = Readonly<{
   graphId: string;
@@ -65,6 +78,7 @@ export type StructuralReturnGraphDefinitionV2 = Readonly<{
 
 export type GraphDefinitionV2 =
   | SweepGraphDefinitionV2
+  | XYGraphDefinitionV2
   | PressureVolumeGraphDefinitionV2
   | StructuralReturnGraphDefinitionV2
   | Readonly<{ graphId: string; renderer: "cycle-waveform"; derivationId: string }>;
@@ -730,7 +744,7 @@ export function assertGraphCatalogV2(
     const graph = definition as Record<string, unknown>;
     if (graph.renderer === "sweep") {
       assertExactKeysV2(definition, definitionPath, SWEEP_GRAPH_KEYS_V2);
-    } else if (graph.renderer === "pressure-volume") {
+    } else if (graph.renderer === "pressure-volume" || graph.renderer === "xy") {
       assertExactKeysV2(
         definition,
         definitionPath,
@@ -747,7 +761,7 @@ export function assertGraphCatalogV2(
     } else {
       throw new ModelContractValidationErrorV2(
         `${definitionPath}.renderer`,
-        'must be "sweep", "pressure-volume", "structural-return", or "cycle-waveform"',
+        'must be "sweep", "pressure-volume", "xy", "structural-return", or "cycle-waveform"',
       );
     }
     const graphId = graph.graphId;
@@ -788,6 +802,7 @@ export function assertGraphCatalogV2(
             `${definitionPath}.seriesCatalog`,
             outputCatalog,
           )
+        : graph.renderer === "xy" ? assertXYGraphSeriesCatalogV2(graph.seriesCatalog, `${definitionPath}.seriesCatalog`, outputCatalog)
         : assertPressureVolumeGraphSeriesCatalogV2(
             graph.seriesCatalog,
             `${definitionPath}.seriesCatalog`,
@@ -799,6 +814,29 @@ export function assertGraphCatalogV2(
       seriesIds,
     );
   }
+}
+
+function assertXYGraphSeriesCatalogV2(value: unknown, path: string, outputs: ValidatedOutputCatalogV2): ReadonlySet<string> {
+  if (!Array.isArray(value) || value.length === 0) throw new ModelContractValidationErrorV2(path, "must contain XY series");
+  const ids = new Set<string>(), bindings = new Set<string>();
+  const units: Partial<Record<"xOutputId" | "yOutputId", string>> = {};
+  value.forEach((entry, index) => {
+    const at = `${path}[${index}]`, series = requiredGraphSeriesRecordV2(entry, at);
+    assertExactKeysV2(series, at, ["cyclePhaseOutputId", "kind", "seriesId", "xOutputId", "yOutputId"]);
+    if (series.kind !== "xy") throw new ModelContractValidationErrorV2(at, "must be an XY series");
+    requiredUniqueGraphSeriesIdV2(series.seriesId, `${at}.seriesId`, ids);
+    for (const key of ["xOutputId", "yOutputId"] as const) {
+      const output = requiredScalarGraphOutputV2(series[key], `${at}.${key}`, outputs);
+      if (units[key] !== undefined && units[key] !== output.unit) throw new ModelContractValidationErrorV2(at, "XY axis units must match across series");
+      units[key] = output.unit;
+    }
+    const phase = requiredScalarGraphOutputV2(series.cyclePhaseOutputId, `${at}.cyclePhaseOutputId`, outputs);
+    if (phase.unit !== "1") throw new ModelContractValidationErrorV2(at, "XY phase must be dimensionless");
+    const binding = `${series.xOutputId}\0${series.yOutputId}\0${series.cyclePhaseOutputId}`;
+    if (bindings.has(binding)) throw new ModelContractValidationErrorV2(at, "duplicate XY output binding");
+    bindings.add(binding);
+  });
+  return ids;
 }
 
 function assertScalarGraphSeriesCatalogV2(

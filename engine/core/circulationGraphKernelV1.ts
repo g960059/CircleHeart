@@ -379,6 +379,8 @@ export function vascularTransmuralPressureAndVolumeTangentFromLawV1(
 }
 
 export type RespiratoryPressureParameterViewV1 = {
+  /** Candidate-owned respiratory mechanics. Absent in the published model. */
+  readonly coupledPressures?: RespiratoryExternalPressuresV1;
   readonly PEEP: number;
   readonly Pth0: number;
   readonly respAmpTh: number;
@@ -395,6 +397,11 @@ export function respiratoryExternalPressuresV1(
   timeSec: number,
   params: RespiratoryPressureParameterViewV1,
 ): RespiratoryExternalPressuresV1 {
+  if (params.coupledPressures !== undefined) {
+    if (!Number.isFinite(params.coupledPressures.pthMmHg)
+      || !Number.isFinite(params.coupledPressures.palvMmHg)) throw new Error("Invalid coupled respiratory pressure");
+    return params.coupledPressures;
+  }
   const respiratorySignal = Math.sin(2 * Math.PI * params.respRate * timeSec);
   return {
     pthMmHg: params.Pth0 + 0.20 * params.PEEP + params.respAmpTh * respiratorySignal,

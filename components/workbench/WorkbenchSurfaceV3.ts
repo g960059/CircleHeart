@@ -643,7 +643,7 @@ function createDefaultGraphPaneV3(
     ...(graph.renderer === "sweep"
       ? { windowSec: WORKBENCH_SWEEP_WINDOW_DEFAULT_SEC_V3 }
       : {
-          ...(graph.renderer === "cycle-waveform" ? {} : { historyDepth: WORKBENCH_GRAPH_HISTORY_DEFAULT_DEPTH_V3 }),
+          ...((graph.renderer === "cycle-waveform" || graph.renderer === "xy") ? {} : { historyDepth: WORKBENCH_GRAPH_HISTORY_DEFAULT_DEPTH_V3 }),
           ...(graph.renderer === "pressure-volume"
             ? options.periodicPvaSupported === false
               ? {

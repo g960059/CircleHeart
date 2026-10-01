@@ -1,4 +1,5 @@
 import React from "react";
+import { GenericXYGraphV1 } from "./presentation/GenericXYGraphV1";
 import { useTranslation } from "react-i18next";
 import { SimulationLegendPlaceholderV1, SimulationPanePlaceholderV1 } from "@/components/simulation/SimulationPreparationV1";
 
@@ -272,8 +273,9 @@ function SampledGraphPaneBodyV3({
   const { appTheme } = useAppTheme();
   const graphPresentation = useWorkbenchSampledGraphPresentationSamplesV3(
     sampleStore,
-    graph.renderer,
+    graph.renderer === "xy" ? "pressure-volume" : graph.renderer,
   );
+  React.useEffect(() => { if (graph.renderer === "xy") sampleStore.ensureExactOrbitWindowSec(18); }, [graph.renderer, sampleStore]);
   const samplesByScenarioId =
     graphPresentation.renderer === "sweep"
       ? graphPresentation.samplesByScenarioId
@@ -357,6 +359,23 @@ function SampledGraphPaneBodyV3({
     pressureVolumeAnalysisId,
     pvaAnalysisRequestKey,
   ]);
+  if (graph.renderer === "xy") {
+    const first = graph.seriesCatalog[0]!;
+    const label = (id: string) => {
+      const definition = contract.outputCatalog.find(output => output.outputId === id);
+      const p = resolveWorkbenchGraphSeriesPresentationV3({ definition, outputId: id, seriesId: id, storedLabel: undefined, locale: i18n.language.startsWith("ja") ? "ja" : "en" });
+      return `${p.label}${definition?.unit && definition.unit !== "1" ? ` (${definition.unit})` : ""}`;
+    };
+    return <GenericXYGraphV1 xLabel={label(first.xOutputId)} yLabel={label(first.yOutputId)} axisRanges={pane.axisRanges} actions={legendActions}
+      traces={scenarios.flatMap((scenario, scenarioIndex) => !visibleScenarioIds.includes(scenario.scenarioId) ? [] : displayedSeries.flatMap((series, seriesIndex) => {
+        const binding = graph.seriesCatalog.find(b => b.seriesId === series.seriesId);
+        if (!binding || isWorkbenchGraphTraceExcludedV3(pane, scenario.scenarioId, series.seriesId)) return [];
+        const style = resolveWorkbenchGraphTraceStyleV3({ pane, surface, renderer: "xy", authoredScenarioCount, scenarioId: scenario.scenarioId, scenarioIndex,
+          seriesId: series.seriesId, seriesIndex, appTheme });
+        return [{ id: `${scenario.scenarioId}/${series.seriesId}`, label: `${scenario.label} · ${series.label}`, color: style.color,
+          samples: exactOrbitSamplesByScenarioId[scenario.scenarioId] ?? [], ...binding }];
+      }))} />;
+  }
   if (graph.renderer === "pressure-volume") {
     const bindings = displayedSeries.flatMap((series) => {
       const binding = graph.seriesCatalog.find(

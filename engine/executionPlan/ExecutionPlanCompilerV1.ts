@@ -147,7 +147,8 @@ function compileUpdateScheduleV1(
       "updateGroupId",
     ], "update group");
     assertPortableId(group.updateGroupId, "updateGroupId");
-    if (group.integration !== "fixed-step-backward-euler") {
+    if (group.integration !== "fixed-step-backward-euler"
+      && group.integration !== "fixed-step-conservative-partitioned") {
       throw new Error(
         `update group ${group.updateGroupId} has an unsupported integration`,
       );

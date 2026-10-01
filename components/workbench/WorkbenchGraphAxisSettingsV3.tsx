@@ -13,7 +13,8 @@ export function readWorkbenchGraphAxisRangesV3(root: Element | null): Experiment
     return validRangeV3(String(value.minimum), String(value.maximum)) ? value : undefined;
   };
   return {
-    x: range("data-volume-minimum-ml", "data-volume-maximum-ml")
+    x: range("data-x-minimum", "data-x-maximum")
+      ?? range("data-volume-minimum-ml", "data-volume-maximum-ml")
       ?? range("data-pressure-minimum-mmhg", "data-pressure-maximum-mmhg"),
     y: range("data-flow-minimum-l-per-min", "data-flow-maximum-l-per-min")
       ?? range("data-y-minimum", "data-y-maximum")
@@ -48,8 +49,8 @@ export function WorkbenchGraphAxisSettingsV3({ graph, pane, waveformUnit, automa
   return <fieldset className="space-y-2.5" data-testid="graph-axis-settings">
     <legend className="mb-2 text-xs font-medium text-wb-text">{ja ? "表示範囲" : "Axis ranges"}</legend>
     {graph.renderer !== "sweep" && <AxisRangeV3 ja={ja} axis="x" range={pane.axisRanges?.x}
-      label={structural ? (ja ? "横軸 · 圧" : "X · pressure") : (ja ? "横軸 · 容積" : "X · volume")}
-      unit={structural ? "mmHg" : "mL"} automatic={automaticRanges?.x}
+      label={graph.renderer === "xy" ? (ja ? "横軸" : "X axis") : structural ? (ja ? "横軸 · 圧" : "X · pressure") : (ja ? "横軸 · 容積" : "X · volume")}
+      unit={graph.renderer === "xy" ? undefined : structural ? "mmHg" : "mL"} automatic={automaticRanges?.x}
       initial={structural ? { minimum: -3, maximum: 18 } : { minimum: 0, maximum: 200 }}
       onValidityChange={setXValid} onChange={range => update("x", range)} />}
     <AxisRangeV3 ja={ja} axis="y" range={pane.axisRanges?.y}

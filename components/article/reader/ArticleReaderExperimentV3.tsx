@@ -1,3 +1,4 @@
+import { GenericXYGraphV1 } from "@/components/workbench/presentation/GenericXYGraphV1";
 import React from "react";
 import { ArticleReaderOutputDisclosureV3, type ArticleReaderOutputViewV3 } from "./ArticleReaderOutputDisclosureV3";
 import { ArticleReaderPendingExperimentV1 } from "./ArticleReaderPendingExperimentV1";
@@ -1289,6 +1290,7 @@ function ArticleReaderLiveGraphV3({
     pane === undefined
       ? undefined
       : contract.graphCatalog.find(({ graphId }) => graphId === pane.graphId);
+  React.useEffect(() => { if (graph?.renderer === "xy") sampleStore.ensureExactOrbitWindowSec(18); }, [graph?.renderer, sampleStore]);
   const livePresentation =
     useWorkbenchOptionalSampledGraphPresentationSamplesV3(
       sampleStore,
@@ -1296,6 +1298,7 @@ function ArticleReaderLiveGraphV3({
       // memoized canvas only redraws when the completed analysis changes.
       graph?.renderer === "cycle-waveform"
         ? "sweep"
+        : graph?.renderer === "xy" ? "pressure-volume"
         : graph?.renderer === "sweep" || graph?.renderer === "pressure-volume"
           ? graph.renderer
           : null,
@@ -1455,6 +1458,23 @@ function ArticleReaderLiveGraphV3({
         />
       </ExperimentGraphPresentationV3>
     );
+  }
+  if (graph.renderer === "xy") {
+    const first = graph.seriesCatalog[0]!;
+    const label = (id: string) => {
+      const definition = contract.outputCatalog.find(output => output.outputId === id);
+      const p = resolveWorkbenchGraphSeriesPresentationV3({ definition, outputId: id, seriesId: id, locale, storedLabel: undefined });
+      return `${p.label}${definition?.unit && definition.unit !== "1" ? ` (${definition.unit})` : ""}`;
+    };
+    return <GenericXYGraphV1 xLabel={label(first.xOutputId)} yLabel={label(first.yOutputId)} axisRanges={pane.axisRanges}
+      traces={visibleScenarios.flatMap((scenario, scenarioIndex) => series.flatMap((selected, seriesIndex) => {
+        const binding = graph.seriesCatalog.find(b => b.seriesId === selected.seriesId);
+        if (!binding || isWorkbenchGraphTraceExcludedV3(pane, scenario.scenarioId, selected.seriesId)) return [];
+        const style = resolveWorkbenchGraphTraceStyleV3({ pane, surface: snapshot.content.surface, renderer: "xy", authoredScenarioCount: visibleScenarios.length,
+          scenarioId: scenario.scenarioId, scenarioIndex, seriesId: selected.seriesId, seriesIndex, appTheme });
+        return [{ id: `${scenario.scenarioId}/${selected.seriesId}`, label: `${scenario.label} · ${selected.label}`, color: style.color, ...binding,
+          samples: sampledPresentation?.renderer === "pressure-volume" ? sampledPresentation.exactOrbitSamplesByScenarioId[scenario.scenarioId] ?? [] : [] }];
+      }))} />;
   }
   if (graph.renderer !== "sweep") return null;
   if (sampledPresentation?.renderer !== "sweep") return null;

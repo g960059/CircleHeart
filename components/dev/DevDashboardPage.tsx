@@ -263,6 +263,9 @@ export function DevDashboardPage() {
               <FlaskConical className="h-4 w-4" aria-hidden="true" />
               {t("devDashboard.openModelLab")}
             </Link>
+            <Link to={`${modelLabHref(locale)}?model=cardiorespiratory`} data-testid="open-cardiorespiratory-model-lab" className="inline-flex min-h-10 items-center justify-center rounded-lg border border-wb-line px-3 text-sm text-wb-text hover:bg-wb-hover">
+              {locale === "ja" ? "心肺・呼吸器 Dev" : "Cardiorespiratory Dev"}
+            </Link>
           </div>
         </div>
 

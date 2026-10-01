@@ -275,14 +275,39 @@ export type MainWireAcceptedTypedStateAuthorityReportV1 = Readonly<
 export function createMainWireAcceptedTypedStateManifestV1(
   coldAcceptedState: AcceptedState,
 ): TransactionalTypedStateManifestV1 {
+  return createMainWireAcceptedTypedStateManifestInternalV1(coldAcceptedState);
+}
+
+/** A new exact owner may append fixed numerical state without changing the
+ * published Main Wire layout. Its own compiler and validator own that layout. */
+export function createMainWireExtendedAcceptedTypedStateManifestV1(
+  coldAcceptedState: AcceptedState,
+  extension: Readonly<{ layoutId: string; state: Readonly<Record<string, unknown>>; fixedArrayPointers?: readonly string[] }>,
+): TransactionalTypedStateManifestV1 {
+  if (!extension.layoutId || extension.layoutId === MAIN_WIRE_ACCEPTED_TYPED_STATE_LAYOUT_V1_ID) {
+    throw new Error("An extended exact owner requires a distinct typed layout");
+  }
+  for (const key of Object.keys(extension.state)) {
+    if (Object.hasOwn(coldAcceptedState, key)) throw new Error("Extended state shadows a hemodynamic owner");
+  }
+  return createMainWireAcceptedTypedStateManifestInternalV1(
+    { ...coldAcceptedState, ...extension.state }, extension.layoutId, extension.fixedArrayPointers,
+  );
+}
+
+function createMainWireAcceptedTypedStateManifestInternalV1(
+  coldAcceptedState: AcceptedState,
+  extendedLayoutId?: string,
+  extendedFixedArrayPointers: readonly string[] = [],
+): TransactionalTypedStateManifestV1 {
   const manifest = createTransactionalTypedStateManifestV1(
-    MAIN_WIRE_ACCEPTED_TYPED_STATE_LAYOUT_V1_ID,
+    extendedLayoutId ?? MAIN_WIRE_ACCEPTED_TYPED_STATE_LAYOUT_V1_ID,
     coldAcceptedState,
     MAIN_WIRE_ACCEPTED_TYPED_STATE_STRING_CAPACITY_BYTES_V1,
     MAIN_WIRE_ACCEPTED_TYPED_STATE_DYNAMIC_CAPACITY_BYTES_V1,
     {
       fixedArrayPointers:
-        MAIN_WIRE_ACCEPTED_TYPED_STATE_FIXED_ARRAY_POINTERS_V1,
+        [...MAIN_WIRE_ACCEPTED_TYPED_STATE_FIXED_ARRAY_POINTERS_V1, ...extendedFixedArrayPointers],
       externalImmutablePointers:
         MAIN_WIRE_ACCEPTED_TYPED_STATE_EXTERNAL_IMMUTABLE_POINTERS_V1,
       nullableContinuousPointers:
@@ -360,6 +385,7 @@ export function createMainWireAcceptedTypedStateManifestV1(
     },
   );
   const layout = manifest.numericalLayout;
+  if (extendedLayoutId !== undefined) return manifest;
   if (
     manifest.fingerprint
       !== MAIN_WIRE_ACCEPTED_TYPED_STATE_LAYOUT_V1_FINGERPRINT

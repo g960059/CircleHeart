@@ -1,3 +1,4 @@
+import { boundCardiorespiratoryControlV1 } from "./CardiorespiratoryControlBoundsV1";
 import React from "react";
 import { SimulationPanePlaceholderV1, SimulationPreparationV1 } from "@/components/simulation/SimulationPreparationV1";
 import { WorkbenchLastMeasuredOutputsV1 } from "./presentation/WorkbenchLastMeasuredOutputsV1";
@@ -235,7 +236,8 @@ export const ControlPaneBodyV3 = React.memo(function ControlPaneBodyV3({
     const mixed = projectedValues.some((candidate) =>
       candidate.status === "mixed" ||
       (candidate.status === "value" && candidate.value !== value));
-    return { definition, item, value, mixed };
+    const bounded = boundCardiorespiratoryControlV1(definition, targetScenarioIds.map(id => controlValuesByScenario[id] ?? {}));
+    return { definition: bounded ?? definition, item, value, mixed, disabledByBounds: bounded === null };
   });
   return (
     <section
@@ -276,12 +278,17 @@ export const ControlPaneBodyV3 = React.memo(function ControlPaneBodyV3({
         ) : (
           <div className="workbench-control-list">
             {presentedControls.map(
-              ({ definition: control, item, value, mixed }) => {
+              ({ definition: control, item, value, mixed, disabledByBounds }) => {
                 const presentation = resolveWorkbenchControlPresentationV3({
                   definition: control,
                   storedLabel: item.label,
                   locale,
                 });
+                const description = disabledByBounds
+                  ? locale === "ja"
+                    ? "選択したシナリオに共通する有効な設定範囲がありません。シナリオを個別に選択して調整してください。"
+                    : "The selected scenarios have no common valid range. Select scenarios individually to adjust this setting."
+                  : presentation.description;
                 return (
                   <ExperimentNumericControlV3
                     key={control.controlId}
@@ -289,12 +296,13 @@ export const ControlPaneBodyV3 = React.memo(function ControlPaneBodyV3({
                     disabled={
                       targetScenarioIds.length === 0 ||
                       pendingControlId !== null ||
-                      disabledByAnalysis
+                      disabledByAnalysis ||
+                      disabledByBounds
                     }
                     label={presentation.label}
-                    {...(presentation.description
+                    {...(description
                       ? {
-                          description: presentation.description,
+                          description,
                           descriptionAriaLabel:
                             locale === "ja"
                               ? `${presentation.label}の説明`

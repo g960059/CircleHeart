@@ -1,0 +1,38 @@
+import { expect, test } from "@playwright/test";
+
+test("@desktop cardiorespiratory Model Lab runs its own Worker, renders XY data and applies a warm PEEP edit", async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.route("**/rest/v1/rpc/save_experiment_v1", route => route.abort("blockedbyclient"));
+  await page.goto("/ja/dev/model-lab?model=cardiorespiratory", { waitUntil: "domcontentloaded" });
+  const root = page.getByTestId("v3-dockview-workbench");
+  await expect(root).toHaveAttribute("data-model-id", "circleheart.cardiorespiratory-dev-v1");
+  await expect(page.getByTestId("cardiorespiratory-dev-notice")).toBeVisible();
+  await expect(page.getByTestId("v3-save-experiment")).toHaveCount(0);
+  await expect.poll(async () => Number(await root.getAttribute("data-model-time-sec"))).toBeGreaterThan(.3);
+  await page.getByTestId("v3-playback-toggle").click();
+  const graphs = page.getByRole("region", { name: "グラフエリア" });
+  await graphs.getByText("呼吸圧・肺気量ループ", { exact: true }).click();
+  const xy = page.getByTestId("generic-xy-graph").filter({ visible: true });
+  await expect(xy).toBeVisible();
+  await expect(xy.locator('path[fill="none"]').first()).toHaveAttribute("d", /^M.+L/);
+  expect(Number(await xy.getAttribute("data-x-maximum"))).toBeGreaterThan(1);
+  expect(Number(await xy.getAttribute("data-x-maximum"))).toBeLessThan(20);
+  await graphs.getByText("フローボリュームループ", { exact: true }).click();
+  await expect(graphs.getByRole("img", { name: /L\/s/ })).toBeVisible();
+  const controls = page.getByRole("region", { name: "コントロールエリア" });
+  await controls.getByText("人工呼吸・自発努力", { exact: true }).click();
+  const peep = controls.getByRole("slider", { name: "PEEP", exact: true });
+  await expect(peep).toHaveValue("5");
+  const epoch = Number(await root.getAttribute("data-input-epoch")), time = Number(await root.getAttribute("data-model-time-sec"));
+  await peep.focus(); await peep.press("ArrowRight");
+  await expect.poll(async () => Number(await root.getAttribute("data-input-epoch"))).toBe(epoch + 1);
+  await expect(peep).toHaveValue("6");
+  expect(Number(await root.getAttribute("data-model-time-sec"))).toBeGreaterThanOrEqual(time);
+  await page.getByTestId("v3-playback-toggle").click();
+  await expect.poll(async () => Number(await root.getAttribute("data-model-time-sec"))).toBeGreaterThan(time + .2);
+  await page.getByTestId("v3-playback-toggle").click();
+  await expect(page.getByTestId("workbench-calculation-stopped")).toHaveCount(0);
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath("cardiorespiratory-model-lab.png"), fullPage: true });
+});

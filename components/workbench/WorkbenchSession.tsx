@@ -1,3 +1,4 @@
+import { createCardiorespiratoryDefaultSurfaceV1, cardiorespiratoryDevLimitationsV1 } from "./CardiorespiratoryDefaultSurfaceV1";
 import { WorkbenchPaneSettingsButtonV3 } from "./WorkbenchPaneSettingsButtonV3";
 import { ResourceAuthorV1 } from "@/components/site/PublicAuthorV1";
 import React from "react";
@@ -304,6 +305,7 @@ export const WorkbenchSession = ({
   const { locale } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
+  const cardiorespiratoryDev = modelLab && new URLSearchParams(location.search).get("model") === "cardiorespiratory";
   // First-save URL replacement changes useNavigate's identity. That must not
   // restart the runtime and discard edits made while a save was in flight.
   const navigateRef = React.useRef(navigate);
@@ -826,7 +828,9 @@ export const WorkbenchSession = ({
                   sourceSnapshot.surfaceReleaseId,
                 )
               : modelLab
-                ? await loadStudioLocalCurrentClientCompositionV1()
+                ? cardiorespiratoryDev
+                  ? await (await import("@/studio/composition/StudioCardiorespiratoryDevCompositionV1")).loadCardiorespiratoryDevClientCompositionV1()
+                  : await loadStudioLocalCurrentClientCompositionV1()
                 : await loadStudioDefaultClientCompositionV2();
       } catch (error) {
         if (
@@ -898,14 +902,16 @@ export const WorkbenchSession = ({
       const candidateSurface =
         pendingSurface ??
         initialContent?.surface ??
-        createDefaultExperimentSurfaceV3(
+        (cardiorespiratoryDev
+          ? createCardiorespiratoryDefaultSurfaceV1(composition.modelSurface.contract, initialScenarioId, resolvedLocale)
+          : createDefaultExperimentSurfaceV3(
           composition.modelSurface.contract,
           initialScenarioId,
           {
             periodicPvaSupported:
               composition.modelSurface.analysis.periodicPvaDerivation !== null,
           },
-        );
+        ));
       const baselineLabel = translationRef.current(
         "workbench.editor.scenarioManager.baselinePresetTitle",
       );
@@ -3391,13 +3397,13 @@ export const WorkbenchSession = ({
               className="hidden rounded-full bg-wb-accent/10 px-2 py-1 text-[11px] font-semibold text-wb-accent sm:inline"
               data-testid="workbench-model-lab-label-v3"
             >
-              Model Lab
+              {cardiorespiratoryDev ? "Cardiorespiratory · Dev" : "Model Lab"}
             </span>
           )}
           {contract !== null && (
             <WorkbenchSimulationInfoV3
               currentModelId={contract.modelId}
-              limitations={[
+              limitations={cardiorespiratoryDev ? cardiorespiratoryDevLimitationsV1(resolvedLocale) : [
                 ...(t(modelLimitationsKey, {
                   returnObjects: true,
                 }) as string[]),
@@ -3415,13 +3421,13 @@ export const WorkbenchSession = ({
               models={[
                 {
                   contract,
-                  publicName: t(
+                  publicName: cardiorespiratoryDev ? (resolvedLocale === "ja" ? "心肺連成・開発版" : "Cardiorespiratory development") : t(
                     "workbench.editor.simulationInfo.integratedModelName",
                   ),
-                  shortLabel: modelDisclosure.shortLabel ?? t(
+                  shortLabel: cardiorespiratoryDev ? "CR Dev V1" : modelDisclosure.shortLabel ?? t(
                     "workbench.editor.simulationInfo.integratedModelVersion",
                   ),
-                  description: t(
+                  description: cardiorespiratoryDev ? cardiorespiratoryDevLimitationsV1(resolvedLocale)[0]! : t(
                     "workbench.editor.simulationInfo.integratedModelDescription",
                   ),
                   ...(baselineValidationPresentation === undefined
@@ -3523,6 +3529,9 @@ export const WorkbenchSession = ({
           )}
         </div>
       </header>
+      {cardiorespiratoryDev && <div role="note" data-testid="cardiorespiratory-dev-notice" className="shrink-0 border-b border-wb-line bg-wb-panel px-4 py-2 text-xs text-wb-muted">
+        {resolvedLocale === "ja" ? "心肺連成の開発版。定量的妥当性は未検証です。既存 oxygen.* は独立した定常推定で、動的ガス状態は呼吸・ガス項目で表示します。" : "Cardiorespiratory development model; quantitative validity is unverified. Inherited oxygen.* remains an independent steady estimate; respiratory/gas outputs show dynamic gas state."}
+      </div>}
       <RuntimeStatusV3 key={runtimeGeneration} status={status} onRetry={() => restartRuntime(playingIntentRef.current)} />
       {status.kind === "live" && status.halted !== undefined && (
         <section role="alert" data-testid="workbench-calculation-stopped"

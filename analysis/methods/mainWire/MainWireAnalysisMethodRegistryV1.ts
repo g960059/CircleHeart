@@ -1,3 +1,5 @@
+import { CARDIORESPIRATORY_BREATH_DERIVATION_V1 } from "@/analysis/methods/cardiorespiratory/CardiorespiratoryBreathMetricsV1";
+import { CARDIORESPIRATORY_VARIATION_DERIVATION_V1 } from "@/analysis/methods/cardiorespiratory/CardiorespiratoryVariationV1";
 import {
   defineAnalysisMethodRegistryV1,
   resolveAnalysisMethodsForSurfaceV1,
@@ -239,6 +241,8 @@ export const MAIN_WIRE_ANALYSIS_METHOD_REGISTRY_V1 =
       MAIN_WIRE_PRESSURE_CROSSING_PV_ANALYSIS_V1_ID,
     ]),
     derivations: Object.freeze([
+      CARDIORESPIRATORY_VARIATION_DERIVATION_V1,
+      CARDIORESPIRATORY_BREATH_DERIVATION_V1,
       Object.freeze({ ...MAIN_WIRE_PERIODIC_PVA_DERIVATION_V1,
         derivationId: MAIN_WIRE_PERIODIC_PVA_METHOD_V16_ID,
         requiredAnalysisIds: Object.freeze([MAIN_WIRE_PRESSURE_CROSSING_PV_ANALYSIS_V1_ID]),
