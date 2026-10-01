@@ -2,7 +2,7 @@
   "schemaId": "circleheart-local-dev-model-bundle-v1",
   "stage": "dev",
   "ephemeral": true,
-  "sourceTreeHash": "7556d1dc30001235b54de4491fd57f45695977a8357710bd6bf33f3442d1445d",
+  "sourceTreeHash": "061b1c65f9fa2129a98cb17836d894fb9331bb22e4a0ee9cb6ee58bb007593f0",
   "sourceInputs": [
     {
       "path": "analysis/methods/mainWire/MainWireFixedToneSettlementV2.ts",
@@ -782,7 +782,7 @@
     },
     {
       "path": "studio/integrations/cardiorespiratoryV1/CardiorespiratoryExactModelV1.ts",
-      "sha256": "df8237420aed1a06cb38d6e6c7faf85325228e0207008916ceb0d9d0145df894"
+      "sha256": "e44b841188b007869474bfda7f47c765323d8fce6e2bb470f19775e8ea8f6576"
     },
     {
       "path": "studio/integrations/mainWireIntegratedV3/MainWireIntegratedExecutionPlanV1.generated.json",
@@ -821,7 +821,7 @@
       "sha256": "b9343d9ec2469940cb9c972c549165cdea1ade9a90828544599a675ba5eec1b5"
     }
   ],
-  "artifactRevisionId": "3c21d8eab63f410cbfc6b331421e2bbb81c03dc73ea403ae7abbbef72a939c4b",
+  "artifactRevisionId": "ec773c669ebab76cd29957bc2dc7af0cfba086919ecefa1ff5ccea0c57910440",
   "manifest": {
     "schemaId": "circleheart-studio-exact-model-kernel-v3",
     "modelId": "circleheart.cardiorespiratory-dev-v1",

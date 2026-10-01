@@ -63,6 +63,41 @@ describe("cardiorespiratory independent exact adapter", () => {
     await expect(release.executables.captureAdapter.validateCapture({ model, capture: { fixture: json(fixture), checkpoint } })).resolves.toBeUndefined();
     await expect(release.executables.captureAdapter.validateCapture({ model, capture: { fixture: json(fixture), checkpoint: { ...checkpoint, acceptedTimeSec: 1 } } })).rejects.toThrow();
   });
+  it("uses canonical integer presentation targets after an aligned warm edit", async () => {
+    const adapter = createCardiorespiratoryDevReleaseV1().executables.simulationAdapter;
+    await adapter.createSession({ runtimeSessionId: context.runtimeSessionId, scenarios: [{ scenarioId: context.scenarioId, fixture: json(fixture) }] });
+    await adapter.advancePresentationBatch({ ...context, stepCount: 13, presentationOutputIds: [] });
+    const source = CardiorespiratorySessionV1.create(fixture);
+    source.advanceToPresentationTime(13 * .002);
+    const changed = applyCardiorespiratoryFixtureControlV1(fixture, "cardiorespiratory.ventilator.peep", 6);
+    const canonical = source.reconfigure(changed);
+    await adapter.applyControl({ ...context, controlId: "cardiorespiratory.ventilator.peep", value: 6, expectedInputEpoch: 0 });
+    for (let ordinal = 1; ordinal <= 4; ordinal++) {
+      const target = (13 + ordinal) * .002;
+      canonical.advanceToPresentationTime(target);
+      const frame = await adapter.advanceOnePresentationStep(context);
+      expect(frame.acceptedTimeSec).toBe(target);
+      // Compare the numerical owner, whose genuine cardiac events may subdivide.
+      expect(frame.acceptedRevision).toBe(canonical.currentAcceptedState().revision);
+    }
+  });
+  it.each([13 * .002, .0133])("preserves canonical aligned or off-grid restored presentation origin %s", async origin => {
+    const source = CardiorespiratorySessionV1.create(fixture);
+    source.advanceToPresentationTime(origin);
+    const checkpoint = source.checkpoint(), accepted = source.currentAcceptedState();
+    const canonical = CardiorespiratorySessionV1.restore(fixture, checkpoint);
+    const adapter = createCardiorespiratoryDevReleaseV1().executables.simulationAdapter;
+    await adapter.createSession({ runtimeSessionId: context.runtimeSessionId, scenarios: [{ scenarioId: context.scenarioId, fixture: json(fixture),
+      checkpoint: { acceptedRevision: accepted.revision, acceptedTimeSec: accepted.acceptedTimeSec, payload: json(checkpoint) } }] });
+    expect(adapter.currentFrame(context).acceptedTimeSec).toBe(origin);
+    const frames = await adapter.advancePresentationBatch({ ...context, stepCount: 4, presentationOutputIds: [] });
+    for (let ordinal = 1; ordinal <= 4; ordinal++) {
+      const target = origin === 13 * .002 ? (13 + ordinal) * .002 : origin + ordinal * .002;
+      canonical.advanceToPresentationTime(target);
+      expect(frames.acceptedTimesSec[ordinal - 1]).toBe(target);
+      expect(frames.acceptedRevisions[ordinal - 1]).toBe(canonical.currentAcceptedState().revision);
+    }
+  });
   it("does not expose previous-epoch uptake divided by newly edited demand in a paused frame", async () => {
     const adapter = createCardiorespiratoryDevReleaseV1().executables.simulationAdapter;
     await adapter.createSession({ runtimeSessionId: context.runtimeSessionId,

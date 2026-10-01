@@ -59398,7 +59398,9 @@ var CardiorespiratoryRuntimeHostV1 = class {
   }
   advanceAccepted(runtimeSessionId, scenarioId) {
     const scenario = this.get(runtimeSessionId, scenarioId), ordinal = scenario.presentationOrdinal + 1;
-    scenario.session.advanceToPresentationTime(scenario.presentationAnchor + ordinal * dt);
+    const anchorTick = Math.round(scenario.presentationAnchor / dt);
+    const target = scenario.presentationAnchor === anchorTick * dt ? (anchorTick + ordinal) * dt : scenario.presentationAnchor + ordinal * dt;
+    scenario.session.advanceToPresentationTime(target);
     scenario.presentationOrdinal = ordinal;
   }
   advance(runtimeSessionId, scenarioId) {

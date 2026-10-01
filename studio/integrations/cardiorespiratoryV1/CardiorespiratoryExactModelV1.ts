@@ -64,7 +64,14 @@ class CardiorespiratoryRuntimeHostV1 {
   }
   advanceAccepted(runtimeSessionId: string, scenarioId: string): void {
     const scenario = this.get(runtimeSessionId, scenarioId), ordinal = scenario.presentationOrdinal + 1;
-    scenario.session.advanceToPresentationTime(scenario.presentationAnchor + ordinal * dt);
+    const anchorTick = Math.round(scenario.presentationAnchor / dt);
+    // Match the numerical owner's integer grid after an aligned warm edit or
+    // restore. Adding two rounded seconds can otherwise create a tiny extra step.
+    // Arbitrary off-grid checkpoints retain their original presentation phase.
+    const target = scenario.presentationAnchor === anchorTick * dt
+      ? (anchorTick + ordinal) * dt
+      : scenario.presentationAnchor + ordinal * dt;
+    scenario.session.advanceToPresentationTime(target);
     scenario.presentationOrdinal = ordinal;
   }
   advance(runtimeSessionId: string, scenarioId: string): StudioSimulationFrameV2 {
