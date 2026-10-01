@@ -1,6 +1,6 @@
 import type { StudioJsonValueV2 } from "@/studio/contracts/v2/json";
 import { REGISTERED_CURRENT_MODEL_BASELINE_V1 } from "@/studio/registry/RegisteredCurrentModelBaselineV1";
-import type { ScenarioCheckpointV2, ScenarioPresetV2 } from "@/studio/contracts/v2/content";
+import type { ExperimentSurfaceV2, ScenarioCheckpointV2, ScenarioPresetV2 } from "@/studio/contracts/v2/content";
 import { resolveRegisteredModelLaunchDefaultsV1 } from
   "@/studio/registry/RegisteredModelLaunchBaselineV1";
 import type {
@@ -63,6 +63,12 @@ export type StudioClientCompositionV2 = Readonly<{
     workerReleaseTicket: StudioModelWorkerReleaseTicketV2;
   }>;
   modelSurface: ModelSurfacePresentationBundleV1<RegisteredAnalysisMethodsV1>;
+  /** Model-specific initial presentation, resolved alongside its Surface.
+   * The Workbench supplies its generic base; model code never imports UI. */
+  presentation?: Readonly<{
+    adaptDefaultSurface: (base: ExperimentSurfaceV2, locale: string) => ExperimentSurfaceV2;
+    limitations: (locale: string) => readonly string[];
+  }>;
   activeBundleVersion?: number;
   /** Same-model, source-bound local examples; not an additional execution identity. */
   presets?: readonly ScenarioPresetV2[];

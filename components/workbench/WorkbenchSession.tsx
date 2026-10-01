@@ -1,4 +1,3 @@
-import { createCardiorespiratoryDefaultSurfaceV1, cardiorespiratoryDevLimitationsV1 } from "./CardiorespiratoryDefaultSurfaceV1";
 import { WorkbenchPaneSettingsButtonV3 } from "./WorkbenchPaneSettingsButtonV3";
 import { ResourceAuthorV1 } from "@/components/site/PublicAuthorV1";
 import React from "react";
@@ -371,6 +370,8 @@ export const WorkbenchSession = ({
   });
   const [releaseStage, setReleaseStage] =
     React.useState<StudioReleaseStageV1>("stable");
+  const [clientPresentation, setClientPresentation] =
+    React.useState<StudioClientCompositionV2["presentation"]>();
   const [presentationSampleStore] = React.useState(
     () => new WorkbenchScenarioPresentationSampleStoreV3(),
   );
@@ -853,6 +854,7 @@ export const WorkbenchSession = ({
         throw new Error("Recovery requires the same exact model and Surface");
       }
       setReleaseStage(composition.exactModel.stage);
+      setClientPresentation(composition.presentation);
       workerReleaseTicketRef.current = composition.exactModel.workerReleaseTicket;
       fixtureProjectionRef.current = composition.exactModel.fixtureProjection;
       periodicPvaDerivationRef.current = composition.modelSurface.analysis.periodicPvaDerivation;
@@ -899,19 +901,16 @@ export const WorkbenchSession = ({
         ?? composition.exactModel.defaultFixture;
       const pendingSurface = pendingSurfaceAfterRuntimeRestartRef.current;
       const pendingFeedback = pendingFeedbackAfterRuntimeRestartRef.current;
+      const baseSurface = createDefaultExperimentSurfaceV3(
+        composition.modelSurface.contract,
+        initialScenarioId,
+        { periodicPvaSupported: composition.modelSurface.analysis.periodicPvaDerivation !== null },
+      );
       const candidateSurface =
         pendingSurface ??
         initialContent?.surface ??
-        (cardiorespiratoryDev
-          ? createCardiorespiratoryDefaultSurfaceV1(composition.modelSurface.contract, initialScenarioId, resolvedLocale)
-          : createDefaultExperimentSurfaceV3(
-          composition.modelSurface.contract,
-          initialScenarioId,
-          {
-            periodicPvaSupported:
-              composition.modelSurface.analysis.periodicPvaDerivation !== null,
-          },
-        ));
+        composition.presentation?.adaptDefaultSurface(baseSurface, resolvedLocale) ??
+        baseSurface;
       const baselineLabel = translationRef.current(
         "workbench.editor.scenarioManager.baselinePresetTitle",
       );
@@ -3403,7 +3402,7 @@ export const WorkbenchSession = ({
           {contract !== null && (
             <WorkbenchSimulationInfoV3
               currentModelId={contract.modelId}
-              limitations={cardiorespiratoryDev ? cardiorespiratoryDevLimitationsV1(resolvedLocale) : [
+              limitations={clientPresentation?.limitations(resolvedLocale) ?? [
                 ...(t(modelLimitationsKey, {
                   returnObjects: true,
                 }) as string[]),
@@ -3427,7 +3426,7 @@ export const WorkbenchSession = ({
                   shortLabel: cardiorespiratoryDev ? "CR Dev V1" : modelDisclosure.shortLabel ?? t(
                     "workbench.editor.simulationInfo.integratedModelVersion",
                   ),
-                  description: cardiorespiratoryDev ? cardiorespiratoryDevLimitationsV1(resolvedLocale)[0]! : t(
+                  description: clientPresentation?.limitations(resolvedLocale)[0] ?? t(
                     "workbench.editor.simulationInfo.integratedModelDescription",
                   ),
                   ...(baselineValidationPresentation === undefined

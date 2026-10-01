@@ -1,7 +1,6 @@
 import { CARDIORESPIRATORY_BREATH_OUTPUT_IDS_V1 as breath } from "@/analysis/methods/cardiorespiratory/CardiorespiratoryBreathMetricsV1";
 import type { ModelContractV2 } from "@/studio/contracts/v2/model";
 import type { ExperimentSurfaceV2, ExperimentSurfaceGraphPaneV2, ExperimentSurfaceControlPaneV2, ExperimentSurfaceOutputPaneV2 } from "@/studio/contracts/v2/content";
-import { createDefaultExperimentSurfaceV3 } from "./WorkbenchSurfaceV3";
 import { CARDIORESPIRATORY_OUTPUT_IDS_V1 as ids } from "@/studio/integrations/cardiorespiratoryV1/CardiorespiratoryCatalogV1";
 import { CARDIORESPIRATORY_VARIATION_OUTPUT_IDS_V1 as variation } from "@/analysis/methods/cardiorespiratory/CardiorespiratoryVariationV1";
 import { resolveStudioItemPresentationV1 } from "@/studio/presentation/StudioItemPresentationCatalogV1";
@@ -23,8 +22,8 @@ export function cardiorespiratoryDevLimitationsV1(locale: string): readonly stri
     "Periodic PVA and static preload analysis are unavailable under breathing. PPV/SVV require three complete passive controlled breaths and do not classify fluid responsiveness.",
   ];
 }
-export function createCardiorespiratoryDefaultSurfaceV1(contract: ModelContractV2, scenarioId: string, locale = "ja"): ExperimentSurfaceV2 {
-  const ja = locale.startsWith("ja"), base = createDefaultExperimentSurfaceV3(contract, scenarioId, { periodicPvaSupported: false });
+export function adaptCardiorespiratoryDefaultSurfaceV1(base: ExperimentSurfaceV2, contract: ModelContractV2, locale: string): ExperimentSurfaceV2 {
+  const ja = locale.startsWith("ja");
   const label = (kind: "control" | "output", itemId: string) => resolveStudioItemPresentationV1({ kind, itemId, locale, fallbackEnglishLabel: itemId }).label;
   const graphs: readonly [string, string, string][] = [
     ["pressures", "Respiratory pressures", "呼吸圧"], ["lung-pressure-volume", "Lung pressure–volume", "呼吸圧・肺気量ループ"],

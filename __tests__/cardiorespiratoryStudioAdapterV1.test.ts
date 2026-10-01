@@ -63,4 +63,26 @@ describe("cardiorespiratory independent exact adapter", () => {
     await expect(release.executables.captureAdapter.validateCapture({ model, capture: { fixture: json(fixture), checkpoint } })).resolves.toBeUndefined();
     await expect(release.executables.captureAdapter.validateCapture({ model, capture: { fixture: json(fixture), checkpoint: { ...checkpoint, acceptedTimeSec: 1 } } })).rejects.toThrow();
   });
+  it("does not expose previous-epoch uptake divided by newly edited demand in a paused frame", async () => {
+    const adapter = createCardiorespiratoryDevReleaseV1().executables.simulationAdapter;
+    await adapter.createSession({ runtimeSessionId: context.runtimeSessionId,
+      scenarios: [{ scenarioId: context.scenarioId, fixture: json(fixture) }] });
+    const previous = await adapter.advanceOnePresentationStep(context);
+    expect(previous.outputs['cardiorespiratory.oxygen.consumption'].value).toBe(250);
+    const edited = await adapter.applyControl({ ...context,
+      controlId: 'cardiorespiratory.oxygen.systemic-demand', value: 25, expectedInputEpoch: 0 });
+    expect(edited.inputEpoch).toBe(1);
+    expect(edited.acceptedTimeSec).toBe(previous.acceptedTimeSec);
+    const paused = adapter.currentFrame(context);
+    expect(paused.outputs['cardiorespiratory.oxygen.demand'].value).toBe(50);
+    expect(paused.outputs['cardiorespiratory.oxygen.demand-met-fraction']).toMatchObject({
+      value: null, availability: 'not-evaluated-at-accepted-state', quality: 'not-assessed' });
+    expect(paused.outputs['cardiorespiratory.oxygen.consumption'].value).toBeNull();
+    expect(paused.outputs['cardiorespiratory.inventory.oxygen'].value)
+      .toBe(previous.outputs['cardiorespiratory.inventory.oxygen'].value);
+    const advanced = await adapter.advanceOnePresentationStep(context);
+    expect(advanced.inputEpoch).toBe(1);
+    expect(advanced.outputs['cardiorespiratory.oxygen.consumption'].value).toBe(50);
+    expect(advanced.outputs['cardiorespiratory.oxygen.demand-met-fraction'].value).toBe(1);
+  });
 });

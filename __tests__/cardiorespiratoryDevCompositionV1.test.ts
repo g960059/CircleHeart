@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { loadCardiorespiratoryDevClientCompositionV1 } from "@/studio/composition/StudioCardiorespiratoryDevCompositionV1";
-import { createCardiorespiratoryDefaultSurfaceV1 } from "@/components/workbench/CardiorespiratoryDefaultSurfaceV1";
+import { createDefaultExperimentSurfaceV3 } from "@/components/workbench/WorkbenchSurfaceV3";
 import { createCardiorespiratoryDevReleaseV1 } from "@/studio/integrations/cardiorespiratoryV1/CardiorespiratoryExactModelV1";
 import { validateExperimentDesiredContentForModelV2 } from "@/studio/application/authoring/StudioExperimentDataV2";
 import { composeStandardModelContractV1 } from "@/studio/contracts/v2/modelSurface";
@@ -33,10 +33,15 @@ describe("explicit local cardiorespiratory Model Lab composition", () => {
     expect(composition.exactModel.stage).toBe("dev");
     expect(composition.exactModel.workerReleaseTicket.artifactUrl).toContain(composition.exactModel.workerReleaseTicket.artifactRevisionId);
     for (const control of contract.controlCatalog) expect(composition.exactModel.fixtureProjection.controlValue(composition.exactModel.defaultFixture, control.controlId).status, control.controlId).toBe("value");
-    const surface = createCardiorespiratoryDefaultSurfaceV1(contract, "case", "ja");
+    const base = createDefaultExperimentSurfaceV3(contract, "case", { periodicPvaSupported: composition.modelSurface.analysis.periodicPvaDerivation !== null });
+    const surface = composition.presentation!.adaptDefaultSurface(base, "ja");
     expect(surface.graphPanes.some(p => p.graphId === "cardiorespiratory.flow-volume")).toBe(true);
     expect(surface.graphPanes.some(p => p.graphId === "cardiorespiratory.lung-pressure-volume")).toBe(true);
     expect(surface.note.text).toContain("oxygen.*");
+    expect(surface.note.text).toBe(composition.presentation!.limitations("ja").join("\n\n"));
+    expect(composition.presentation!.adaptDefaultSurface(base, "en").note.text).toBe(composition.presentation!.limitations("en").join("\n\n"));
+    expect(base.graphPanes).not.toEqual(surface.graphPanes);
+    expect(base.note.text).not.toBe(surface.note.text);
     expect(() => validateExperimentDesiredContentForModelV2({ modelId: contract.modelId, surfaceSeriesId: composition.modelSurface.identity.surfaceSeriesId,
       scenarios: [{ scenarioId: "case", label: "Case", fixture: composition.exactModel.defaultFixture }], surface }, contract)).not.toThrow();
   });

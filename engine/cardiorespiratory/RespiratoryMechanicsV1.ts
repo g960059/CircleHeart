@@ -288,10 +288,14 @@ export function validateRespiratoryMechanicsStateV1(c: RespiratoryMechanicsConfi
   }
 }
 
+/** Shared effort clock. Positive offsets advance the prescribed muscle cycle. */
+export function respiratoryMuscleCycleTimeSecV1(c: RespiratoryMechanicsConfigV1, timeSec: number): number {
+  const period = 60 / c.muscle.respiratoryRatePerMin;
+  return ((timeSec + c.muscle.phaseOffsetSec) % period + period) % period;
+}
 function musclePressure(c: RespiratoryMechanicsConfigV1, timeSec: number): number {
   const m = c.muscle;
-  const period = 60 / m.respiratoryRatePerMin;
-  const phase = ((timeSec + m.phaseOffsetSec) % period + period) % period;
+  const phase = respiratoryMuscleCycleTimeSecV1(c, timeSec);
   return phase < m.inspiratoryTimeSec
     ? m.amplitudeCmH2O * Math.sin(Math.PI * phase / m.inspiratoryTimeSec) ** 2 : 0;
 }

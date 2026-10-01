@@ -134,6 +134,30 @@ describe('development cardiorespiratory exact session', () => {
     expect(changed.cardiorespiratoryState().readback.systemicConsumptionMlMin).toBe(0);
     expect(changed.cardiorespiratoryState().readback.myocardialConsumptionMlMin).toBe(0);
   });
+  it('withholds prior-interval gas outputs after a warm demand edit until the next accepted step', () => {
+    const original = run(.002, .01);
+    const intervalIds = ['oxygen.delivery', 'oxygen.consumption', 'oxygen.demand-met-fraction',
+      'oxygen.myocardial-consumption', 'flow.perfusion.1', 'flow.perfusion.2'].map(id => `cardiorespiratory.${id}`);
+    const stateIds = ['oxygen.demand', 'inventory.oxygen', 'inventory.carbon-dioxide',
+      'balance.oxygen', 'balance.carbon-dioxide', 'gas.pressure.arterial-o2'].map(id => `cardiorespiratory.${id}`);
+    const allIds = [...intervalIds, ...stateIds];
+    const changed = original.reconfigure({ ...original.fixture,
+      cardiorespiratory: { ...original.fixture.cardiorespiratory, systemicDemandMlMin: 25 } });
+    expect(changed.cardiorespiratoryState().readback.systemicConsumptionMlMin).toBe(225);
+    const values = changed.projectValues(allIds);
+    expect(values['cardiorespiratory.oxygen.demand'].value).toBe(50);
+    for (const id of intervalIds) expect(values[id], id).toMatchObject({ value: null,
+      availability: 'not-evaluated-at-accepted-state', quality: 'not-assessed' });
+    for (const id of stateIds) expect(values[id].availability, id).toBe('available');
+    const restored = CardiorespiratorySessionV1.restore(changed.fixture, JSON.parse(JSON.stringify(changed.checkpoint())));
+    expect(restored.projectValues(allIds)).toEqual(values);
+    changed.advanceToPresentationTime(.012);
+    const updated = changed.projectValues(allIds);
+    for (const id of intervalIds) expect(updated[id].availability, id).toBe('available');
+    expect(updated['cardiorespiratory.oxygen.consumption'].value).toBe(50);
+    expect(updated['cardiorespiratory.oxygen.demand-met-fraction'].value).toBe(1);
+    expect(updated['cardiorespiratory.oxygen.myocardial-consumption'].value).toBe(25);
+  });
   it('conserves all gas in closed airways with zero metabolism while blood and tissue exchange continues', () => {
     const fixture = { ...DEFAULT_CARDIORESPIRATORY_FIXTURE_V1, cardiorespiratory: {
       ...DEFAULT_CARDIORESPIRATORY_FIXTURE_V1.cardiorespiratory,
@@ -295,4 +319,20 @@ describe('development cardiorespiratory exact session', () => {
     expect(result.conservationResidualMol.o2Mol).toBeCloseTo(0, 13);
     expect(result.conservationResidualMol.co2Mol).toBeCloseTo(0, 13);
   });
+});
+
+
+it("uses the same offset effort clock for spontaneous muscle pressure and displayed phase", () => {
+  const base = DEFAULT_CARDIORESPIRATORY_FIXTURE_V1;
+  const inspiratoryTimeSec = base.cardiorespiratory.respiratory.muscle.inspiratoryTimeSec;
+  for (const sign of [1, -1]) {
+    const respiratory = { ...base.cardiorespiratory.respiratory,
+      ventilator: { ...base.cardiorespiratory.respiratory.ventilator, mode: "spontaneous" as const },
+      muscle: { ...base.cardiorespiratory.respiratory.muscle, amplitudeCmH2O: 5, phaseOffsetSec: sign * inspiratoryTimeSec / 2 } };
+    const session = CardiorespiratorySessionV1.create({ ...base, cardiorespiratory: { ...base.cardiorespiratory, respiratory } });
+    const outputs = session.projectValues(["cardiorespiratory.phase", "cardiorespiratory.pressure.muscle"]);
+    const offsetFraction = inspiratoryTimeSec / 2 / (60 / respiratory.muscle.respiratoryRatePerMin);
+    expect(outputs["cardiorespiratory.phase"].value).toBeCloseTo(sign > 0 ? offsetFraction : 1 - offsetFraction, 12);
+    expect(outputs["cardiorespiratory.pressure.muscle"].value).toBeCloseTo(sign > 0 ? 5 : 0, 12);
+  }
 });

@@ -46242,10 +46242,13 @@ function validateRespiratoryMechanicsStateV1(c, s) {
     if (s.recruitmentProgress01ByUnit[i] > 1) throw new RangeError("respiratory recruitmentProgress exceeds one");
   }
 }
+function respiratoryMuscleCycleTimeSecV1(c, timeSec) {
+  const period = 60 / c.muscle.respiratoryRatePerMin;
+  return ((timeSec + c.muscle.phaseOffsetSec) % period + period) % period;
+}
 function musclePressure(c, timeSec) {
   const m = c.muscle;
-  const period = 60 / m.respiratoryRatePerMin;
-  const phase = ((timeSec + m.phaseOffsetSec) % period + period) % period;
+  const phase = respiratoryMuscleCycleTimeSecV1(c, timeSec);
   return phase < m.inspiratoryTimeSec ? m.amplitudeCmH2O * Math.sin(Math.PI * phase / m.inspiratoryTimeSec) ** 2 : 0;
 }
 function lungRecoil(u, v) {
@@ -47776,8 +47779,9 @@ var CardiorespiratorySessionV1 = class _CardiorespiratorySessionV1 {
     const ven = bloodGasPressuresFromAmountsV1(cr.blood.PA, volumes.PA, this.fixture.cardiorespiratory.bloodGas);
     const c = this.fixture.cardiorespiratory, demand = c.systemicDemandMlMin + c.myocardialDemandMlMin;
     const consumption = cr.readback.systemicConsumptionMlMin + cr.readback.myocardialConsumptionMlMin;
+    const intervalValue = (value) => cr.hemodynamicReadback.available ? value : null;
     const signals = {
-      phase: c.respiratory.ventilator.mode === "spontaneous" ? ((hemo.acceptedTimeSec - c.respiratory.muscle.phaseOffsetSec) * c.respiratory.muscle.respiratoryRatePerMin / 60 % 1 + 1) % 1 : cr.respiratory.ventilatorCycleTimeSec / (60 / c.respiratory.ventilator.respiratoryRatePerMin),
+      phase: c.respiratory.ventilator.mode === "spontaneous" ? respiratoryMuscleCycleTimeSecV1(c.respiratory, hemo.acceptedTimeSec) / (60 / c.respiratory.muscle.respiratoryRatePerMin) : cr.respiratory.ventilatorCycleTimeSec / (60 / c.respiratory.ventilator.respiratoryRatePerMin),
       "breath-index": cr.respiratory.completedBreaths,
       "pressure.airway": ro.airwayPressureCmH2O,
       "pressure.pleural": ro.pleuralPressureCmH2O,
@@ -47794,8 +47798,8 @@ var CardiorespiratorySessionV1 = class _CardiorespiratorySessionV1 {
       "gas.ph.mixed-venous": ven.pH,
       "gas.content.arterial-o2": art.o2MolPerL * MOLAR_GAS_VOLUME_STPD_L_PER_MOL_V1 * 100,
       "gas.content.mixed-venous-o2": ven.o2MolPerL * MOLAR_GAS_VOLUME_STPD_L_PER_MOL_V1 * 100,
-      "flow.perfusion.1": cr.readback.pulmonaryFlow1MlSec,
-      "flow.perfusion.2": cr.readback.pulmonaryFlow2MlSec,
+      "flow.perfusion.1": intervalValue(cr.readback.pulmonaryFlow1MlSec),
+      "flow.perfusion.2": intervalValue(cr.readback.pulmonaryFlow2MlSec),
       "lung.open.1": Number(ro.airwayOpenByUnit[0]),
       "lung.open.2": Number(ro.airwayOpenByUnit[1]),
       "tissue.oxygen-pressure.systemic": cr.systemic.amount.o2Mol / DEFAULT_TISSUE_GAS_PARAMETERS_V1.systemic.o2CapacityMolPerMmHg,
@@ -47804,12 +47808,12 @@ var CardiorespiratorySessionV1 = class _CardiorespiratorySessionV1 {
       "inventory.carbon-dioxide": totalGas2(cr).co2Mol,
       "balance.oxygen": cr.readback.oxygenBalanceResidualMol,
       "balance.carbon-dioxide": cr.readback.co2BalanceResidualMol,
-      "oxygen.delivery": hemo.revision === 0 ? null : cr.readback.aorticOxygenFluxMolPerSec * mlMinPerMolSec,
+      "oxygen.delivery": intervalValue(cr.readback.aorticOxygenFluxMolPerSec * mlMinPerMolSec),
       "oxygen.demand": demand,
-      "oxygen.consumption": hemo.revision === 0 ? null : consumption,
-      "oxygen.demand-met-fraction": hemo.revision === 0 || demand === 0 ? null : consumption / demand,
+      "oxygen.consumption": intervalValue(consumption),
+      "oxygen.demand-met-fraction": demand === 0 ? null : intervalValue(consumption / demand),
       "oxygen.myocardial-demand": c.myocardialDemandMlMin,
-      "oxygen.myocardial-consumption": hemo.revision === 0 ? null : cr.readback.myocardialConsumptionMlMin,
+      "oxygen.myocardial-consumption": intervalValue(cr.readback.myocardialConsumptionMlMin),
       "ventilator.pressure-limited": Number(ro.pressureLimited),
       "ventilator.controlled": Number(c.respiratory.ventilator.mode !== "spontaneous"),
       "muscle.active": Number(c.respiratory.muscle.amplitudeCmH2O > 0)

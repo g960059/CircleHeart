@@ -9,6 +9,8 @@ import { readCardiorespiratoryControlValueV1 } from "@/studio/integrations/cardi
 import { CARDIORESPIRATORY_DEV_MODEL_ID_V1 } from "@/domain/model/CardiorespiratoryIdentityV1";
 import surfaceRelease from "@/studio/integrations/cardiorespiratoryV1/CardiorespiratorySurfaceV1";
 import bundle from "@/data/model-releases/cardiorespiratory-dev-v1/bundle.json";
+import { adaptCardiorespiratoryDefaultSurfaceV1, cardiorespiratoryDevLimitationsV1 } from "@/studio/integrations/cardiorespiratoryV1/CardiorespiratoryDefaultSurfaceV1";
+import type { ExperimentSurfaceV2 } from "@/studio/contracts/v2/content";
 
 export const CARDIORESPIRATORY_DEV_FIXTURE_PROJECTION_V1 = Object.freeze({
   controlValue(fixture: unknown, controlId: string) {
@@ -32,8 +34,13 @@ export function loadCardiorespiratoryDevClientCompositionV1(): Promise<StudioCli
       modelId: bundle.manifest.modelId, artifactRevisionId: bundle.artifactRevisionId, manifest: bundle.manifest, surfaceRelease,
       moduleAbi: "circleheart-exact-model-esm-v1", artifactUrl: artifactUrl.href });
     const analysis = resolveRegisteredAnalysisMethodsV1(surfaceRelease);
+    const modelSurface = composeModelSurfacePresentationBundleV1({ kernel: bundle.manifest, surfaceRelease, stage: "dev", analysis });
     return Object.freeze({ exactModel: Object.freeze({ modelId: bundle.manifest.modelId, stage: "dev" as const,
       defaultFixture: bundle.defaultFixture as StudioJsonValueV2, fixtureProjection: CARDIORESPIRATORY_DEV_FIXTURE_PROJECTION_V1, workerReleaseTicket }),
-      modelSurface: composeModelSurfacePresentationBundleV1({ kernel: bundle.manifest, surfaceRelease, stage: "dev", analysis }) });
+      modelSurface,
+      presentation: Object.freeze({
+        adaptDefaultSurface: (base: ExperimentSurfaceV2, locale: string) => adaptCardiorespiratoryDefaultSurfaceV1(base, modelSurface.contract, locale),
+        limitations: cardiorespiratoryDevLimitationsV1,
+      }) });
   }).catch(error => { pending = undefined; throw error; });
 }
