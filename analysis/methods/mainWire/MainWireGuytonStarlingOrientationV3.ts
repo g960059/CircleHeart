@@ -9,6 +9,8 @@ import {
   vascularTransmuralPressureFromPhysicalVolumeV1,
 } from "@/engine/core/circulationGraphKernelV1";
 import { smoothMax } from "@/engine/math";
+import { evaluateParallelPulmonaryPathsV1, type ParallelPulmonaryPathsV1 } from "@/engine/core/ParallelPulmonaryPathsV1";
+import type { MAIN_WIRE_FIXED_TONE_SETTLEMENT_V2, MainWireFixedToneSettlementEvidenceV2 } from "./MainWireFixedToneSettlementV2";
 import type {
   MainWireIntegratedModelHemodynamicResearchInputsV3,
 } from "@/engine/myocardium/MainWireIntegratedModelHemodynamicResearchInputsV3";
@@ -50,6 +52,8 @@ export type MainWireIntegratedModelPressureVolumeLoopPointV3 = Readonly<{
 }>;
 
 export type MainWireIntegratedModelStarlingPointV3 = Readonly<{
+  /** Present only when this measured interval passed reservoir closure. */
+  settlementEvidence?: MainWireFixedToneSettlementEvidenceV2;
   totalBloodVolumeMl: number;
   fillingPressureMmHg: number;
   cardiacOutputLPerMin: number;
@@ -131,7 +135,8 @@ export type MainWireIntegratedModelStarlingLocusV3 =
       slowControllerPolicy:
         "active-source-period1-then-coronary-tone-frozen";
       convergencePolicy:
-        "complete-beat-output-period1-closure";
+        "complete-beat-output-period1-closure" | "complete-beat-output-and-reservoir-period1-closure";
+      settlementPolicy?: typeof MAIN_WIRE_FIXED_TONE_SETTLEMENT_V2;
       points: readonly (MainWireIntegratedModelStarlingPointV3 & Readonly<{
         quality: "locally-converged";
         curveEligible: true;
@@ -207,6 +212,7 @@ type StructuralNodeV3 = Readonly<{
 }>;
 
 type StructuralEdgeV3 = Readonly<{
+  parallelPulmonaryPaths?: ParallelPulmonaryPathsV1;
   upstreamNode: string;
   resistanceMmHgSecPerMl: number;
   quadraticLossMmHgSec2PerMl2: number;
@@ -261,6 +267,7 @@ export function buildMainWireIntegratedModelGuytonStarlingOrientationV3(
     MainWireIntegratedModelGuytonSideV3,
     MainWireIntegratedModelStarlingLocusV3
   >>,
+  parallelPulmonaryPaths?: ParallelPulmonaryPathsV1,
 ): MainWireIntegratedModelGuytonStarlingOrientationV3 {
   const accepted = observation.acceptedState;
   const step = observation.lastAcceptedStep;
@@ -287,12 +294,14 @@ export function buildMainWireIntegratedModelGuytonStarlingOrientationV3(
       observation,
       hemodynamicInputs,
       starlingLoci?.right,
+      parallelPulmonaryPaths,
     ),
     left: buildSideOrientationV3(
       "left",
       observation,
       hemodynamicInputs,
       starlingLoci?.left,
+      parallelPulmonaryPaths,
     ),
   });
 }
@@ -302,11 +311,12 @@ function buildSideOrientationV3(
   observation: MainWireIntegratedModelObservationV3,
   hemodynamicInputs: MainWireIntegratedModelHemodynamicResearchInputsV3,
   starlingLocus?: MainWireIntegratedModelStarlingLocusV3,
+  parallelPulmonaryPaths?: ParallelPulmonaryPathsV1,
 ): MainWireIntegratedModelStructuralReturnOrientationV3 {
   const accepted = observation.acceptedState;
   const circulation = observation.lastAcceptedStep!.coronaryStep.baseStep
     .circulationTrial;
-  const path = structuralPathV3(side, observation, hemodynamicInputs);
+  const path = structuralPathV3(side, observation, hemodynamicInputs, parallelPulmonaryPaths);
   const downstreamNode = side === "right" ? "RA" : "LA";
   const returnPath = side === "right" ? "VC_RA+CS_RA" : "PVein_LA";
   const acceptedDownstreamPressureMmHg =
@@ -415,6 +425,7 @@ function structuralPathV3(
   side: MainWireIntegratedModelGuytonSideV3,
   observation: MainWireIntegratedModelObservationV3,
   hemodynamicInputs: MainWireIntegratedModelHemodynamicResearchInputsV3,
+  parallelPulmonaryPaths?: ParallelPulmonaryPathsV1,
 ): StructuralPathV3 {
   const graph = buildNonCoronaryCirculationGraphV1();
   const acceptedVolumes =
@@ -468,6 +479,7 @@ function structuralPathV3(
     });
     return Object.freeze({
       upstreamNode: edge.up,
+      ...(name === "PCap_PVen" && parallelPulmonaryPaths ? { parallelPulmonaryPaths } : {}),
       resistanceMmHgSecPerMl: loss.resistanceMmHgSecPerMl,
       quadraticLossMmHgSec2PerMl2:
         loss.quadraticLossMmHgSec2PerMl2,
@@ -580,7 +592,9 @@ function totalStressedVolumeAtFlowV3(
           0.25,
         )
       : currentDownstreamPressureMmHg;
-    const upstreamPressureMmHg = effectiveDownstreamPressureMmHg
+    const upstreamPressureMmHg = edge.parallelPulmonaryPaths
+      ? inverseParallelPulmonaryPressureV1(edge.parallelPulmonaryPaths, currentDownstreamPressureMmHg, flowMlPerSec)
+      : effectiveDownstreamPressureMmHg
       + edge.resistanceMmHgSecPerMl * flowMlPerSec
       + edge.quadraticLossMmHgSec2PerMl2
         * flowMlPerSec * Math.abs(flowMlPerSec);
@@ -591,6 +605,29 @@ function totalStressedVolumeAtFlowV3(
     currentDownstreamPressureMmHg = upstreamPressureMmHg;
   }
   return totalStressedVolumeMl;
+}
+
+/** Invert the SUM of both actual pulmonary branch laws. Averaging Palv or R
+ * would move collapse thresholds and change the return curve. */
+export function inverseParallelPulmonaryPressureV1(
+  paths: ParallelPulmonaryPathsV1, downstreamMmHg: number, flowMlPerSec: number,
+): number {
+  if (!Number.isFinite(flowMlPerSec) || flowMlPerSec < 0) throw new Error("Structural pulmonary return requires nonnegative flow");
+  // Also validates the path domain at zero flow.
+  evaluateParallelPulmonaryPathsV1(paths, downstreamMmHg, downstreamMmHg);
+  if (flowMlPerSec === 0) return downstreamMmHg;
+  const flow = (up: number) => evaluateParallelPulmonaryPathsV1(paths, up, downstreamMmHg).totalFlowMlPerSec;
+  let low = downstreamMmHg, high = Math.max(downstreamMmHg, ...paths.map(p => p.externalPressureMmHg))
+    + 1 + flowMlPerSec / paths.reduce((sum, p) => sum + 1 / p.resistanceMmHgSecPerMl, 0);
+  for (let i = 0; flow(high) < flowMlPerSec; i++) {
+    if (i === 32 || !Number.isFinite(high)) throw new Error("Cannot bracket parallel pulmonary return");
+    high = downstreamMmHg + 2 * (high - downstreamMmHg);
+  }
+  for (let i = 0; i < 64 && high - low > 1e-9; i++) {
+    const middle = (low + high) / 2;
+    if (flow(middle) < flowMlPerSec) low = middle; else high = middle;
+  }
+  return (low + high) / 2;
 }
 
 function responsiveStarlingAnchorV3(

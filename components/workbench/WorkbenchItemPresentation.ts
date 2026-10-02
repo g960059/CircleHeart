@@ -1,3 +1,5 @@
+import { cardiorespiratoryBreathOutputValueV1 } from "@/analysis/methods/cardiorespiratory/CardiorespiratoryBreathMetricsV1";
+import { cardiorespiratoryVariationOutputValueV1 } from "@/analysis/methods/cardiorespiratory/CardiorespiratoryVariationV1";
 import {
   formatExperimentPressureSummaryV3,
   type ExperimentOutputPresentationItemV3,
@@ -305,7 +307,9 @@ export function materializeWorkbenchOutputPresentationItemsV3(
     if (definition === undefined) continue;
     const observation = mainWireCardiacCycleOutputValueV1(input.presentationAnalyses, input.frame, item.outputId)
       ?? mainWireFillingFlowOutputValueV1(input.presentationAnalyses, input.frame, item.outputId)
-      ?? mainWireAorticJetOutputValueV1(input.presentationAnalyses, input.frame, item.outputId);
+      ?? mainWireAorticJetOutputValueV1(input.presentationAnalyses, input.frame, item.outputId)
+      ?? cardiorespiratoryVariationOutputValueV1(input.presentationAnalyses, input.frame, item.outputId)
+      ?? cardiorespiratoryBreathOutputValueV1(input.presentationAnalyses, input.frame, item.outputId);
     const outputValue =
       workbenchPeriodicPvaOutputValueV3(input.periodicPva, item.outputId)
       ?? observation

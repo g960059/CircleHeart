@@ -79,7 +79,7 @@ export type BoundExecutionPlanUpdateGroupDispatchV1 = Readonly<{
   periodTicks: number;
   phaseTicks: number;
   effectiveStepSec: number;
-  integration: "fixed-step-backward-euler";
+  integration: "fixed-step-backward-euler" | "fixed-step-conservative-partitioned";
   solveGroupId: string;
   solveGroupIndex: number;
   systemKernelId: string;
@@ -598,7 +598,8 @@ export function validateAndOwnExecutionPlanDescriptorV1(
     if (integerV1(group.ordinal, `${path}.ordinal`) !== index) {
       failV1(`${path}.ordinal`, "must be contiguous from zero");
     }
-    if (group.integration !== "fixed-step-backward-euler") {
+    if (group.integration !== "fixed-step-backward-euler"
+      && group.integration !== "fixed-step-conservative-partitioned") {
       failV1(`${path}.integration`, "unsupported integration");
     }
     const periodTicks = positiveIntegerV1(

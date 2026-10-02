@@ -1095,6 +1095,8 @@ function graphOutputIdsV1(graphs: readonly unknown[]): Set<string> {
       assertRecordV1(series, seriesPath);
       if (graph.renderer === "sweep") {
         if (typeof series.outputId === "string") result.add(series.outputId);
+      } else if (graph.renderer === "xy") {
+        for (const key of ["xOutputId", "yOutputId", "cyclePhaseOutputId"]) if (typeof series[key] === "string") result.add(series[key] as string);
       } else if (graph.renderer === "pressure-volume") {
         if (typeof series.volumeOutputId === "string") result.add(series.volumeOutputId);
         if (typeof series.pressureOutputId === "string") result.add(series.pressureOutputId);

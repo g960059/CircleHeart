@@ -34,6 +34,9 @@ export type AnalysisExecutionSourceV1 = Readonly<{
   acceptedFrame: StudioSimulationFrameV2;
   legacyExact: LegacyExactAnalysisExecutionPortV1 | null;
   surfaceRelease?: ModelSurfaceReleaseManifestV1;
+  /** Numerical exports of the admitted artifact that owns this capture.
+   * Analysis must never restore it using the client's current engine source. */
+  exactNumericalExports?: Readonly<Record<string, unknown>>;
   /** Detached exact-owned capture, created lazily on the accepted boundary.
    * Capturing never advances, resets, or lends the live numerical session. */
   capture?: () => Promise<Readonly<{ artifactRevisionId: string; scenario: ScenarioCaptureV2 }>>;

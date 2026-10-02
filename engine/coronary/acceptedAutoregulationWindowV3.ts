@@ -102,6 +102,11 @@ export type CoronaryAcceptedAutoregulationAdvanceV3 = Readonly<{
 }>;
 
 const VALIDATED_AUTOREGULATION_BINDINGS_V3 = new WeakSet<object>();
+const FROZEN_AUTOREGULATION_CONTROLS_V3 = new WeakMap<
+  object,
+  CoronaryAutoregulationWindowControlV3
+>();
+let defaultAutoregulationControlV3: CoronaryAutoregulationWindowControlV3 | undefined;
 const VALIDATED_BINDINGS_BY_AUTOREGULATION_STATE_V3 = new WeakMap<
   object,
   WeakSet<object>
@@ -151,14 +156,19 @@ export function createCoronaryAutoregulationWindowBindingV3(
 
 export function createDefaultCoronaryAutoregulationWindowControlV3():
 CoronaryAutoregulationWindowControlV3 {
-  return freezeControl({
+  if (validationStampReuseEligibleV1() && defaultAutoregulationControlV3 !== undefined) {
+    return defaultAutoregulationControlV3;
+  }
+  const control = freezeControl(Object.freeze({
     controlId: DEFAULT_CORONARY_AUTOREGULATION_CONTROL_V3_ID,
     demandScaleByTerritoryLayer: unitCoronaryDemandScaleV2(),
     hyperemia01ByTerritoryLayer: zeroCoronaryHyperemiaDriveV2(),
     effectiveMinimumToneScaleByTerritoryLayer: constantLayerRecord(
       NORMAL_ADULT_CORONARY_AUTOREGULATION_PRIOR_V2.minimumResistanceScale,
     ),
-  });
+  }));
+  if (validationStampReuseEligibleV1()) defaultAutoregulationControlV3 = control;
+  return control;
 }
 
 export function createCoronaryAcceptedAutoregulationStateV3(
@@ -566,11 +576,15 @@ function freezeState(
 ): CoronaryAcceptedAutoregulationStateV3 {
   return Object.freeze({
     ...state,
-    qmTimeIntegralMlByTerritoryLayer: mapLayerRecord(
+    // Every caller is private and supplies freshly constructed frozen numerical
+    // records. Reusing those records retains detachment from all public inputs.
+    qmTimeIntegralMlByTerritoryLayer: validationStampReuseEligibleV1()
+      ? state.qmTimeIntegralMlByTerritoryLayer : mapLayerRecord(
       (territoryId, layerId) =>
         state.qmTimeIntegralMlByTerritoryLayer[territoryId][layerId],
     ),
-    perfusionPressureTimeIntegralMmHgSecByTerritory: mapTerritoryRecord(
+    perfusionPressureTimeIntegralMmHgSecByTerritory: validationStampReuseEligibleV1()
+      ? state.perfusionPressureTimeIntegralMmHgSecByTerritory : mapTerritoryRecord(
       (territoryId) =>
         state.perfusionPressureTimeIntegralMmHgSecByTerritory[territoryId],
     ),
@@ -679,6 +693,9 @@ function recordAutoregulationStateBindingStampV3(
 function freezeControl(
   control: CoronaryAutoregulationWindowControlV3,
 ): CoronaryAutoregulationWindowControlV3 {
+  const reuse = validationStampReuseEligibleV1();
+  const cached = reuse ? FROZEN_AUTOREGULATION_CONTROLS_V3.get(control) : undefined;
+  if (cached !== undefined) return cached;
   assertPlainObject(control, "autoregulation control");
   assertExactKeys(control, [
     "controlId",
@@ -713,7 +730,7 @@ function freezeControl(
       }
     }
   }
-  return Object.freeze({
+  const frozen = Object.freeze({
     controlId: control.controlId,
     demandScaleByTerritoryLayer: mapLayerRecord((territoryId, layerId) =>
       control.demandScaleByTerritoryLayer[territoryId][layerId]),
@@ -724,6 +741,14 @@ function freezeControl(
         control.effectiveMinimumToneScaleByTerritoryLayer[territoryId][layerId],
     ),
   });
+  if (reuse && validationStampIssuanceEligibleV1(control)) {
+    // Both the validated reads and copied values come from immutable plain data.
+    // Getter-backed inputs can change between validation and copying, so even
+    // their new frozen snapshot must pass a fresh validator before earning reuse.
+    FROZEN_AUTOREGULATION_CONTROLS_V3.set(frozen, frozen);
+    FROZEN_AUTOREGULATION_CONTROLS_V3.set(control, frozen);
+  }
+  return frozen;
 }
 
 function controlsExactlyEqual(

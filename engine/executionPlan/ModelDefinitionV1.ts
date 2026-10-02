@@ -91,7 +91,7 @@ export type NumericalSolveGroupV1 = Readonly<{
 export type NumericalUpdateGroupV1 = Readonly<{
   updateGroupId: string;
   ordinal: number;
-  integration: "fixed-step-backward-euler";
+  integration: "fixed-step-backward-euler" | "fixed-step-conservative-partitioned";
   /** Number of policy timebase ticks between updates. */
   periodTicks: number;
   /** Target-tick phase in [0, periodTicks). */

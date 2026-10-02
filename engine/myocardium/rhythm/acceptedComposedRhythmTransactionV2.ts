@@ -1420,9 +1420,16 @@ function pacMetadataForCapture(trial: AcceptedAuthoredEctopyScheduleTrialV2, cap
   return metadata?.eventKind === "pac" ? metadata : null;
 }
 
+const composedProximalAvConfigurationsV2 = new WeakMap<
+  AcceptedComposedRhythmTransactionConfigurationV2, RecoveryConcealmentAvGateConfigurationV2
+>();
+
 function composedProximalAvGateConfiguration(
   configuration: AcceptedComposedRhythmTransactionConfigurationV2,
 ): RecoveryConcealmentAvGateConfigurationV2 {
+  const cached = validationStampReuseEligibleV1()
+    ? composedProximalAvConfigurationsV2.get(configuration) : undefined;
+  if (cached !== undefined) return cached;
   const parameters = configuration.avGateParameters;
   const direct = createRecoveryConcealmentAvGateConfigurationV2({
     configurationId: parameters.parameterSetId,
@@ -1443,6 +1450,12 @@ function composedProximalAvGateConfiguration(
       parameters.concealedRefractoryExtensionSec,
   });
   validateRecoveryConcealmentAvGateConfigurationV2(direct);
+  // This conversion depends only on the immutable configuration, never on an
+  // accepted rhythm clock or queue. Mutable/getter-backed inputs cannot retain
+  // a derived contract, and stamp-disabled audits redo the complete conversion.
+  if (validationStampIssuanceEligibleV1(configuration)) {
+    composedProximalAvConfigurationsV2.set(configuration, direct);
+  }
   return direct;
 }
 

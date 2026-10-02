@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { selectValidationStampModeV1, validationStampModeV1 } from "@/engine/validationStampModeV1";
 
 import { createMechanicalSupportConfigV1 } from
   "@/engine/devices/defaultsV1";
@@ -9,6 +10,7 @@ import {
   createDynamicMechanicalSupportDeviceProfileBindingV1,
   createDynamicMechanicalSupportInertanceProfileV1,
   evaluateDynamicMechanicalSupportHydraulicsV1,
+  restoreDynamicMechanicalSupportAcceptedStateV1,
   validateDynamicMechanicalSupportAcceptedStateV1,
   type DynamicMechanicalSupportAcceptedStateV1,
   type DynamicMechanicalSupportHydraulicInputV1,
@@ -60,6 +62,46 @@ const HYDRAULIC_INPUT = Object.freeze({
 }) satisfies DynamicMechanicalSupportHydraulicInputV1;
 
 describe("dynamic four-device mechanical-support network V1", () => {
+  it("reuses admitted immutable binding shapes while stamp-disabled restores retain full checks", () => {
+    const mode = validationStampModeV1();
+    const config = createMechanicalSupportConfigV1();
+    const profile = profileWith(inertance());
+    const expected = createDynamicMechanicalSupportAcceptedStateV1(profile, config);
+    const detached = Object.freeze({ ...expected, acceptedFlowMlPerSec: Object.freeze({
+      LVAD: 1, IMPELLA: 2, VA_ECMO: 3, VV_ECMO: 4,
+    }) });
+    let keys: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      selectValidationStampModeV1("validation-stamps-enabled");
+      const first = restoreDynamicMechanicalSupportAcceptedStateV1(detached, expected);
+      keys = vi.spyOn(Reflect, "ownKeys");
+      const second = restoreDynamicMechanicalSupportAcceptedStateV1(detached, expected);
+      expect(second).toEqual(first);
+      expect(keys.mock.calls.some(([value]) => value === expected.structuralHydraulicProjection)).toBe(false);
+      selectValidationStampModeV1("validation-stamps-disabled");
+      expect(restoreDynamicMechanicalSupportAcceptedStateV1(detached, expected)).toEqual(first);
+      expect(keys.mock.calls.some(([value]) => value === expected.structuralHydraulicProjection)).toBe(true);
+      expect(() => validateDynamicMechanicalSupportAcceptedStateV1(detached, profile, config))
+        .toThrow(/live factory provenance/);
+    } finally { keys?.mockRestore(); selectValidationStampModeV1(mode); }
+  });
+
+  it("does not reuse a shallow-frozen mutable structural binding after nested edits", () => {
+    const mode = validationStampModeV1();
+    try {
+      selectValidationStampModeV1("validation-stamps-enabled");
+      const expected = createDynamicMechanicalSupportAcceptedStateV1(profileWith(inertance()), createMechanicalSupportConfigV1());
+      const structural = Object.freeze(JSON.parse(JSON.stringify(expected.structuralHydraulicProjection)));
+      const candidate = Object.freeze({ ...expected, structuralHydraulicProjection: structural });
+      expect(restoreDynamicMechanicalSupportAcceptedStateV1(candidate, expected)).toEqual(expected);
+      structural.byDevice.LVAD.maximumReverseFlowLMin += 1;
+      expect(() => restoreDynamicMechanicalSupportAcceptedStateV1(candidate, expected))
+        .toThrow(/structural hydraulic content mismatch/);
+      structural.byDevice.LVAD.maximumReverseFlowLMin = NaN;
+      expect(() => restoreDynamicMechanicalSupportAcceptedStateV1(candidate, expected)).toThrow(/finite/);
+    } finally { selectValidationStampModeV1(mode); }
+  });
+
   it("rejects a copied state with mutable flow descendants before proof issuance", () => {
     const config = createMechanicalSupportConfigV1();
     const profile = profileWith(inertance({

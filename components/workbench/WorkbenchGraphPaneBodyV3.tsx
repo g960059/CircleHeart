@@ -1,4 +1,6 @@
 import React from "react";
+import { GenericXYGraphV1 } from "./presentation/GenericXYGraphV1";
+import type { WorkbenchGraphSampleSourceV3 } from "./presentation/WorkbenchGraphSampleSourceV3";
 import { useTranslation } from "react-i18next";
 import { SimulationLegendPlaceholderV1, SimulationPanePlaceholderV1 } from "@/components/simulation/SimulationPreparationV1";
 
@@ -19,11 +21,13 @@ import {
   WorkbenchScenarioPresentationSampleStoreV3,
   resolveWorkbenchGraphTraceStyleV3,
   structuralReturnOrientationFromPayloadV3,
-  useWorkbenchSampledGraphPresentationSamplesV3,
+  useWorkbenchOptionalSampledGraphPresentationSamplesV3,
   workbenchModelCyclePhaseOutputIdV3,
   type WorkbenchScenarioOrbitHistoryV3,
   type WorkbenchScenarioPresentationSamplesV3,
+  type WorkbenchScalarSampleV3,
 } from "@/components/workbench/presentation";
+
 import {
   shouldAutoRequestStructuralReturnComparisonV3,
   structuralReturnComparisonRequestKeyV3,
@@ -32,6 +36,7 @@ import {
 } from "@/components/workbench/WorkbenchAnalysisState";
 import { workbenchScenarioRuntimeStatusV3 } from "@/components/workbench/WorkbenchSessionPolicy";
 import { mainWireFormalPvAnalysisIdV1 } from "@/analysis/methods/mainWire/MainWireStructuralAnalysisContractV3";
+import { CARDIORESPIRATORY_MECHANICAL_ANALYSIS_V1_ID } from "@/analysis/methods/cardiorespiratory/CardiorespiratoryMechanicalAnalysisV1";
 import { periodicPvaFromAnalysisV3 } from "./presentation/WorkbenchPeriodicPvaProjectionV3";
 import { CompletedEjectionWaveformV1 } from "./presentation/CompletedEjectionWaveformV1";
 import { WorkbenchChartLegendRowV3 } from "./presentation/WorkbenchChartTraceStyleV3";
@@ -49,6 +54,7 @@ import type {
   StudioSimulationFrameV2,
 } from "@/studio/contracts/v2/simulation";
 import type { StudioSimulationWorkerScenarioDescriptorV2 } from "@/studio/workers/StudioSimulationWorkerProtocolV2";
+const EMPTY_GRAPH_SAMPLES_V3: readonly WorkbenchScalarSampleV3[] = Object.freeze([]);
 const EMPTY_WORKBENCH_SCENARIO_PRESENTATION_SAMPLES_V3 = Object.freeze(
   Object.create(null),
 ) as WorkbenchScenarioPresentationSamplesV3;
@@ -69,6 +75,19 @@ export function workbenchPvGraphUsesPeriodicPvaAnalysisV3(
     pressureVolumeAnalysisMode !== "raw-exact-orbit" &&
     displayedSeriesIds.some((seriesId) => seriesId === "LV" || seriesId === "RV")
   );
+}
+
+export function WorkbenchMechanicalAnalysisCaptionV3({ analysisId, kind }: Readonly<{
+  analysisId: string;
+  kind: "pressure-volume" | "structural-return";
+}>) {
+  const { t } = useTranslation();
+  if (analysisId !== CARDIORESPIRATORY_MECHANICAL_ANALYSIS_V1_ID) return null;
+  return <p className="shrink-0 px-3 py-1 text-[10px] text-wb-muted" data-testid="workbench-mechanical-analysis-caption">
+    {t(kind === "pressure-volume"
+      ? "workbench.live.fixedRespiratoryPvCaption"
+      : "workbench.live.fixedRespiratoryMechanicalCaption")}
+  </p>;
 }
 
 export function GraphPaneBodyV3({
@@ -270,20 +289,27 @@ function SampledGraphPaneBodyV3({
 }>) {
   const { i18n } = useTranslation();
   const { appTheme } = useAppTheme();
-  const graphPresentation = useWorkbenchSampledGraphPresentationSamplesV3(
+  const graphPresentation = useWorkbenchOptionalSampledGraphPresentationSamplesV3(
     sampleStore,
-    graph.renderer,
+    graph.renderer === "pressure-volume" ? "pressure-volume" : null,
   );
+  const graphSampleSource = React.useMemo<WorkbenchGraphSampleSourceV3>(() => ({
+    subscribe: graph.renderer === "xy" ? sampleStore.subscribePressureVolume : sampleStore.subscribeSweep,
+    getSamples: scenarioId => graph.renderer === "xy"
+      ? sampleStore.getScenarioExactOrbitSnapshot(scenarioId)
+      : sampleStore.getScenarioSnapshot(scenarioId),
+  }), [sampleStore, graph.renderer]);
+  React.useEffect(() => { if (graph.renderer === "xy") sampleStore.ensureExactOrbitWindowSec(18); }, [graph.renderer, sampleStore]);
   const samplesByScenarioId =
-    graphPresentation.renderer === "sweep"
+    graphPresentation?.renderer === "sweep"
       ? graphPresentation.samplesByScenarioId
       : EMPTY_WORKBENCH_SCENARIO_PRESENTATION_SAMPLES_V3;
   const exactOrbitSamplesByScenarioId =
-    graphPresentation.renderer === "pressure-volume"
+    graphPresentation?.renderer === "pressure-volume"
       ? graphPresentation.exactOrbitSamplesByScenarioId
       : EMPTY_WORKBENCH_SCENARIO_PRESENTATION_SAMPLES_V3;
   const orbitHistoryByScenarioId =
-    graphPresentation.renderer === "pressure-volume"
+    graphPresentation?.renderer === "pressure-volume"
       ? graphPresentation.orbitHistoryByScenarioId
       : EMPTY_WORKBENCH_SCENARIO_ORBIT_HISTORY_V3;
   const displayedSeries = React.useMemo(
@@ -357,6 +383,23 @@ function SampledGraphPaneBodyV3({
     pressureVolumeAnalysisId,
     pvaAnalysisRequestKey,
   ]);
+  if (graph.renderer === "xy") {
+    const first = graph.seriesCatalog[0]!;
+    const label = (id: string) => {
+      const definition = contract.outputCatalog.find(output => output.outputId === id);
+      const p = resolveWorkbenchGraphSeriesPresentationV3({ definition, outputId: id, seriesId: id, storedLabel: undefined, locale: i18n.language.startsWith("ja") ? "ja" : "en" });
+      return `${p.label}${definition?.unit && definition.unit !== "1" ? ` (${definition.unit})` : ""}`;
+    };
+    return <GenericXYGraphV1 xLabel={label(first.xOutputId)} yLabel={label(first.yOutputId)} axisRanges={pane.axisRanges} actions={legendActions} sampleSource={graphSampleSource}
+      traces={scenarios.flatMap((scenario, scenarioIndex) => !visibleScenarioIds.includes(scenario.scenarioId) ? [] : displayedSeries.flatMap((series, seriesIndex) => {
+        const binding = graph.seriesCatalog.find(b => b.seriesId === series.seriesId);
+        if (!binding || isWorkbenchGraphTraceExcludedV3(pane, scenario.scenarioId, series.seriesId)) return [];
+        const style = resolveWorkbenchGraphTraceStyleV3({ pane, surface, renderer: "xy", authoredScenarioCount, scenarioId: scenario.scenarioId, scenarioIndex,
+          seriesId: series.seriesId, seriesIndex, appTheme });
+        return [{ id: `${scenario.scenarioId}/${series.seriesId}`, scenarioId: scenario.scenarioId, label: `${scenario.label} · ${series.label}`, color: style.color,
+          samples: exactOrbitSamplesByScenarioId[scenario.scenarioId] ?? EMPTY_GRAPH_SAMPLES_V3, ...binding }];
+      }))} />;
+  }
   if (graph.renderer === "pressure-volume") {
     const bindings = displayedSeries.flatMap((series) => {
       const binding = graph.seriesCatalog.find(
@@ -411,9 +454,9 @@ function SampledGraphPaneBodyV3({
               scenarioStatus: workbenchScenarioRuntimeStatusV3(playbackRunning),
               scenarioStyleIndex,
               samples,
-              currentCycleSamples: graphPresentation.renderer === "pressure-volume" ? graphPresentation.currentCycleSamplesByScenarioId[scenario.scenarioId] : undefined,
-              cyclePosition: graphPresentation.renderer === "pressure-volume" ? graphPresentation.cyclePositionByScenarioId[scenario.scenarioId] : undefined,
-              completedCycleSampleSets: graphPresentation.renderer === "pressure-volume" ? graphPresentation.completedCyclesByScenarioId[scenario.scenarioId] : undefined,
+              currentCycleSamples: graphPresentation?.renderer === "pressure-volume" ? graphPresentation.currentCycleSamplesByScenarioId[scenario.scenarioId] : undefined,
+              cyclePosition: graphPresentation?.renderer === "pressure-volume" ? graphPresentation.cyclePositionByScenarioId[scenario.scenarioId] : undefined,
+              completedCycleSampleSets: graphPresentation?.renderer === "pressure-volume" ? graphPresentation.completedCyclesByScenarioId[scenario.scenarioId] : undefined,
               historyEpochs: workbenchBoundedGraphHistoryV3(
                 orbitHistoryByScenarioId[scenario.scenarioId] ?? [],
                 pane.historyDepth ?? 1,
@@ -451,23 +494,26 @@ function SampledGraphPaneBodyV3({
       <ExperimentGraphPresentationV3
         variant="pane"
         data-workbench-graph-pane={pane.paneId}
-        canvasClassName="h-full min-h-0"
+        canvasClassName="flex h-full min-h-0 flex-col"
       >
-        <PressureVolumeLoopCanvasV3
-          axisRanges={pane.axisRanges}
-          pvTrailBeats={pane.pvTrailBeats}
-          playbackRunning={playbackRunning}
-          legendActions={legendActions}
-          periodicPvaSupported={periodicPvaEnabled}
-          traces={traces}
-          onRetryAnalysis={retryScenarioIds.length === 0 || operationPending
-            ? undefined
-            : () => onRequestAnalysis(pressureVolumeAnalysisId, retryScenarioIds)}
-          showPressureEnvelope={
-            periodicPvaEnabled ? pane.showPressureEnvelope : false
-          }
-          showPvaBoundary={periodicPvaEnabled ? pane.showPvaBoundary : false}
-        />
+        {periodicPvaEnabled && <WorkbenchMechanicalAnalysisCaptionV3 analysisId={pressureVolumeAnalysisId} kind="pressure-volume" />}
+        <div className="min-h-0 flex-1">
+          <PressureVolumeLoopCanvasV3
+            axisRanges={pane.axisRanges}
+            pvTrailBeats={pane.pvTrailBeats}
+            playbackRunning={playbackRunning}
+            legendActions={legendActions}
+            periodicPvaSupported={periodicPvaEnabled}
+            traces={traces}
+            onRetryAnalysis={retryScenarioIds.length === 0 || operationPending
+              ? undefined
+              : () => onRequestAnalysis(pressureVolumeAnalysisId, retryScenarioIds)}
+            showPressureEnvelope={
+              periodicPvaEnabled ? pane.showPressureEnvelope : false
+            }
+            showPvaBoundary={periodicPvaEnabled ? pane.showPvaBoundary : false}
+          />
+        </div>
       </ExperimentGraphPresentationV3>
     );
   }
@@ -517,8 +563,7 @@ function SampledGraphPaneBodyV3({
         !visibleScenarioIds.includes(scenario.scenarioId)
       )
         return [];
-      const samples = samplesByScenarioId[scenario.scenarioId] ?? [];
-      if (samples.length === 0) return [];
+      const samples = samplesByScenarioId[scenario.scenarioId] ?? EMPTY_GRAPH_SAMPLES_V3;
       return bindings.flatMap(({ binding, series }) => {
         if (
           isWorkbenchGraphTraceExcludedV3(
@@ -575,6 +620,7 @@ function SampledGraphPaneBodyV3({
       canvasClassName="h-full min-h-0"
     >
       <SweepingWaveformCanvasV3
+        sampleSource={graphSampleSource}
         axisRanges={pane.axisRanges}
         legendActions={legendActions}
         activeScenarioId={activeScenarioId}
@@ -730,6 +776,7 @@ function StructuralReturnGraphPaneV3({
       data-analysis-pending={pending ? "true" : "false"}
     >
       <>
+        <WorkbenchMechanicalAnalysisCaptionV3 analysisId={analysisId} kind="structural-return" />
         {comparisonTraces.length === 0 && <WorkbenchChartLegendRowV3 actions={legendActions}
           updatingLabel={traces.length > 0 && (pending || error === null) ? t("workbench.live.analysisRunning") : undefined}>
           {traces.length > 0 && <SimulationLegendPlaceholderV1 />}

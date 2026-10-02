@@ -13,9 +13,9 @@ authority and scientific gates.
 
 - The exact Worker is the sole owner of numerical advance, event handling,
   accepted clocks, and exact frames.
-- The main thread may schedule delivery, retain presentation history, and
-  paint graphs. It must not manufacture scientific states or reinterpret
-  accepted values.
+- The presentation layer may schedule delivery, retain presentation history,
+  and paint graphs on the main thread or a rendering Worker. Neither owns
+  scientific states or may reinterpret accepted values.
 - Pressure and volume in a PV point come from the same accepted state.
 - A visual cache, reduced history, or interpolated display is never evidence
   for settlement, analysis, Snapshot admission, or qualification.
@@ -27,6 +27,11 @@ A slow numerical lane may slow the comparison, but no lane may acquire a
 different implied playback clock merely to keep its graph visually smooth.
 Playback and presentation controls are therefore group concerns rather than
 independent scientific clocks.
+
+Asynchronous drawing consumes only the released prefix. A renderer may
+coalesce pending visual updates, but must retain the complete current visual
+window across those updates and reject stale deliveries after a reset. Its
+queue, caches, and failure recovery cannot become a second numerical owner.
 
 ## Compact presentation transport
 

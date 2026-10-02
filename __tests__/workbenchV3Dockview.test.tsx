@@ -15,6 +15,7 @@ import {
 } from "@/components/workbench/WorkbenchItemPresentation";
 import {
   workbenchPvGraphUsesPeriodicPvaAnalysisV3,
+  WorkbenchMechanicalAnalysisCaptionV3,
 } from "@/components/workbench/WorkbenchGraphPaneBodyV3";
 import {
   PressureVolumeLoopCanvasV3,
@@ -98,7 +99,7 @@ import {
   resolveExperimentOutputDisplayV3,
 } from "@/components/workbench/ExperimentPanePresentationV3";
 import { WorkbenchMobileStageDeckV3 } from "@/components/workbench/WorkbenchMobileStageDeckV3";
-import { WorkbenchSimulationInfoPanelV3, workbenchAnalysisLimitationsV3 } from "@/components/workbench/WorkbenchSimulationInfoV3";
+import { WorkbenchSimulationInfoPanelV3, workbenchAnalysisLimitationsV3, workbenchSnapshotChecksV3 } from "@/components/workbench/WorkbenchSimulationInfoV3";
 import {
   DEFAULT_WORKBENCH_SCENARIO_MANAGER_STRINGS_V3,
   WorkbenchScenarioManagerV3,
@@ -1227,6 +1228,36 @@ describe("V3 Dockview Workbench", () => {
     expect(workbenchAnalysisLimitationsV3(currentId, "ja")[0]).toContain("弁尖の接触時刻を測るものではありません");
     expect(workbenchAnalysisLimitationsV3(currentId, "en")[0]).toContain("not a measurement of physical leaflet contact");
     expect(workbenchAnalysisLimitationsV3(previousId, "ja")).toEqual([]);
+  });
+
+  it("never promotes Snapshot admission into a settlement claim", () => {
+    expect(workbenchSnapshotChecksV3("created")).toEqual({
+      settlement: "not-assessed", numericalSafety: "passed",
+    });
+    expect(workbenchSnapshotChecksV3("creating")).toEqual({
+      settlement: "not-assessed", numericalSafety: "checking",
+    });
+    expect(workbenchSnapshotChecksV3("error")).toEqual({
+      settlement: "not-assessed", numericalSafety: "unavailable",
+    });
+    expect(workbenchSnapshotChecksV3(null)).toEqual({
+      settlement: "not-assessed", numericalSafety: "not-checked",
+    });
+  });
+
+  it("discloses the captured fixed respiratory boundary of development mechanical analysis", async () => {
+    const { CARDIORESPIRATORY_MECHANICAL_ANALYSIS_V1_ID: id } = await import("@/analysis/methods/cardiorespiratory/CardiorespiratoryMechanicalAnalysisV1");
+    const english = workbenchAnalysisLimitationsV3(id, "en")[0]!;
+    expect(english).toContain("both regional alveolar pressures and pulmonary vascular resistances");
+    expect(english).toContain("vascular tone fixed");
+    expect(english).toContain("does not represent a breath-averaged response or whole-system gas-exchange settlement");
+    expect(english).toContain("without changing the source capture");
+    expect(workbenchAnalysisLimitationsV3(id, "ja")[0]).toContain("胸膜圧、2領域の肺胞圧と肺血管抵抗");
+    const pvCaption = renderToStaticMarkup(<WorkbenchMechanicalAnalysisCaptionV3 analysisId={id} kind="pressure-volume" />);
+    expect(pvCaption).toMatch(/PV reference lines|PV参考線/);
+    const structuralCaption = renderToStaticMarkup(<WorkbenchMechanicalAnalysisCaptionV3 analysisId={id} kind="structural-return" />);
+    expect(structuralCaption).toMatch(/Mechanical analysis with fixed respiratory conditions|呼吸条件固定の機械解析/);
+    expect(renderToStaticMarkup(<WorkbenchMechanicalAnalysisCaptionV3 analysisId="another-method" kind="pressure-volume" />)).toBe("");
   });
 
   it("discloses human model information without implementation identities", async () => {

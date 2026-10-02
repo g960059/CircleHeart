@@ -51,6 +51,7 @@ import type {
   WholeHeartMechanicsProviderV1,
 } from "@/engine/myocardium/wholeHeartMechanicsContractV1";
 import {
+  validationStampIssuanceEligibleV1,
   validationStampReuseEligibleV1,
 } from "@/engine/validationStampModeV1";
 
@@ -96,6 +97,12 @@ export type MainWireFiveWallCoronaryAcceptedStateV3<TWallState> = Readonly<
  */
 const validatedBaseStateByMainWireFiveWallCoronaryAcceptedStateV3 =
   new WeakMap<object, MainWireFiveWallCoronaryAcceptedStateV2<unknown>>();
+
+const defaultAutoregulationDriveIdentityV3 = Object.freeze({});
+const resolvedAutoregulationControlsByDiseaseV3 = new WeakMap<
+  object,
+  WeakMap<object, CoronaryAutoregulationWindowControlV3>
+>();
 
 export type MainWireFiveWallCoronaryAutoregulationDriveV3 = Readonly<{
   controlId: string;
@@ -577,8 +584,14 @@ function resolveAutoregulationControl(
   drive: MainWireFiveWallCoronaryAutoregulationDriveV3 | undefined,
   disease: CoronaryDiseaseInputV2,
 ): CoronaryAutoregulationWindowControlV3 {
+  const reuse = validationStampReuseEligibleV1();
+  const driveIdentity = drive ?? defaultAutoregulationDriveIdentityV3;
+  const cached = reuse
+    ? resolvedAutoregulationControlsByDiseaseV3.get(disease)?.get(driveIdentity)
+    : undefined;
+  if (cached !== undefined) return cached;
   const defaults = createDefaultCoronaryAutoregulationWindowControlV3();
-  return Object.freeze({
+  const control = Object.freeze({
     controlId: drive?.controlId ?? defaults.controlId,
     demandScaleByTerritoryLayer:
       drive?.demandScaleByTerritoryLayer ?? unitCoronaryDemandScaleV2(),
@@ -592,6 +605,13 @@ function resolveAutoregulationControl(
       ),
     ),
   });
+  if (reuse && validationStampIssuanceEligibleV1(disease, driveIdentity)) {
+    const byDrive = resolvedAutoregulationControlsByDiseaseV3.get(disease)
+      ?? new WeakMap<object, CoronaryAutoregulationWindowControlV3>();
+    byDrive.set(driveIdentity, control);
+    resolvedAutoregulationControlsByDiseaseV3.set(disease, byDrive);
+  }
+  return control;
 }
 
 function copyLayerRecord(

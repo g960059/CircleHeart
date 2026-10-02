@@ -1,4 +1,5 @@
 import { MAIN_WIRE_PRESSURE_CROSSING_PV_PROTOCOL_V1_ID } from "./MainWireStructuralAnalysisContractV3";
+import { CARDIORESPIRATORY_MECHANICAL_PROTOCOL_V1_ID, CARDIORESPIRATORY_MECHANICAL_PVA_V1_ID } from "../cardiorespiratory/CardiorespiratoryMechanicalAnalysisV1";
 import type {
   MainWireIntegratedModelPressureVolumeLoopPointV3,
   MainWireIntegratedModelStarlingLocusV3,
@@ -38,7 +39,8 @@ export type MainWirePeriodicPvaMethodIdV1 =
   | typeof MAIN_WIRE_PERIODIC_PVA_METHOD_V13_ID
   | typeof MAIN_WIRE_PERIODIC_PVA_METHOD_V14_ID
   | typeof MAIN_WIRE_PERIODIC_PVA_METHOD_V15_ID
-  | typeof MAIN_WIRE_PERIODIC_PVA_METHOD_V16_ID;
+  | typeof MAIN_WIRE_PERIODIC_PVA_METHOD_V16_ID
+  | typeof CARDIORESPIRATORY_MECHANICAL_PVA_V1_ID;
 
 type Mvo2Estimate = MainWireIntegratedModelLvMvo2EstimateV1 | MainWireLvMvo2EstimateV2;
 
@@ -424,10 +426,22 @@ function assertPressureCrossingFamilyV1(locus: MainWireIntegratedModelStarlingLo
     throw new Error("Pressure-crossing PVA requires its pinned measured protocol, not a legacy family");
 }
 
+/** Same energy equations as V16, separately pinned to an explicitly frozen
+ * respiratory intervention. Never relabel a breathing or legacy PV family. */
+export function buildCardiorespiratoryMechanicalPvaV1(
+  locus: MainWireIntegratedModelStarlingLocusV3,
+  ventricleId: MainWireIntegratedModelPeriodicPvaVentricleV1,
+): MainWirePeriodicPvaV1 {
+  if (locus.status !== "measured-fixed-tbv-protocol" || locus.protocolId !== CARDIORESPIRATORY_MECHANICAL_PROTOCOL_V1_ID)
+    throw new Error("Fixed respiratory PVA requires its own measured mechanical protocol");
+  return buildMeasuredLoadPva(locus, ventricleId, CARDIORESPIRATORY_MECHANICAL_PVA_V1_ID,
+    { exactIntersectionEndpoint: true, lowVolumeTailPolicy: "measured-domain-first" });
+}
+
 function buildMeasuredLoadPva(locus: MainWireIntegratedModelStarlingLocusV3,
   ventricleId: MainWireIntegratedModelPeriodicPvaVentricleV1,
   methodId: typeof MAIN_WIRE_PERIODIC_PVA_METHOD_V13_ID | typeof MAIN_WIRE_PERIODIC_PVA_METHOD_V14_ID
-    | typeof MAIN_WIRE_PERIODIC_PVA_METHOD_V16_ID,
+    | typeof MAIN_WIRE_PERIODIC_PVA_METHOD_V16_ID | typeof CARDIORESPIRATORY_MECHANICAL_PVA_V1_ID,
   options: Readonly<{ exactIntersectionEndpoint?: boolean; lowVolumeTailPolicy?: "measured-domain-first" }> = {},
 ): MainWirePeriodicPvaV1 {
   const pva = buildMainWirePeriodicPvaByPolicyV1(locus, ventricleId, {

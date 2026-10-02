@@ -36,6 +36,8 @@ import {
   type ExecutionPlanAcceptedTypedStateBindingV1,
 } from "@/engine/vnext/ExecutionPlanAcceptedTypedStateBindingV1";
 
+import { assertMainWireAcceptedTypedExtensionBindingV1, type MainWireAcceptedTypedExtensionBindingV1 } from "./MainWireAcceptedTypedExtensionBindingV1";
+
 export const MAIN_WIRE_ACCEPTED_TYPED_HEMODYNAMIC_VIEW_V1_ID =
   "main-wire-integrated-accepted-typed-hemodynamic-view-v1" as const;
 
@@ -133,8 +135,8 @@ type OwnerClockBindingV1 = Readonly<{
 
 export type MainWireAcceptedTypedHemodynamicBindingV1 = Readonly<{
   viewId: typeof MAIN_WIRE_ACCEPTED_TYPED_HEMODYNAMIC_VIEW_V1_ID;
-  layoutId: typeof MAIN_WIRE_ACCEPTED_TYPED_STATE_LAYOUT_V1_ID;
-  fingerprint: typeof MAIN_WIRE_ACCEPTED_TYPED_STATE_LAYOUT_V1_FINGERPRINT;
+  layoutId: string;
+  fingerprint: string;
   /** Canonical 100-f64 view; the MVC-active position is supplied separately. */
   canonicalContinuousSlots: readonly (number | null)[];
   mvcActiveBooleanSlot: number;
@@ -290,11 +292,30 @@ function createLegacyMainWireAcceptedProjectionV1(
  * binding is a read-only view over the existing full accepted-state image,
  * never a second state authority.
  */
+const ISSUED_HEMODYNAMIC_BINDINGS = new WeakSet<object>();
+
 export function createMainWireAcceptedTypedHemodynamicBindingV1(
   manifest: TransactionalTypedStateManifestV1,
   executionPlanBinding?: ExecutionPlanAcceptedTypedStateBindingV1,
 ): MainWireAcceptedTypedHemodynamicBindingV1 {
   assertManifest(manifest);
+  return createHemodynamicBinding(manifest, executionPlanBinding);
+}
+
+export function createMainWireExtendedAcceptedTypedHemodynamicBindingV1(
+  manifest: TransactionalTypedStateManifestV1,
+  extension: MainWireAcceptedTypedExtensionBindingV1,
+  executionPlanBinding: ExecutionPlanAcceptedTypedStateBindingV1,
+): MainWireAcceptedTypedHemodynamicBindingV1 {
+  assertMainWireAcceptedTypedExtensionBindingV1(extension, manifest);
+  return createHemodynamicBinding(manifest, executionPlanBinding, extension);
+}
+
+function createHemodynamicBinding(
+  manifest: TransactionalTypedStateManifestV1,
+  executionPlanBinding?: ExecutionPlanAcceptedTypedStateBindingV1,
+  extension?: MainWireAcceptedTypedExtensionBindingV1,
+): MainWireAcceptedTypedHemodynamicBindingV1 {
   let slots: (number | null)[];
   let mvcActiveBooleanSlot: number;
   if (executionPlanBinding === undefined) {
@@ -310,9 +331,14 @@ export function createMainWireAcceptedTypedHemodynamicBindingV1(
         "Main Wire execution-plan authority binding identity drifted",
       );
     }
-    const compiled = listExecutionPlanAcceptedTypedStateSlotsV1(
-      executionPlanBinding,
-    );
+    const allCompiled = listExecutionPlanAcceptedTypedStateSlotsV1(executionPlanBinding);
+    const compiled = extension === undefined ? allCompiled
+      : MAIN_WIRE_ACCEPTED_TYPED_HEMODYNAMIC_STATE_IDS_V1.map(id => {
+        const slot = allCompiled.find(entry => entry.stateId === id);
+        if (slot === undefined) throw new Error(`Extended Main Wire state ${id} is unavailable`);
+        return slot;
+      });
+    const reference = extension === undefined ? null : createLegacyMainWireAcceptedProjectionV1(manifest);
     if (
       compiled.length
         !== MAIN_WIRE_ACCEPTED_TYPED_HEMODYNAMIC_STATE_IDS_V1.length
@@ -331,6 +357,8 @@ export function createMainWireAcceptedTypedHemodynamicBindingV1(
         slot.stateId !== expectedStateId
         || slot.logicalIndex !== index
         || slot.storageKind !== expectedStorageKind
+        || (reference !== null && slot.authoritySlotIndex !== (index === MVC_ACTIVE_INDEX
+          ? reference.mvcActiveBooleanSlot : reference.slots[index]))
       ) {
         throw new Error(
           `Main Wire execution-plan state ${index} identity drifted`,
@@ -388,10 +416,10 @@ export function createMainWireAcceptedTypedHemodynamicBindingV1(
   const solverRetainedContinuousSlots = Object.freeze(
     coupledContinuousSlots.filter((slot) => !coronaryToneSlots.has(slot)),
   );
-  return Object.freeze({
+  const binding = Object.freeze({
     viewId: MAIN_WIRE_ACCEPTED_TYPED_HEMODYNAMIC_VIEW_V1_ID,
-    layoutId: MAIN_WIRE_ACCEPTED_TYPED_STATE_LAYOUT_V1_ID,
-    fingerprint: MAIN_WIRE_ACCEPTED_TYPED_STATE_LAYOUT_V1_FINGERPRINT,
+    layoutId: manifest.layoutId,
+    fingerprint: manifest.fingerprint,
     canonicalContinuousSlots: Object.freeze(slots),
     mvcActiveBooleanSlot,
     circulationTotalBloodVolumeSlot,
@@ -403,6 +431,8 @@ export function createMainWireAcceptedTypedHemodynamicBindingV1(
     solverRetainedContinuousSlots,
     solverRetainedBooleanSlots: Object.freeze([mvcActiveBooleanSlot]),
   });
+  ISSUED_HEMODYNAMIC_BINDINGS.add(binding);
+  return binding;
 }
 
 /** Allocates caller-owned scratch for cold setup or benchmark tooling. */
@@ -956,7 +986,8 @@ function assertCursor(
   binding: MainWireAcceptedTypedHemodynamicBindingV1,
 ): void {
   if (
-    cursor.layoutId !== binding.layoutId
+    !ISSUED_HEMODYNAMIC_BINDINGS.has(binding)
+    || cursor.layoutId !== binding.layoutId
     || cursor.fingerprint !== binding.fingerprint
   ) {
     throw new Error("Main Wire accepted typed hemodynamic cursor is unsupported");
@@ -968,7 +999,8 @@ function assertCandidateCursor(
   binding: MainWireAcceptedTypedHemodynamicBindingV1,
 ): void {
   if (
-    cursor.layoutId !== binding.layoutId
+    !ISSUED_HEMODYNAMIC_BINDINGS.has(binding)
+    || cursor.layoutId !== binding.layoutId
     || cursor.fingerprint !== binding.fingerprint
   ) {
     throw new Error(

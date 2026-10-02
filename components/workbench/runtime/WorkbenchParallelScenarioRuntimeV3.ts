@@ -234,7 +234,10 @@ export class WorkbenchParallelScenarioRuntimeV3 {
       // its background load. Existing analysis can survive a Scenario addition;
       // waiting for an idle pool would hide available acceleration for minutes.
       capacityMeasurementEligible: foregroundDocumentVisibleV3,
-      batchSteps: this.#presentationProfile.maximumBatchSteps,
+      adaptPresentationCadenceToLoad: this.#presentationProfile.name === "smooth",
+      adaptComputeBatchToPlaybackRate: this.#presentationProfile.name === "smooth"
+        && this.#presentationProfile.maximumBatchSteps >= 32,
+      batchSteps: Math.min(this.#presentationProfile.preferredBatchSteps, this.#presentationProfile.maximumBatchSteps),
       presentationIntervalMs:
         this.#presentationProfile.presentationIntervalMs,
       maximumPresentationFramesPerLane:

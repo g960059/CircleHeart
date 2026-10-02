@@ -1,3 +1,4 @@
+import { evaluateParallelPulmonaryPathsV1 } from "./ParallelPulmonaryPathsV1";
 import {
   buildAuthoritativeCirculationGraphV1,
   downstreamEffectivePressureAndDerivativeV1,
@@ -31,6 +32,8 @@ import type { EdgeSpec, NodeSpec } from "@/engine/core/topology";
 import {
   fullHotPathInvariantsEnabledV1,
 } from "@/engine/hotPathIntegrityTierV1";
+import { isTransitivelyFrozenPlainDataV1, validationStampReuseEligibleV1 }
+  from "@/engine/validationStampModeV1";
 import {
   validateMainWireFourValveDiseaseResearchInputV1,
   type MainWireFourValveDiseaseResearchInputV1,
@@ -242,6 +245,8 @@ export type NonCoronaryCirculationRuntimeParamsV1 = Readonly<{
   vascular: VascularPvRuntimeParameterViewV1;
   losses: BaseEdgeLossRuntimeParameterViewV1;
   respiratory: RespiratoryPressureParameterViewV1;
+  /** New exact owners only; omission preserves the published circulation. */
+  parallelPulmonaryPaths?: import("./ParallelPulmonaryPathsV1").ParallelPulmonaryPathsV1;
   /** Explicit even for normal, so numeric identity and provenance cannot diverge. */
   valveResearchInput: MainWireFourValveDiseaseResearchInputV1;
 }>;
@@ -2720,6 +2725,12 @@ function evaluateCandidate<TEvaluation, TCompanionTrial = never>(
       flows[edgeIndex] = evaluation.flowMlPerSec;
       continue;
     }
+    if (name === "PCap_PVen" && input.runtime.parallelPulmonaryPaths !== undefined) {
+      flows[edgeIndex] = evaluateParallelPulmonaryPathsV1(
+        input.runtime.parallelPulmonaryPaths, upstreamPressure, downstreamPressure,
+      ).totalFlowMlPerSec;
+      continue;
+    }
     const edgeExternalPressureMmHg = respiratoryExternalPressureFromFrameV1(
       respiratoryKind(edge.ext),
       respiratoryExternalPressures,
@@ -3061,6 +3072,11 @@ function analyticEdgeFlowPressureDerivativesV1<
     ]!;
   let upstreamMlPerSecPerMmHg: number;
   let downstreamMlPerSecPerMmHg: number;
+
+  if (edgeName === "PCap_PVen" && input.runtime.parallelPulmonaryPaths !== undefined) {
+    return evaluateParallelPulmonaryPathsV1(input.runtime.parallelPulmonaryPaths,
+      upstreamPressureMmHg, downstreamPressureMmHg);
+  }
 
   if (edge.kind === "valve") {
     const evaluation = current.valveEvaluations[
@@ -4497,41 +4513,56 @@ function resolveNewtonOptions(
   return Object.freeze(resolved);
 }
 
-/**
- * Runtime parameters that have already passed this validation. The session
- * holds one frozen runtime object for the life of a parameter setting and hands
- * the same object to every step, so without this the whole check — including
- * five `stableHash` passes over an unchanging valve research input — re-ran twice per
- * 2 ms step.
- *
- * Membership is by object identity. A caller that mutates a runtime object in
- * place instead of building a new one is outside the contract: the object is
- * expected to be frozen, and the session replaces it wholesale on a parameter
- * change.
- */
+/** Successful proofs belong only to transitively immutable plain-data inputs.
+ * Respiratory coupling replaces the outer runtime each step but retains its
+ * fixed vascular/valve subtrees. Their proofs exclude every dynamic pressure,
+ * resistance and accepted state; those retain their existing validators. */
 const VALIDATED_RUNTIMES_V1 = new WeakSet<object>();
+const VALIDATED_VASCULAR_RUNTIMES_V1 = new WeakSet<object>();
+const VALIDATED_VALVE_RESEARCH_INPUTS_V1 = new WeakSet<object>();
 
 function validateRuntime(runtime: NonCoronaryCirculationRuntimeParamsV1): void {
-  if (VALIDATED_RUNTIMES_V1.has(runtime)) return;
+  const reuse = validationStampReuseEligibleV1();
+  if (reuse && VALIDATED_RUNTIMES_V1.has(runtime)) return;
   validateRuntimeOnceV1(runtime);
-  VALIDATED_RUNTIMES_V1.add(runtime);
+  if (reuse && isTransitivelyFrozenPlainDataV1(runtime)) VALIDATED_RUNTIMES_V1.add(runtime);
 }
 
 function validateRuntimeOnceV1(
   runtime: NonCoronaryCirculationRuntimeParamsV1,
 ): void {
-  requireFinite(runtime.vascular.venousTone, "venousTone");
-  requirePositive(runtime.vascular.arterialStiffness, "arterialStiffness");
-  const aorticInertanceScale = runtime.vascular.aorticRootInertanceResearchScale;
+  validateVascularRuntimeV1(runtime.vascular);
+  requirePositive(runtime.losses.systemicResistance, "systemicResistance");
+  requirePositive(runtime.losses.pulmonaryResistance, "pulmonaryResistance");
+  if (
+    runtime.losses.useChiResistance !== undefined
+    && typeof runtime.losses.useChiResistance !== "boolean"
+  ) {
+    throw new Error("useChiResistance must be boolean when provided");
+  }
+  requireFinite(runtime.respiratory.PEEP, "PEEP");
+  requireFinite(runtime.respiratory.Pth0, "Pth0");
+  requireFinite(runtime.respiratory.respAmpTh, "respAmpTh");
+  requireFinite(runtime.respiratory.respAmpAlv, "respAmpAlv");
+  requireNonnegative(runtime.respiratory.respRate, "respRate");
+  validateRuntimeValveResearchInputV1(runtime.valveResearchInput);
+}
+
+function validateVascularRuntimeV1(vascular: VascularPvRuntimeParameterViewV1): void {
+  const reuse = validationStampReuseEligibleV1();
+  if (reuse && VALIDATED_VASCULAR_RUNTIMES_V1.has(vascular)) return;
+  requireFinite(vascular.venousTone, "venousTone");
+  requirePositive(vascular.arterialStiffness, "arterialStiffness");
+  const aorticInertanceScale = vascular.aorticRootInertanceResearchScale;
   if (aorticInertanceScale !== undefined) {
     requireNonnegative(aorticInertanceScale, "aorticRootInertanceResearchScale");
-    if (runtime.vascular.selectedAorticOutflowProfile !== undefined
-      || runtime.vascular.algebraicProximalArterialRootsProfile !== undefined) {
+    if (vascular.selectedAorticOutflowProfile !== undefined
+      || vascular.algebraicProximalArterialRootsProfile !== undefined) {
       throw new Error("aortic root inertance scale cannot override another aortic root owner");
     }
   }
   const selectedAorticOutflowProfile =
-    runtime.vascular.selectedAorticOutflowProfile;
+    vascular.selectedAorticOutflowProfile;
   if (selectedAorticOutflowProfile !== undefined) {
     const selectedProfileIssues =
       validateMainWireSelectedAorticOutflowCirculationProfileV1(
@@ -4543,7 +4574,7 @@ function validateRuntimeOnceV1(
       );
     }
   }
-  const algebraicProximalArterialRootsProfile = runtime.vascular
+  const algebraicProximalArterialRootsProfile = vascular
     .algebraicProximalArterialRootsProfile;
   if (algebraicProximalArterialRootsProfile !== undefined) {
     const issues = validateMainWireAlgebraicProximalArterialRootsProfileV1(
@@ -4560,7 +4591,7 @@ function validateRuntimeOnceV1(
       );
     }
   }
-  const algebraicPulmonaryArterialRootProfile = runtime.vascular
+  const algebraicPulmonaryArterialRootProfile = vascular
     .algebraicPulmonaryArterialRootProfile;
   if (algebraicPulmonaryArterialRootProfile !== undefined) {
     const issues = validateMainWireAlgebraicPulmonaryArterialRootProfileV1(
@@ -4577,25 +4608,19 @@ function validateRuntimeOnceV1(
       );
     }
   }
-  requirePositive(runtime.losses.systemicResistance, "systemicResistance");
-  requirePositive(runtime.losses.pulmonaryResistance, "pulmonaryResistance");
-  if (
-    runtime.losses.useChiResistance !== undefined
-    && typeof runtime.losses.useChiResistance !== "boolean"
-  ) {
-    throw new Error("useChiResistance must be boolean when provided");
-  }
-  requireFinite(runtime.respiratory.PEEP, "PEEP");
-  requireFinite(runtime.respiratory.Pth0, "Pth0");
-  requireFinite(runtime.respiratory.respAmpTh, "respAmpTh");
-  requireFinite(runtime.respiratory.respAmpAlv, "respAmpAlv");
-  requireNonnegative(runtime.respiratory.respRate, "respRate");
+  if (reuse && isTransitivelyFrozenPlainDataV1(vascular)) VALIDATED_VASCULAR_RUNTIMES_V1.add(vascular);
+}
+
+function validateRuntimeValveResearchInputV1(researchInput: MainWireFourValveDiseaseResearchInputV1): void {
+  const reuse = validationStampReuseEligibleV1();
+  if (reuse && VALIDATED_VALVE_RESEARCH_INPUTS_V1.has(researchInput)) return;
   const valveIssues = validateMainWireFourValveDiseaseResearchInputV1(
-    runtime.valveResearchInput,
+    researchInput,
   );
   if (valveIssues.length > 0) {
     throw new Error(`invalid valveResearchInput: ${valveIssues.join("; ")}`);
   }
+  if (reuse && isTransitivelyFrozenPlainDataV1(researchInput)) VALIDATED_VALVE_RESEARCH_INPUTS_V1.add(researchInput);
 }
 
 function validateMechanicalSupportInput(

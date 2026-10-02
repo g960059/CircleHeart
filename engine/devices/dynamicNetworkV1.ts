@@ -26,6 +26,7 @@ import {
   type RotarySupportDeviceIdV1,
 } from "@/engine/devices/typesV1";
 import {
+  isTransitivelyFrozenPlainDataV1,
   validationStampIssuanceEligibleV1,
   validationStampReuseEligibleV1,
 } from "@/engine/validationStampModeV1";
@@ -143,6 +144,8 @@ const LIVE_DYNAMIC_MECHANICAL_SUPPORT_STATES = new WeakSet<object>();
  * ineligible.
  */
 const VALIDATED_DYNAMIC_MECHANICAL_SUPPORT_PROFILES = new WeakSet<object>();
+const VALIDATED_STRUCTURAL_HYDRAULIC_PROJECTIONS = new WeakSet<object>();
+const VALIDATED_LIVE_DYNAMIC_STATE_SHAPES = new WeakSet<object>();
 
 type DynamicMechanicalSupportValidationStampV1 = Readonly<{
   profile: DynamicMechanicalSupportInertanceProfileV1;
@@ -1062,6 +1065,9 @@ function assertAcceptedStateShape(
   state: unknown,
   requireLiveFactoryState: boolean,
 ): asserts state is DynamicMechanicalSupportAcceptedStateV1 {
+  if (requireLiveFactoryState && state !== null && typeof state === "object"
+      && validationStampReuseEligibleV1()
+      && VALIDATED_LIVE_DYNAMIC_STATE_SHAPES.has(state)) return;
   plainRecord(state, "dynamic mechanical-support accepted state");
   assertExactKeys(
     state,
@@ -1100,12 +1106,18 @@ function assertAcceptedStateShape(
       );
     }
     assertDeepFrozen(state, "dynamic mechanical-support accepted state");
+    if (validationStampIssuanceEligibleV1(state)) {
+      VALIDATED_LIVE_DYNAMIC_STATE_SHAPES.add(state);
+    }
   }
 }
 
 function validateStructuralHydraulicProjection(
   value: unknown,
 ): asserts value is DynamicMechanicalSupportStructuralHydraulicProjectionV1 {
+  if (value !== null && typeof value === "object"
+      && validationStampReuseEligibleV1()
+      && VALIDATED_STRUCTURAL_HYDRAULIC_PROJECTIONS.has(value)) return;
   plainRecord(value, "structural hydraulic projection");
   assertExactKeys(value, [
     "projectionSchemaId",
@@ -1133,6 +1145,11 @@ function validateStructuralHydraulicProjection(
       projection.byDevice[deviceId],
       deviceId,
     );
+  }
+  // Only successful admission of an immutable plain-data graph is reusable.
+  // A restored clone or any mutable descendant still crosses the full gate.
+  if (validationStampIssuanceEligibleV1(value)) {
+    VALIDATED_STRUCTURAL_HYDRAULIC_PROJECTIONS.add(value);
   }
 }
 
@@ -1460,6 +1477,7 @@ function validateNode(
 }
 
 function assertDeepFrozen(value: unknown, label: string): void {
+  if (validationStampReuseEligibleV1() && isTransitivelyFrozenPlainDataV1(value)) return;
   const visited = new WeakSet<object>();
   const visit = (candidate: unknown, path: string): void => {
     if (candidate === null || typeof candidate !== "object") return;

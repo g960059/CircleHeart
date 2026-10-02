@@ -204,7 +204,7 @@ export class DynamicExactModelRuntimeLoaderV2 {
       contractValidationMs,
       totalMs: nonnegativeDurationV2(totalStartedAtMs),
     }));
-    return runtime;
+    return Object.freeze({ ...runtime, exactNumericalExports: namespace });
   }
 }
 

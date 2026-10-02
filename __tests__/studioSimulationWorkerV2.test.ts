@@ -237,6 +237,20 @@ describe("Studio simulation worker V2 protocol", () => {
       stepCount: 4,
       presentationOutputIds: ["pressure.lv", "pressure.lv"],
     })).toThrow(/must be unique/);
+    expect(createStudioSimulationAdvancePresentationRequestV2(2, {
+      runtimeSessionId: "runtime/session-1",
+      scenarioId: "scenario/baseline",
+      stepCount: 32,
+      presentationOutputIds: ["pressure.lv"],
+    })).toMatchObject({ stepCount: 32 });
+    for (const stepCount of [0, 33, 1.5, Number.NaN]) {
+      expect(() => createStudioSimulationAdvancePresentationRequestV2(2, {
+        runtimeSessionId: "runtime/session-1",
+        scenarioId: "scenario/baseline",
+        stepCount,
+        presentationOutputIds: ["pressure.lv"],
+      })).toThrow(/within \[1, 32\]/);
+    }
   });
 
   it("validates exact semantic control requests and finite scalar values", () => {
@@ -703,6 +717,28 @@ describe("Studio simulation worker V2 protocol", () => {
     expect([...owned.batch.outputValues]).toEqual([91, 92]);
     expect(owned.batch.workerAdvanceMs).toBe(0);
     expect(owned.batch.workerPrepareMs).toBe(0);
+  });
+
+  it("bounds both presentation response decoders at 32 while keeping full-frame responses at 16", () => {
+    const frames = Array.from({ length: 33 }, (_, index) => frameV2({
+      acceptedRevision: index + 1,
+      acceptedTimeSec: (index + 1) * 0.002,
+    }));
+    for (const validate of [validateStudioSimulationWorkerResponseV2, validateStudioSimulationWorkerResponseFromTrustedRuntimeV2]) {
+      for (const count of [16, 32, 33]) {
+        const response = {
+          protocol: STUDIO_SIMULATION_WORKER_PROTOCOL_V2,
+          requestId: 2,
+          status: "ok",
+          kind: "presentation-advanced",
+          batch: createStudioSimulationPresentationBatchV2(frames.slice(0, count), ["pressure.lv"]),
+        };
+        if (count <= 32) expect(validate(response)).toMatchObject({ kind: "presentation-advanced" });
+        else expect(() => validate(response)).toThrow(/1-32 aligned clocks/);
+      }
+      expect(validate(advancedResponseV2(2, frames.slice(0, 16)))).toMatchObject({ kind: "advanced" });
+      expect(() => validate(advancedResponseV2(2, frames.slice(0, 17)))).toThrow(/1-16 frames/);
+    }
   });
 
   it("rejects shared compact transport buffers", () => {
@@ -3418,6 +3454,50 @@ describe("Studio simulation worker V2 client", () => {
       acceptedTimeSec: 0.1,
     })]));
     await expect(advanced).resolves.toHaveLength(1);
+  });
+
+  it("round-trips adaptive 32-step presentation batches through the real client and Worker runtime", async () => {
+    const adapter = runtimeHarnessV2().adapter;
+    const transport = new RuntimeBackedWorkerTransportV2(adapter);
+    const client = createStudioSimulationWorkerClientForTestV2({ transport });
+    const initialized = client.initialize({
+      expectedModelId: adapter.modelId,
+      releaseTicket: STANDARD_TEST_RELEASE_TICKET_V1,
+      runtimeSessionId: "runtime/session-1",
+      scenarioId: "scenario/baseline",
+      scenarioLabel: "Baseline",
+      fixture: { value: 1 },
+    });
+    await transport.whenIdle();
+    await initialized;
+
+    const input = {
+      runtimeSessionId: "runtime/session-1",
+      scenarioId: "scenario/baseline",
+      presentationOutputIds: ["pressure.lv"],
+    };
+    let priorRevision = 0;
+    for (const stepCount of [16, 32, 16]) {
+      const pending = client.advancePresentation({ ...input, stepCount });
+      await transport.whenIdle();
+      const frames = await pending;
+      const revisions = Array.from({ length: stepCount }, (_, index) => priorRevision + index + 1);
+      expect(frames.map(frame => frame.acceptedRevision)).toEqual(revisions);
+      expect(frames.map(frame => frame.acceptedTimeSec)).toEqual(revisions.map(revision => revision / 10));
+      expect(frames.map(frame => frame.outputs["pressure.lv"]?.value)).toEqual(Array(stepCount).fill(80));
+      expect(adapter.advancePresentationBatch).toHaveBeenLastCalledWith({ ...input, stepCount });
+      priorRevision += stepCount;
+    }
+    expect(adapter.advanceOnePresentationStep).toHaveBeenCalledTimes(64);
+
+    // Local rejection must not post, advance or poison the persistent Worker.
+    await expect(client.advancePresentation({ ...input, stepCount: 33 })).rejects.toThrow(/within \[1, 32\]/);
+    expect(transport.messages).toHaveLength(4);
+    const continued = client.advancePresentation({ ...input, stepCount: 1 });
+    await transport.whenIdle();
+    await expect(continued).resolves.toMatchObject([{ acceptedRevision: 65, acceptedTimeSec: 6.5 }]);
+    expect(transport.terminate).not.toHaveBeenCalled();
+    client.terminate();
   });
 
   it("materializes compact presentation rows and preserves the terminal frame", async () => {

@@ -6,6 +6,7 @@
  * Japanese label never changes model identity.
  */
 
+import { cardiorespiratoryItemPresentationV1 } from "@/studio/integrations/cardiorespiratoryV1/CardiorespiratoryPresentationV1";
 import type { ControlDefinitionV2 } from "@/studio/contracts/v2/model";
 
 export type StudioItemPresentationLocaleV1 = "en" | "ja";
@@ -1555,12 +1556,12 @@ export function resolveStudioItemPresentationV1(
     catalogFacts?: StudioItemPresentationCatalogFactsV1;
   }>,
 ): ResolvedStudioItemPresentationV1 {
-  const authored =
+  const authored = cardiorespiratoryItemPresentationV1(input.kind, input.itemId) ?? (
     input.kind === "control"
       ? (CONTROL_PRESENTATION_V1[input.itemId] ??
         patternedControlPresentationV1(input.itemId))
       : (OUTPUT_PRESENTATION_V1[input.itemId] ??
-        patternedOutputPresentationV1(input.itemId));
+        patternedOutputPresentationV1(input.itemId)));
   const locale: StudioItemPresentationLocaleV1 = input.locale.startsWith("ja")
     ? "ja"
     : "en";

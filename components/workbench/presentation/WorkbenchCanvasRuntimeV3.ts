@@ -10,6 +10,7 @@ import {
 
 const CANVAS_OBJECT_IDS_V3 = new WeakMap<object, number>();
 let nextCanvasObjectIdV3 = 0;
+let nextCanvasPaneIdV3 = 0;
 
 /** Immutable analysis objects can invalidate a visual layer without repeatedly
  * serializing their full scientific payload on every animation frame. */
@@ -147,6 +148,7 @@ export function useResponsiveCanvasFrameV3(
     height: number,
   ) => void,
   diagnosticKey = "canvas",
+  subscribe?: (schedule: () => void) => () => void,
 ): void {
   const drawRef = React.useRef(draw);
   const scheduleRef = React.useRef<(() => void) | null>(null);
@@ -162,6 +164,8 @@ export function useResponsiveCanvasFrameV3(
     if (container === null || canvas === null) return undefined;
     const context = canvas.getContext("2d");
     if (context === null) return undefined;
+    const paneId = `${diagnosticKey}-${++nextCanvasPaneIdV3}`;
+    canvas.dataset.workbenchCanvasId = paneId;
     let width = 1;
     let height = 1;
 
@@ -194,13 +198,16 @@ export function useResponsiveCanvasFrameV3(
       context.clearRect(0, 0, width, height);
       drawRef.current(context, width, height);
       if (diagnosticsEnabled) {
+        const durationMs = workbenchPerformanceNowV3() - startedAtMs;
         recordWorkbenchPerformanceDurationV3(
           `canvas.${diagnosticKey}.draw`,
-          workbenchPerformanceNowV3() - startedAtMs,
+          durationMs,
         );
         recordWorkbenchPerformanceEventIntervalV3(
           `canvas.${diagnosticKey}.display-interval`,
         );
+        recordWorkbenchPerformanceDurationV3(`render.${diagnosticKey}.${paneId}.draw`, durationMs);
+        recordWorkbenchPerformanceEventIntervalV3(`render.${diagnosticKey}.${paneId}.callback-interval`);
       }
     };
     const frameScheduler = createWorkbenchCanvasFrameSchedulerV3(render);
@@ -217,6 +224,10 @@ export function useResponsiveCanvasFrameV3(
         })
       : null;
     observer?.observe(container);
+    const themeRoot = container.closest("[data-app-theme]");
+    const themeObserver = typeof MutationObserver === "function" ? new MutationObserver(schedule) : null;
+    if (themeRoot) themeObserver?.observe(themeRoot, { attributes: true, attributeFilter: ["data-app-theme", "class", "style"] });
+    document.fonts?.addEventListener("loadingdone", schedule);
     const handleWindowResize = () => {
       updateBounds();
       schedule();
@@ -224,14 +235,18 @@ export function useResponsiveCanvasFrameV3(
     window.addEventListener("resize", handleWindowResize);
     updateBounds();
     scheduleRef.current = schedule;
+    const unsubscribe = subscribe?.(schedule);
     schedule();
     return () => {
       scheduleRef.current = null;
+      unsubscribe?.();
       observer?.disconnect();
+      themeObserver?.disconnect();
+      document.fonts?.removeEventListener("loadingdone", schedule);
       window.removeEventListener("resize", handleWindowResize);
       frameScheduler.dispose();
     };
-  }, [canvasRef, containerRef, diagnosticKey]);
+  }, [canvasRef, containerRef, diagnosticKey, subscribe]);
 }
 
 export function scaleLinearV3(

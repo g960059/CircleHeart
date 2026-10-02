@@ -21,6 +21,12 @@ import {
   type CoronaryTerritoryRecordV2,
   type CoronaryToneStateV2,
 } from "@/engine/coronary/typesV2";
+import {
+  selectValidationStampModeV1,
+  validationStampModeV1,
+  type ValidationStampModeV1,
+} from "@/engine/validationStampModeV1";
+import { withHotPathIntegrityTierV1 } from "@/engine/hotPathIntegrityTierV1";
 
 const binding = createCoronaryAutoregulationWindowBindingV3({
   originAcceptedTimeSec: 0,
@@ -364,6 +370,106 @@ describe("accepted physical-time coronary autoregulation window V3", () => {
       partial.nextState,
       { acceptedTimeSec: 0.1, maximumRevision: 9 },
     )).toThrow(/step count differs from accepted revision/);
+  });
+
+  it("retains exact accepted traces with reuse disabled across controls, restore, and window closure", () => {
+    const originalMode = validationStampModeV1();
+    const run = (mode: ValidationStampModeV1) => {
+      selectValidationStampModeV1(mode);
+      let state = createCoronaryAcceptedAutoregulationStateV3(binding, {
+        acceptedTimeSec: 0, revision: 0,
+      });
+      let tone = initialCoronaryToneStateV2();
+      const baseline = createDefaultCoronaryAutoregulationWindowControlV3();
+      const changed = Object.freeze({ ...baseline, controlId: "changed",
+        demandScaleByTerritoryLayer: layerRecord(1.2),
+        hyperemia01ByTerritoryLayer: layerRecord(0.1) });
+      const trace = [];
+      for (let step = 1; step <= 12; step++) {
+        if (step === 3 || step === 7) state = JSON.parse(JSON.stringify(state));
+        const advanced = advanceCoronaryAcceptedAutoregulationV3(binding, state, tone, {
+          ...sampleInput((step - 1) / 4, step / 4, step, step >= 3 ? changed : baseline),
+          finalQmInternalFlowMlPerSecByTerritoryLayer: layerRecord(step === 2 ? -0.1 : 1 + step / 10),
+        });
+        trace.push(advanced);
+        state = advanced.nextState;
+        tone = advanced.nextToneResistanceScaleByTerritoryLayer;
+      }
+      return trace;
+    };
+    try {
+      const uncached = run("validation-stamps-disabled");
+      const cached = run("validation-stamps-enabled");
+      expect(cached).toStrictEqual(uncached);
+      expect(cached.filter(step => step.completedWindow !== null)).toHaveLength(3);
+    } finally { selectValidationStampModeV1(originalMode); }
+  });
+
+  it("rechecks an accessor-backed outer clock even when the previous state is immutable", () => {
+    const originalMode = validationStampModeV1();
+    try {
+      for (const tier of ["full-invariant", "hot-path-lean"] as const) {
+        withHotPathIntegrityTierV1(tier, () => {
+          for (const mode of ["validation-stamps-enabled", "validation-stamps-disabled"] as const) {
+            selectValidationStampModeV1(mode);
+            const initial = createCoronaryAcceptedAutoregulationStateV3(binding, { acceptedTimeSec: 0, revision: 0 });
+            const before = JSON.stringify(initial);
+            let reads = 0;
+            const input = { ...sampleInput(0, 0.1, 1),
+              get previousAcceptedTimeSec() { return reads++ === 0 ? 0 : 0.05; } };
+            expect(() => advanceCoronaryAcceptedAutoregulationV3(binding, initial, initialCoronaryToneStateV2(), input))
+              .toThrow(/window clock differs from accepted tuple/);
+            expect(JSON.stringify(initial)).toBe(before);
+          }
+        });
+      }
+    } finally { selectValidationStampModeV1(originalMode); }
+  });
+
+  it("never reuses mutable or getter-backed controls and keeps accepted snapshots detached", () => {
+    const originalMode = validationStampModeV1();
+    try {
+      for (const mode of ["validation-stamps-enabled", "validation-stamps-disabled"] as const) {
+        selectValidationStampModeV1(mode);
+        const initial = createCoronaryAcceptedAutoregulationStateV3(binding, { acceptedTimeSec: 0, revision: 0 });
+        const tone = initialCoronaryToneStateV2();
+        const mutable = structuredClone(createDefaultCoronaryAutoregulationWindowControlV3()) as {
+          controlId: string;
+          demandScaleByTerritoryLayer: Record<string, Record<string, number>>;
+          hyperemia01ByTerritoryLayer: Record<string, Record<string, number>>;
+          effectiveMinimumToneScaleByTerritoryLayer: Record<string, Record<string, number>>;
+        };
+        const outerFrozen = Object.freeze(mutable) as CoronaryAutoregulationWindowControlV3;
+        const first = advanceCoronaryAcceptedAutoregulationV3(binding, initial, tone, sampleInput(0, 0.1, 1, outerFrozen));
+        mutable.hyperemia01ByTerritoryLayer.LAD!.subendocardial = 0.5;
+        const changed = advanceCoronaryAcceptedAutoregulationV3(binding, initial, tone, sampleInput(0, 0.1, 1, outerFrozen));
+        expect(first.nextState.desiredControl?.hyperemia01ByTerritoryLayer.LAD.subendocardial).toBe(0);
+        expect(changed.nextState.desiredControl?.hyperemia01ByTerritoryLayer.LAD.subendocardial).toBe(0.5);
+        mutable.hyperemia01ByTerritoryLayer.LAD!.subendocardial = 2;
+        expect(() => advanceCoronaryAcceptedAutoregulationV3(binding, initial, tone, sampleInput(0, 0.1, 1, outerFrozen)))
+          .toThrow(/hyperemia must lie/);
+
+        let demand = layerRecord(1);
+        const getterControl = Object.freeze({ ...createDefaultCoronaryAutoregulationWindowControlV3(),
+          get demandScaleByTerritoryLayer() { return demand; } });
+        advanceCoronaryAcceptedAutoregulationV3(binding, initial, tone, sampleInput(0, 0.1, 1, getterControl));
+        demand = layerRecord(-1);
+        expect(() => advanceCoronaryAcceptedAutoregulationV3(binding, initial, tone, sampleInput(0, 0.1, 1, getterControl)))
+          .toThrow(/demand scale must be positive/);
+
+        // A hostile accessor changes between semantic validation (one record
+        // read plus six bound checks) and copying. Freezing that copy must not
+        // itself bless the unvalidated negative values.
+        let reads = 0;
+        const changesDuringCopy = Object.freeze({ ...createDefaultCoronaryAutoregulationWindowControlV3(),
+          get demandScaleByTerritoryLayer() { return layerRecord(++reads <= 7 ? 1 : -1); } });
+        expect(() => advanceCoronaryAcceptedAutoregulationV3(binding, initial, tone, sampleInput(0, 0.1, 1, changesDuringCopy)))
+          .toThrow(/demand scale must be positive/);
+        const forgedCopy = Object.freeze({ ...first.nextState.desiredControl!, hiddenControl: 1 });
+        expect(() => advanceCoronaryAcceptedAutoregulationV3(binding, initial, tone, sampleInput(0, 0.1, 1, forgedCopy)))
+          .toThrow(/control keys mismatch/);
+      }
+    } finally { selectValidationStampModeV1(originalMode); }
   });
 });
 

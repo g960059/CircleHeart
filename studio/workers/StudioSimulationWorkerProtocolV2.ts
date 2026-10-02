@@ -51,6 +51,9 @@ import {
 export const STUDIO_SIMULATION_WORKER_PROTOCOL_V2 =
   "circleheart-studio-simulation-worker-protocol-v2" as const;
 export const STUDIO_SIMULATION_WORKER_MAX_ADVANCE_STEPS_V2 = 16;
+// Selected-signal batches permit the conductor's bounded high-rate expansion;
+// ordinary full-frame requests keep their smaller transport budget.
+export const STUDIO_SIMULATION_WORKER_MAX_PRESENTATION_ADVANCE_STEPS_V2 = 32;
 
 export type StudioPreparedAnalysisValidationV1 = Readonly<{
   record: StudioJsonValueV2;
@@ -959,11 +962,11 @@ export function validateStudioSimulationWorkerRequestV2(
       typeof stepCount !== "number"
       || !Number.isSafeInteger(stepCount)
       || stepCount < 1
-      || stepCount > STUDIO_SIMULATION_WORKER_MAX_ADVANCE_STEPS_V2
+      || stepCount > STUDIO_SIMULATION_WORKER_MAX_PRESENTATION_ADVANCE_STEPS_V2
     ) {
       throw protocolErrorV2(
         "$.request.stepCount",
-        `must be an integer within [1, ${STUDIO_SIMULATION_WORKER_MAX_ADVANCE_STEPS_V2}]`,
+        `must be an integer within [1, ${STUDIO_SIMULATION_WORKER_MAX_PRESENTATION_ADVANCE_STEPS_V2}]`,
       );
     }
     return Object.freeze({
@@ -2382,12 +2385,12 @@ function validatePresentationBatchV2(
   const frameCount = acceptedRevisions.length;
   if (
     frameCount < 1
-    || frameCount > STUDIO_SIMULATION_WORKER_MAX_ADVANCE_STEPS_V2
+    || frameCount > STUDIO_SIMULATION_WORKER_MAX_PRESENTATION_ADVANCE_STEPS_V2
     || acceptedTimesSec.length !== frameCount
   ) {
     throw protocolErrorV2(
       path,
-      `must contain 1-${STUDIO_SIMULATION_WORKER_MAX_ADVANCE_STEPS_V2} aligned clocks`,
+      `must contain 1-${STUDIO_SIMULATION_WORKER_MAX_PRESENTATION_ADVANCE_STEPS_V2} aligned clocks`,
     );
   }
   const scalarCount = frameCount * outputIds.length;

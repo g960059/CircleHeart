@@ -9,16 +9,16 @@ import { workbenchPvTrailAlphaV3, workbenchPvInputTransitionV3, workbenchPvHisto
 import { workbenchManualChartDomainV3 } from "@/components/workbench/presentation/WorkbenchManualChartDomainV3";
 import { nextZeroBasedPvDomainV3, workbenchPvLoopDomainPointsV3 } from "@/components/workbench/presentation/PressureVolumeLoopCanvasV3";
 import { pvCompactPressureAxisTitleV3, pvPressureAxisTitleV3 } from "@/components/workbench/presentation/PressureVolumeLoopCanvasV3";
+import { coalesceSweepingWaveformDisplaySegmentV3, WORKBENCH_SWEEP_FORWARD_GAP_FRACTION_V3 } from "@/components/workbench/presentation/sweep/SweepWaveformGeometryV1";
+import { buildSweepingWaveformSegmentsV3, latestSweepingWaveformPointV3 } from "./helpers/sweepGeometryReferenceV1";
 
 import {
   WORKBENCH_PRESENTATION_SAMPLE_CAPACITY_V3,
   WORKBENCH_PRESENTATION_HISTORY_MAX_DEPTH_V3,
-  WORKBENCH_SWEEP_FORWARD_GAP_FRACTION_V3,
   WorkbenchScenarioPresentationSampleStoreV3,
   appendWorkbenchPresentationSamplesV3,
   appendWorkbenchExactOrbitSamplesV3,
   buildPvBackBufferRemainderV3,
-  buildSweepingWaveformSegmentsV3,
   buildWorkbenchTraceLegendModelV3,
   boundedCanvasPixelRatioV3,
   createWorkbenchCanvasFrameSchedulerV3,
@@ -29,7 +29,6 @@ import {
   guytonStarlingPlotDomainV3,
   isWorkbenchPresentationSampleV3,
   lastCompleteCycleRangeV3,
-  latestSweepingWaveformPointV3,
   mixOpaqueWorkbenchCanvasColorV3,
   nextStableNumericDomainStateV3,
   niceNumericDomainV3,
@@ -85,6 +84,35 @@ const sampleV3 = (
   });
 
 describe("V3-neutral Workbench Canvas helpers", () => {
+  it("bounds dense sweep strokes by pixel columns while retaining original signed peaks and time pairs", () => {
+    const source: readonly Readonly<{ phaseSec: number; value: number }>[] = Object.freeze(Array.from({ length: 1000 }, (_, i) => Object.freeze({
+      phaseSec: i * .001, value: i === 11 ? 200 : i === 12 ? -100 : 0,
+    })));
+    const displayed = coalesceSweepingWaveformDisplaySegmentV3(source, phase => phase * 10);
+    expect(displayed.length).toBeLessThanOrEqual(40);
+    expect(displayed[0]).toBe(source[0]);
+    expect(displayed.at(-1)).toBe(source.at(-1));
+    expect(displayed).toContain(source[11]);
+    expect(displayed).toContain(source[12]);
+    expect(Math.min(...displayed.map(point => point.value))).toBe(-100);
+    expect(Math.max(...displayed.map(point => point.value))).toBe(200);
+    const indices = displayed.map(point => source.indexOf(point));
+    expect(indices.every((index, i) => index >= 0 && (i === 0 || index > indices[i - 1]!))).toBe(true);
+    expect(source).toHaveLength(1000);
+  });
+
+  it("preserves sparse sweep identity and separate endpoints across a sweep wrap", () => {
+    const sparse = [{ phaseSec: 0, value: 3 }, { phaseSec: .5, value: 10 }];
+    expect(coalesceSweepingWaveformDisplaySegmentV3(sparse, phase => phase * 100)).toBe(sparse);
+    const before = Array.from({ length: 100 }, (_, i) => ({ phaseSec: .9 + i * .0009, value: i }));
+    const after = Array.from({ length: 100 }, (_, i) => ({ phaseSec: i * .0009, value: -i }));
+    const result = [before, after].map(segment => coalesceSweepingWaveformDisplaySegmentV3(segment, phase => phase * 10));
+    expect(result).toHaveLength(2);
+    expect(result[0]![0]).toBe(before[0]); expect(result[0]!.at(-1)).toBe(before.at(-1));
+    expect(result[1]![0]).toBe(after[0]); expect(result[1]!.at(-1)).toBe(after.at(-1));
+    expect(result.flat().every(point => before.includes(point) || after.includes(point))).toBe(true);
+  });
+
   it("reuses axes while data animates and invalidates the bitmap for theme, bounds, font readiness and density", () => {
     const layer = { setTransform: vi.fn() };
     const create = vi.fn(() => ({ width: 0, height: 0, getContext: () => layer }));

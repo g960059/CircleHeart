@@ -392,6 +392,20 @@ describe("WorkbenchParallelScenarioRuntimeV3", () => {
     }
   });
 
+  it.each([
+    { name: "smooth" as const, maximumBatchSteps: 16, expectedSteps: 16 },
+    { name: "smooth" as const, maximumBatchSteps: 8, expectedSteps: 8 },
+    { name: "balanced" as const, maximumBatchSteps: 32, expectedSteps: 16 },
+  ])("honors the explicit $name batch ceiling $maximumBatchSteps", async ({ name, maximumBatchSteps, expectedSteps }) => {
+    const harness = harnessV3(undefined, undefined, { presentationProfile: {
+      name, maximumBatchSteps, preferredBatchSteps: 16,
+      presentationIntervalMs: name === "balanced" ? 0 : 16,
+      maximumPresentationBatchFrames: 8,
+    } });
+    expect(harness.conductor.dependencies).toMatchObject({ batchSteps: expectedSteps, adaptComputeBatchToPlaybackRate: false });
+    await harness.runtime.dispose();
+  });
+
   it("creates one persistent Worker per Scenario under one TimeConductor", async () => {
     const harness = harnessV3();
     const state = await harness.runtime.initialize({
@@ -417,6 +431,8 @@ describe("WorkbenchParallelScenarioRuntimeV3", () => {
       }));
     expect(state.activeScenarioId).toBe("scenario/comparison");
     expect(harness.conductor.dependencies).toMatchObject({
+      adaptPresentationCadenceToLoad: true,
+      adaptComputeBatchToPlaybackRate: true,
       batchSteps: 16,
       presentationIntervalMs: 16,
       maximumPresentationFramesPerLane: 8,

@@ -58,6 +58,16 @@ export type MainWireFiveWallCoupledPredictorCheckpointV2 = Readonly<{
   currentAcceptedMl: readonly number[];
 }>;
 
+/** A private, prevalidated history update; never physiological authority. */
+export type MainWireFiveWallCoupledPredictorPromotionV1 = Readonly<{
+  /** Preflight before the caller atomically promotes its complete candidate. */
+  assertCurrent(): void;
+  /** Nonthrowing install after promotion, with no intervening predictor call. */
+  promote(): boolean;
+  /** Discarding a rejected outer candidate changes no accepted history. */
+  discard(): void;
+}>;
+
 type PredictorStorage = {
   readonly oldestAcceptedMl: Float64Array;
   readonly olderAcceptedMl: Float64Array;
@@ -74,6 +84,7 @@ type PredictorStorage = {
   contextFallbackCount: number;
   dampedPredictionCount: number;
   resetCount: number;
+  preparationGeneration: number;
 };
 
 const STORAGE = new WeakMap<
@@ -106,6 +117,7 @@ MainWireFiveWallCoupledPredictorWorkspaceV1 {
     contextFallbackCount: 0,
     dampedPredictionCount: 0,
     resetCount: 0,
+    preparationGeneration: 0,
   });
   return workspace;
 }
@@ -128,6 +140,7 @@ export function prepareMainWireFiveWallCoupledPredictionV1<TWallState>(
     throw new RangeError("coupled predictor order is unsupported");
   }
   const storage = requireStorage(workspace);
+  storage.preparationGeneration += 1;
   storage.preparedBaseRevision = context.baseRevision;
   storage.preparedBaseAcceptedTimeSec = context.baseAcceptedTimeSec;
   if (!matchesSequentialAcceptedState(context, storage)) {
@@ -182,40 +195,79 @@ export function recordAcceptedMainWireFiveWallCoupledSolutionV1<TWallState>(
   acceptedSolutionMl: Float64Array,
   workspace: MainWireFiveWallCoupledPredictorWorkspaceV1,
 ): void {
+  const storage = validateAcceptedRootForRecord(context, acceptedSolutionMl, workspace);
+  installAcceptedHistory(storage, context.initialUnknownsMl, acceptedSolutionMl,
+    context.baseRevision + 1, context.baseAcceptedTimeSec + context.stepDtSec);
+}
+
+/**
+ * Stage before the outer owner validates/promotes its complete candidate. All
+ * throwing validation and borrowed-root reads finish here. The caller can then
+ * preflight the ticket, promote its own state, and install this history without
+ * a second admission operation. Preparing another solve/reset/restore makes a
+ * stale ticket unusable; discard never trains the predictor on a rejected root.
+ */
+export function stageAcceptedMainWireFiveWallCoupledSolutionV1<TWallState>(
+  context: MainWireFiveWallCoupledResidualContextV1<TWallState>,
+  acceptedSolutionMl: Float64Array,
+  workspace: MainWireFiveWallCoupledPredictorWorkspaceV1,
+): MainWireFiveWallCoupledPredictorPromotionV1 {
+  const storage = validateAcceptedRootForRecord(context, acceptedSolutionMl, workspace);
+  const previous = Float64Array.from(context.initialUnknownsMl);
+  const current = Float64Array.from(acceptedSolutionMl);
+  const generation = storage.preparationGeneration;
+  const nextRevision = context.baseRevision + 1;
+  const nextAcceptedTimeSec = context.baseAcceptedTimeSec + context.stepDtSec;
+  let pending = true;
+  const isCurrent = () => pending && storage.preparationGeneration === generation;
+  return Object.freeze({
+    assertCurrent() {
+      if (!isCurrent()) throw new Error("coupled predictor promotion is stale or resolved");
+    },
+    promote() {
+      if (!isCurrent()) return false;
+      pending = false;
+      // All arrays are workspace-owned, lifetime-fixed f64 buffers. These writes
+      // cannot invoke user code or fail after a successful synchronous preflight.
+      installAcceptedHistory(storage, previous, current, nextRevision, nextAcceptedTimeSec);
+      return true;
+    },
+    discard() {
+      pending = false;
+    }
+  });
+}
+
+function validateAcceptedRootForRecord<TWallState>(
+  context: MainWireFiveWallCoupledResidualContextV1<TWallState>, acceptedSolutionMl: Float64Array,
+  workspace: MainWireFiveWallCoupledPredictorWorkspaceV1,
+): PredictorStorage {
   context.assertWorkspaceCurrent();
   const storage = requireStorage(workspace);
-  if (
-    storage.preparedBaseRevision !== context.baseRevision
-    || !sameNumber(
-      storage.preparedBaseAcceptedTimeSec,
-      context.baseAcceptedTimeSec,
-    )
-  ) {
-    throw new Error(
-      "coupled predictor can record only its most recently prepared context",
-    );
+  if (storage.preparedBaseRevision !== context.baseRevision
+    || !sameNumber(storage.preparedBaseAcceptedTimeSec, context.baseAcceptedTimeSec)) {
+    throw new Error("coupled predictor can record only its most recently prepared context");
   }
   requireFiniteVector(acceptedSolutionMl, workspace.dimension, "accepted root");
   if (!isAdmissiblePrediction(context, acceptedSolutionMl)) {
     throw new RangeError("accepted root is outside the coupled predictor domain");
   }
+  return storage;
+}
+
+function installAcceptedHistory(storage: PredictorStorage, previous: Float64Array, current: Float64Array,
+  revision: number, acceptedTimeSec: number): void {
   if (storage.hasAcceptedPair) {
-    if (storage.historyDepth >= 3) {
-      storage.oldestAcceptedMl.set(storage.olderAcceptedMl);
-    }
+    if (storage.historyDepth >= 3) storage.oldestAcceptedMl.set(storage.olderAcceptedMl);
     storage.olderAcceptedMl.set(storage.previousAcceptedMl);
   }
-  storage.previousAcceptedMl.set(context.initialUnknownsMl);
-  storage.currentAcceptedMl.set(acceptedSolutionMl);
+  storage.previousAcceptedMl.set(previous);
+  storage.currentAcceptedMl.set(current);
   storage.hasAcceptedPair = true;
-  storage.historyDepth = storage.historyDepth === 0
-    ? 2
-    : storage.historyDepth === 2
-      ? 3
-      : 4;
-  storage.expectedBaseRevision = context.baseRevision + 1;
-  storage.expectedBaseAcceptedTimeSec =
-    context.baseAcceptedTimeSec + context.stepDtSec;
+  storage.historyDepth = storage.historyDepth === 0 ? 2 : storage.historyDepth === 2 ? 3 : 4;
+  storage.expectedBaseRevision = revision;
+  storage.expectedBaseAcceptedTimeSec = acceptedTimeSec;
+  storage.preparationGeneration += 1;
 }
 
 export function resetMainWireFiveWallCoupledPredictorV1(
@@ -382,6 +434,7 @@ function contextPrediction<TWallState>(
 }
 
 function resetHistory(storage: PredictorStorage): void {
+  storage.preparationGeneration += 1;
   storage.oldestAcceptedMl.fill(0);
   storage.olderAcceptedMl.fill(0);
   storage.previousAcceptedMl.fill(0);
@@ -394,6 +447,7 @@ function resetHistory(storage: PredictorStorage): void {
 }
 
 function resetStorage(storage: PredictorStorage): void {
+  storage.preparationGeneration += 1;
   storage.oldestAcceptedMl.fill(0);
   storage.olderAcceptedMl.fill(0);
   storage.previousAcceptedMl.fill(0);

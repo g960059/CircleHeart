@@ -48,6 +48,16 @@ export function validMainWireFixedToneSettlementEvidenceV2(
     && measured.measurementDurationSec <= policy.maximumMeasurementDurationSec;
 }
 
+/** A point cannot borrow another interval's valid reservoir-closure receipt. */
+export function validMainWireFixedTonePointSettlementV2(point: unknown): boolean {
+  if (point === null || typeof point !== "object" || Array.isArray(point)) return false;
+  const value = point as Record<string, unknown>;
+  const evidence = value.settlementEvidence;
+  return validMainWireFixedToneSettlementEvidenceV2(evidence)
+    && value.completedBeatCount === evidence.completedBeatCount
+    && value.acceptedMeasurementDurationSec === evidence.measurementDurationSec;
+}
+
 type Sample = Readonly<{ timeSec: number; volumesMl: Readonly<Record<string, number>> }>;
 
 /**

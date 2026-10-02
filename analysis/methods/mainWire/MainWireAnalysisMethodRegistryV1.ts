@@ -1,3 +1,6 @@
+import { CARDIORESPIRATORY_BREATH_DERIVATION_V1 } from "@/analysis/methods/cardiorespiratory/CardiorespiratoryBreathMetricsV1";
+import { CARDIORESPIRATORY_MECHANICAL_ANALYSIS_V1_ID, CARDIORESPIRATORY_MECHANICAL_PVA_V1_ID } from "../cardiorespiratory/CardiorespiratoryMechanicalAnalysisV1";
+import { CARDIORESPIRATORY_VARIATION_DERIVATION_V1 } from "@/analysis/methods/cardiorespiratory/CardiorespiratoryVariationV1";
 import {
   defineAnalysisMethodRegistryV1,
   resolveAnalysisMethodsForSurfaceV1,
@@ -36,6 +39,7 @@ import {
   buildMainWirePeriodicPvaMethodV14,
   buildMainWirePeriodicPvaMethodV15,
   buildMainWirePeriodicPvaMethodV16,
+  buildCardiorespiratoryMechanicalPvaV1,
 } from "@/analysis/methods/mainWire/MainWirePeriodicPvaV1";
 import type {
   StudioSimulationAnalysisExecutionPlanResolverV2,
@@ -234,11 +238,20 @@ export const MAIN_WIRE_AORTIC_JET_DERIVATION_V1 = Object.freeze({
 export const MAIN_WIRE_ANALYSIS_METHOD_REGISTRY_V1 =
   defineAnalysisMethodRegistryV1<MainWireAnalysisDerivationRuntimeV1>({
     analysisRequestIds: Object.freeze([
+      CARDIORESPIRATORY_MECHANICAL_ANALYSIS_V1_ID,
       MAIN_WIRE_INTEGRATED_MODEL_GUYTON_STARLING_ORIENTATION_V3_ID,
       MAIN_WIRE_INTEGRATED_MODEL_FORMAL_PRESSURE_VOLUME_RELATIONS_V3_ID,
       MAIN_WIRE_PRESSURE_CROSSING_PV_ANALYSIS_V1_ID,
     ]),
     derivations: Object.freeze([
+      Object.freeze({ ...MAIN_WIRE_PERIODIC_PVA_DERIVATION_V1,
+        derivationId: CARDIORESPIRATORY_MECHANICAL_PVA_V1_ID,
+        requiredAnalysisIds: Object.freeze([CARDIORESPIRATORY_MECHANICAL_ANALYSIS_V1_ID]),
+        runtime: Object.freeze({ kind: "periodic-pva" as const,
+          derivation: Object.freeze({ methodId: CARDIORESPIRATORY_MECHANICAL_PVA_V1_ID, build: buildCardiorespiratoryMechanicalPvaV1 }) }),
+      }),
+      CARDIORESPIRATORY_VARIATION_DERIVATION_V1,
+      CARDIORESPIRATORY_BREATH_DERIVATION_V1,
       Object.freeze({ ...MAIN_WIRE_PERIODIC_PVA_DERIVATION_V1,
         derivationId: MAIN_WIRE_PERIODIC_PVA_METHOD_V16_ID,
         requiredAnalysisIds: Object.freeze([MAIN_WIRE_PRESSURE_CROSSING_PV_ANALYSIS_V1_ID]),

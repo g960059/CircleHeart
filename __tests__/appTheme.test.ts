@@ -66,7 +66,7 @@ describe('application theme', () => {
 
   it('uses the same semantic grid and axis tokens in every Canvas renderer', () => {
     const sources = [
-      'components/workbench/presentation/SweepingWaveformCanvasV3.tsx',
+      'components/workbench/presentation/sweep/useSweepCanvasRendererV1.ts',
       'components/workbench/presentation/PressureVolumeLoopCanvasV3.tsx',
       'components/workbench/presentation/GuytonStarlingOrientationCanvasV3.tsx',
     ].map((path) => readFileSync(path, 'utf8'));

@@ -4,6 +4,7 @@ import {
   NON_CORONARY_INDEPENDENT_NODE_NAMES_V1,
   NON_CORONARY_DYNAMIC_EDGE_NAMES_V1,
   NON_CORONARY_NODE_NAMES_V1,
+  NON_CORONARY_EDGE_NAMES_V1,
   NON_CORONARY_VALVE_NAMES_V1,
   createNonCoronaryBackwardEulerScratchWorkspaceV1,
 } from "@/engine/core/nonCoronaryCirculationBackwardEulerV1";
@@ -35,6 +36,7 @@ import {
 } from "@/engine/coronary/topologyPriorV2";
 import {
   CORONARY_CONSERVED_VOLUME_NODE_IDS_V2,
+  CORONARY_EDGE_IDS_V2,
   CORONARY_LAYER_IDS_V2,
   CORONARY_TERRITORY_IDS_V2,
 } from "@/engine/coronary/typesV2";
@@ -109,6 +111,7 @@ import {
   recordAcceptedMainWireFiveWallCoupledSolutionV1,
   reportMainWireFiveWallCoupledPredictorV1,
   resetMainWireFiveWallCoupledPredictorV1,
+  stageAcceptedMainWireFiveWallCoupledSolutionV1,
   restoreMainWireFiveWallCoupledPredictorV1,
   validateAndOwnMainWireFiveWallCoupledPredictorCheckpointV2,
 } from "@/engine/vnext/coupled/MainWireFiveWallCoupledPredictorV1";
@@ -117,10 +120,14 @@ import {
 } from "@/engine/vnext/coupled/MainWireFlatCoupledAcceptedStateV1";
 import {
   solveMainWireFiveWallCoupledCandidateV1,
+  stepMainWireIntegratedModelCoupledV1,
 } from "@/engine/vnext/coupled/MainWireIntegratedCoupledStepV1";
 import {
   MAIN_WIRE_SOLVER_REPLACEMENT_CORPUS_CASES_V1,
 } from "@/engine/vnext/MainWireSolverReplacementCorpusV1";
+import { cardiorespiratoryBorrowedBloodNetworkV1, cardiorespiratoryPhysicalBloodVolumesFromCoupledStateV1 }
+  from "@/engine/cardiorespiratory/CardiorespiratoryBloodNetworkV1";
+import { advanceConservativeGasTransportV1 } from "@/engine/cardiorespiratory/ConservativeGasTransportV1";
 
 type TestState = Readonly<{ timeSec: number; volumeSumMl: number }>;
 
@@ -1264,8 +1271,7 @@ describe("main-wire five-wall + sixteen-volume coronary atomic transaction V2", 
         === "linear-extrapolation" ? 1 : 0;
       quadraticPredictionCount += predicted.predictionMode
         === "quadratic-extrapolation" ? 1 : 0;
-      predictedJacobianEvaluations +=
-        predicted.solver.result.jacobianEvaluationCount;
+      predictedJacobianEvaluations += predicted.work.jacobianEvaluationCount;
       baselineJacobianEvaluations += baseline.result.jacobianEvaluationCount;
       for (let index = 0; index < context.dimension; index += 1) {
         expect(predicted.solver.result.solution[index]).toBeCloseTo(
@@ -1312,6 +1318,123 @@ describe("main-wire five-wall + sixteen-volume coronary atomic transaction V2", 
       resetCount: 1,
     });
   }, 60_000);
+
+  it("stages predictor history without recording rejected outer candidates or retaining borrowed root storage", () => {
+    const fixture = createMainWireIntegratedModelRegularSinusAllOffFixtureV3();
+    const context = prepareMainWireFiveWallCoupledResidualContextV1(fixture.provider,
+      mainWireFiveWallCoronaryBaseStateV2(fixture.cold.acceptedState.coronary),
+      { ...fixture.coronaryStepInput, dtSec: 0.002 });
+    const predictor = createMainWireFiveWallCoupledPredictorWorkspaceV1();
+    const solver = solveMainWireFiveWallCoupledNewtonPredictedV1(context, {},
+      createMainWireFiveWallCoupledNewtonShadowWorkspaceV1(), predictor);
+    if (solver.solver.result.status !== "converged") throw new Error("Expected converged root");
+    const root = solver.solver.result.solution;
+    const empty = checkpointMainWireFiveWallCoupledPredictorV1(predictor);
+    const rejected = stageAcceptedMainWireFiveWallCoupledSolutionV1(context, root, predictor);
+    expect(checkpointMainWireFiveWallCoupledPredictorV1(predictor)).toEqual(empty);
+    rejected.discard();
+    expect(() => rejected.assertCurrent()).toThrow(/stale or resolved/);
+    expect(rejected.promote()).toBe(false);
+    expect(checkpointMainWireFiveWallCoupledPredictorV1(predictor)).toEqual(empty);
+    const ticket = stageAcceptedMainWireFiveWallCoupledSolutionV1(context, root, predictor);
+    const expectedRoot = Array.from(root);
+    root.fill(NaN); // Solver scratch may be reused after ticket staging.
+    ticket.assertCurrent();
+    expect(ticket.promote()).toBe(true);
+    expect(ticket.promote()).toBe(false);
+    expect(checkpointMainWireFiveWallCoupledPredictorV1(predictor)).toMatchObject({
+      historyDepth: 2, currentAcceptedMl: expectedRoot,
+      expectedBaseRevision: context.baseRevision + 1,
+      expectedBaseAcceptedTimeSec: context.baseAcceptedTimeSec + context.stepDtSec,
+    });
+  });
+
+  it("invalidates staged predictor history before another solve, reset, or restore can replace its base", () => {
+    const fixture = createMainWireIntegratedModelRegularSinusAllOffFixtureV3();
+    const context = prepareMainWireFiveWallCoupledResidualContextV1(fixture.provider,
+      mainWireFiveWallCoronaryBaseStateV2(fixture.cold.acceptedState.coronary),
+      { ...fixture.coronaryStepInput, dtSec: 0.002 });
+    for (const replacement of ["prepare", "reset", "restore"] as const) {
+      const predictor = createMainWireFiveWallCoupledPredictorWorkspaceV1();
+      prepareMainWireFiveWallCoupledPredictionV1(context, predictor);
+      const empty = checkpointMainWireFiveWallCoupledPredictorV1(predictor);
+      const ticket = stageAcceptedMainWireFiveWallCoupledSolutionV1(context, context.initialUnknownsMl, predictor);
+      if (replacement === "prepare") prepareMainWireFiveWallCoupledPredictionV1(context, predictor);
+      if (replacement === "reset") resetMainWireFiveWallCoupledPredictorV1(predictor);
+      if (replacement === "restore") restoreMainWireFiveWallCoupledPredictorV1(empty, {
+        revision: context.baseRevision, acceptedTimeSec: context.baseAcceptedTimeSec, unknownsMl: context.initialUnknownsMl,
+      }, predictor);
+      expect(() => ticket.assertCurrent()).toThrow(/stale or resolved/);
+      expect(ticket.promote()).toBe(false);
+      expect(checkpointMainWireFiveWallCoupledPredictorV1(predictor)).toEqual(empty);
+      const invalid = Float64Array.from(context.initialUnknownsMl); invalid[0] = NaN;
+      expect(() => stageAcceptedMainWireFiveWallCoupledSolutionV1(context, invalid, predictor)).toThrow();
+      expect(checkpointMainWireFiveWallCoupledPredictorV1(predictor)).toEqual(empty);
+    }
+  });
+
+  it("accounts for failed predicted work before the unchanged context-seed fallback", () => {
+    const fixture = createMainWireIntegratedModelRegularSinusAllOffFixtureV3();
+    const context = prepareMainWireFiveWallCoupledResidualContextV1(fixture.provider,
+      mainWireFiveWallCoronaryBaseStateV2(fixture.cold.acceptedState.coronary),
+      { ...fixture.coronaryStepInput, dtSec: 0.002 });
+    const predictor = createMainWireFiveWallCoupledPredictorWorkspaceV1();
+    const empty = checkpointMainWireFiveWallCoupledPredictorV1(predictor);
+    restoreMainWireFiveWallCoupledPredictorV1({ ...empty, historyDepth: 2,
+      expectedBaseRevision: context.baseRevision, expectedBaseAcceptedTimeSec: context.baseAcceptedTimeSec,
+      currentAcceptedMl: Array.from(context.initialUnknownsMl),
+      previousAcceptedMl: Array.from(context.initialUnknownsMl, value => value - 0.01),
+    }, { revision: context.baseRevision, acceptedTimeSec: context.baseAcceptedTimeSec, unknownsMl: context.initialUnknownsMl }, predictor);
+    const history = checkpointMainWireFiveWallCoupledPredictorV1(predictor);
+    let rejectFirstJacobian = true;
+    const rejectingContext = { ...context,
+      writeCoupledLinearizations(...args: Parameters<typeof context.writeCoupledLinearizations>) {
+        if (rejectFirstJacobian) { rejectFirstJacobian = false; throw new Error("Synthetic predicted-attempt failure"); }
+        return context.writeCoupledLinearizations(...args);
+      },
+    };
+    const solved = solveMainWireFiveWallCoupledNewtonPredictedV1(rejectingContext, {},
+      createMainWireFiveWallCoupledNewtonShadowWorkspaceV1(), predictor);
+    expect(solved.predictionMode).toBe("linear-extrapolation");
+    expect(solved.fallbackUsed).toBe(true);
+    expect(solved.solver.result.status).toBe("converged");
+    expect(solved.work.attemptCount).toBe(2);
+    expect(solved.work.residualEvaluationCount).toBe(solved.solver.result.residualEvaluationCount + 1);
+    expect(solved.work.jacobianEvaluationCount).toBe(solved.solver.result.jacobianEvaluationCount);
+    expect(checkpointMainWireFiveWallCoupledPredictorV1(predictor)).toEqual(history);
+  });
+
+  it("offers an integrated predictor ticket only after hemodynamic convergence and retains the unpredicted default", () => {
+    const fixture = createMainWireIntegratedModelRegularSinusAllOffFixtureV3();
+    const input = {
+      candidateTimeSec: 0.002, coronary: fixture.coronaryStepInput,
+      rhythm: { configuration: fixture.rhythm.configuration, externalAfNextBoundaryTimeSec: null, externalAtrialSourceBatch: null },
+      dynamicMechanicalSupport: { config: fixture.config, profile: fixture.profile },
+    };
+    const predictor = createMainWireFiveWallCoupledPredictorWorkspaceV1();
+    const empty = checkpointMainWireFiveWallCoupledPredictorV1(predictor);
+    let offered = 0;
+    const result = stepMainWireIntegratedModelCoupledV1(fixture.provider, fixture.cold.acceptedState,
+      input, createMainWireFiveWallCoupledNewtonShadowWorkspaceV1(), {
+        predictor: { workspace: predictor, order: "cubic" },
+        onSolverDiagnostics(diagnostics) { expect(diagnostics.predictionMode).toBe("context"); expect(diagnostics.work.attemptCount).toBe(1); },
+        onPredictorCandidate(ticket) { offered++; ticket.assertCurrent(); ticket.discard(); },
+      });
+    expect(result.converged).toBe(true);
+    expect(offered).toBe(1);
+    expect(checkpointMainWireFiveWallCoupledPredictorV1(predictor)).toEqual(empty);
+    const baseline = stepMainWireIntegratedModelCoupledV1(fixture.provider, fixture.cold.acceptedState,
+      input, createMainWireFiveWallCoupledNewtonShadowWorkspaceV1());
+    expect(result).toEqual(baseline);
+    const failed = stepMainWireIntegratedModelCoupledV1(fixture.provider, fixture.cold.acceptedState,
+      input, createMainWireFiveWallCoupledNewtonShadowWorkspaceV1(), {
+        solver: { maximumIterations: 1 }, predictor: { workspace: predictor, order: "cubic" },
+        onPredictorCandidate() { offered++; },
+      });
+    expect(failed.converged).toBe(false);
+    expect(offered).toBe(1);
+    expect(checkpointMainWireFiveWallCoupledPredictorV1(predictor)).toEqual(empty);
+  });
 
   it("restores exact predictor history and rejects mismatched or accessor checkpoints", () => {
     const acceptedUnknowns = new Float64Array(30).fill(1);
@@ -1495,11 +1618,11 @@ describe("main-wire five-wall + sixteen-volume coronary atomic transaction V2", 
           throw new Error(`${corpusCase.caseId} predictor solve failed`);
         }
         linearResidualEvaluations +=
-          linear.solver.result.residualEvaluationCount;
+          linear.work.residualEvaluationCount;
         quadraticResidualEvaluations +=
-          quadratic.solver.result.residualEvaluationCount;
+          quadratic.work.residualEvaluationCount;
         cubicResidualEvaluations +=
-          cubic.solver.result.residualEvaluationCount;
+          cubic.work.residualEvaluationCount;
         for (let index = 0; index < linearContext.dimension; index += 1) {
           maximumRootDifferenceMl = Math.max(
             maximumRootDifferenceMl,
@@ -2316,7 +2439,21 @@ describe("main-wire five-wall + sixteen-volume coronary atomic transaction V2", 
       throw new Error("coupled candidate result did not converge");
     }
     let firstAcceptedTimeSec = -1;
-    solved.context.withConvergedCandidate(result.solution, (candidate) => {
+    let detached: ReturnType<typeof cardiorespiratoryBorrowedBloodNetworkV1> | null = null;
+    let copiedPressures: number[] = [], copiedFlows: number[] = [], copiedCoronaryFlows: number[] = [];
+    const stale = solved.context.withConvergedCandidate(result.solution, (candidate) => {
+      candidate.assertCurrent();
+      detached = cardiorespiratoryBorrowedBloodNetworkV1(candidate);
+      copiedPressures = Array.from(candidate.nonCoronaryNodeAbsolutePressuresMmHg);
+      copiedFlows = Array.from(candidate.nonCoronaryEdgeFlowsMlPerSec);
+      copiedCoronaryFlows = Array.from(candidate.coronarySignedEdgeFlowsMlPerSec);
+      expect(() => cardiorespiratoryBorrowedBloodNetworkV1({ ...candidate, stepDtSec: 0 })).toThrow(/transport step/);
+      for (const key of ["nonCoronaryNodeVolumesMl", "nonCoronaryNodeAbsolutePressuresMmHg", "nonCoronaryEdgeFlowsMlPerSec", "coronarySignedEdgeFlowsMlPerSec"] as const) {
+        expect(() => cardiorespiratoryBorrowedBloodNetworkV1({ ...candidate, [key]: new Float64Array(1) })).toThrow(/transport vector/);
+      }
+      const invalidPressure = candidate.nonCoronaryNodeAbsolutePressuresMmHg.slice(); invalidPressure[0] = NaN;
+      expect(() => cardiorespiratoryBorrowedBloodNetworkV1({ ...candidate, nonCoronaryNodeAbsolutePressuresMmHg: invalidPressure })).toThrow(/transport vector/);
+      expect(() => cardiorespiratoryBorrowedBloodNetworkV1({ ...candidate, coronaryVolumesMl: { ...candidate.coronaryVolumesMl, CV: -1 } })).toThrow(/physical blood volume/);
       firstAcceptedTimeSec = candidate.candidateTimeSec;
       expect(candidate.candidateRevision).toBe(1);
       expect(candidate.acceptedNumericalReadback[0]).toBe(0.002);
@@ -2327,8 +2464,18 @@ describe("main-wire five-wall + sixteen-volume coronary atomic transaction V2", 
         "selectedAorticValveReadback",
       );
       expect(candidate.selectedAorticValveReadback).toBeUndefined();
+      solved.context.evaluateResidualMl(result.solution, new Float64Array(30));
+      expect(() => candidate.assertCurrent()).toThrow(/stale or outside/);
+      return candidate;
     });
     expect(firstAcceptedTimeSec).toBe(0.002);
+    expect(() => stale.assertCurrent()).toThrow(/stale or outside/);
+    expect(() => cardiorespiratoryBorrowedBloodNetworkV1(stale)).toThrow(/stale or outside/);
+    const rejectedRoot = result.solution.slice(); rejectedRoot[0] += 1;
+    let rejectedBorrowCalled = false;
+    expect(() => solved.context.withConvergedCandidate(rejectedRoot, () => { rejectedBorrowCalled = true; }))
+      .toThrow(/component convergence/);
+    expect(rejectedBorrowCalled).toBe(false);
 
     // The borrow did not consume the one-shot public finalizer. Event/cold
     // callers can still materialize the exact legacy boundary afterward.
@@ -2342,8 +2489,60 @@ describe("main-wire five-wall + sixteen-volume coronary atomic transaction V2", 
     expect(finalized.converged).toBe(true);
     if (finalized.converged) {
       expect(finalized.acceptedState.acceptedTimeSec).toBe(0.002);
+      expect(detached!.physicalBloodVolumesMl).toEqual(cardiorespiratoryPhysicalBloodVolumesFromCoupledStateV1(finalized.acceptedState));
+      NON_CORONARY_NODE_NAMES_V1.forEach((node, i) => expect(copiedPressures[i]).toBeCloseTo(finalized.circulationTrial.nodeAbsolutePressuresMmHg[node], 10));
+      NON_CORONARY_EDGE_NAMES_V1.forEach((edge, i) => expect(copiedFlows[i]).toBeCloseTo(finalized.circulationTrial.edgeFlowsMlPerSec[edge], 10));
+      CORONARY_EDGE_IDS_V2.forEach((edge, i) => expect(copiedCoronaryFlows[i]).toBeCloseTo(finalized.coronaryTrial.diagnostics.hydraulics.signedFlowMlPerSecByEdge[edge], 10));
+      expect(detached!.pulmonaryCapillaryPressureMmHg).toBeCloseTo(finalized.circulationTrial.nodeAbsolutePressuresMmHg.PCap, 10);
+      expect(detached!.pulmonaryVenousPressureMmHg).toBeCloseTo(finalized.circulationTrial.nodeAbsolutePressuresMmHg.PVen, 10);
+      expect(detached!.aorticFlowMlSec).toBeCloseTo(finalized.circulationTrial.edgeFlowsMlPerSec.AoV, 10);
     }
   });
+
+  it("borrows conservative signed blood transfers through systolic flow reversal without retaining scratch", () => {
+    const fixture = createMainWireIntegratedModelRegularSinusAllOffFixtureV3();
+    let previous = mainWireFiveWallCoronaryBaseStateV2(fixture.cold.acceptedState.coronary);
+    const input = { ...fixture.coronaryStepInput, dtSec: .002 };
+    const solver = createMainWireFiveWallCoupledNewtonShadowWorkspaceV1();
+    const residualWorkspace = createMainWireFiveWallCoupledResidualWorkspaceV1();
+    let nonCoronaryReversed = false, coronaryReversed = false;
+    for (let step = 0; step < 250; step++) {
+      const before = cardiorespiratoryPhysicalBloodVolumesFromCoupledStateV1(previous);
+      const solved = solveMainWireFiveWallCoupledCandidateV1(fixture.provider, previous, input, solver, { residualWorkspace });
+      if (solved.status !== "converged" || solved.solver.result.status !== "converged") throw new Error("borrow test coupled solve rejected");
+      const result = solved.solver.result;
+      const detached = solved.context.withConvergedCandidate(result.solution, candidate => {
+        nonCoronaryReversed ||= candidate.nonCoronaryEdgeFlowsMlPerSec.some(flow => flow < -1e-6);
+        coronaryReversed ||= candidate.coronarySignedEdgeFlowsMlPerSec.some(flow => flow < -1e-6);
+        return cardiorespiratoryBorrowedBloodNetworkV1(candidate);
+      });
+      const copyBeforeFinalization = structuredClone(detached);
+      const finalized = solved.context.finalizeConvergedSolution(result.solution,
+        { iterations: result.iterations, lineSearchBacktracks: result.lineSearchBacktrackCount });
+      if (finalized.converged === false) throw new Error(finalized.message);
+      expect(detached).toEqual(copyBeforeFinalization);
+      expect(detached.physicalBloodVolumesMl).toEqual(cardiorespiratoryPhysicalBloodVolumesFromCoupledStateV1(finalized.acceptedState));
+      for (const edge of detached.transfers) {
+        const id = `${edge.from}_${edge.to}`;
+        const nonCoronary = id === "LV_Ao" ? "AoV" : id === "LA_LV" ? "MV" : id === "RA_RV" ? "TV" : id === "RV_PA" ? "PV" : id;
+        const flow = nonCoronary in finalized.circulationTrial.edgeFlowsMlPerSec
+          ? finalized.circulationTrial.edgeFlowsMlPerSec[nonCoronary as typeof NON_CORONARY_EDGE_NAMES_V1[number]]
+          : finalized.coronaryTrial.diagnostics.hydraulics.signedFlowMlPerSecByEdge[id as typeof CORONARY_EDGE_IDS_V2[number]];
+        expect(edge.volumeMl).toBeCloseTo(input.dtSec * flow, 11);
+      }
+      const advected = advanceConservativeGasTransportV1(Object.keys(before).map(id => ({ id,
+        volumeBeforeMl: before[id]!, volumeAfterMl: detached.physicalBloodVolumesMl[id]!,
+        amount: { o2Mol: before[id]! * 1e-5, co2Mol: before[id]! * 2e-5 } })), detached.transfers,
+        { volumeBalanceToleranceMl: 2e-5 });
+      for (const [id, amount] of Object.entries(advected.amountsById)) {
+        expect(amount.o2Mol / detached.physicalBloodVolumesMl[id]!).toBeCloseTo(1e-5, 11);
+        expect(amount.co2Mol / detached.physicalBloodVolumesMl[id]!).toBeCloseTo(2e-5, 11);
+      }
+      previous = finalized.acceptedState;
+    }
+    expect(nonCoronaryReversed).toBe(true);
+    expect(coronaryReversed).toBe(true);
+  }, 30_000);
 
   it("carries exact selected-AoV scalars across cache hits and excludes them after workspace reuse", () => {
     const provider = createCanonicalMainWireNormalAdultFiveWallProviderV1();
@@ -2434,9 +2633,11 @@ describe("main-wire five-wall + sixteen-volume coronary atomic transaction V2", 
     );
     expect(Array.from(cacheHitResidual)).toEqual(Array.from(acceptedResidual));
 
+    let assertBorrowCurrent = () => {};
     const acceptedProjection = selectedSolved.context.withConvergedCandidate(
       selectedResult.solution,
       (candidate) => {
+        assertBorrowCurrent = candidate.assertCurrent;
         const selected = candidate.selectedAorticValveReadback;
         expect(Object.keys(candidate)).toContain("selectedAorticValveReadback");
         expect(selected).toBeDefined();
@@ -2537,6 +2738,7 @@ describe("main-wire five-wall + sixteen-volume coronary atomic transaction V2", 
       selectedResult.solution,
       new Float64Array(selectedSolved.context.dimension),
     )).toThrow(/invalidated by a newer workspace borrow/);
+    expect(assertBorrowCurrent).toThrow(/invalidated by a newer workspace borrow/);
   }, 60_000);
 
   it("solves the real 30-row residual without either nested Newton loop", () => {

@@ -75,6 +75,10 @@ export function workbenchPresentationOutputSelectionV3(
         outputIds.add(binding.volumeOutputId);
         outputIds.add(binding.pressureOutputId);
         outputIds.add(binding.cyclePhaseOutputId);
+      } else if (graph.renderer === "xy" && binding.kind === "xy") {
+        outputIds.add(binding.xOutputId);
+        outputIds.add(binding.yOutputId);
+        outputIds.add(binding.cyclePhaseOutputId);
       }
     }
   }

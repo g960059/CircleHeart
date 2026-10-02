@@ -64,6 +64,12 @@ type TypedStateNodeV1 =
     items: readonly TypedStateNodeV1[];
   }>;
 
+type TypedStateSubtreeValueV1<TState, TPath extends readonly string[]> =
+  TPath extends readonly [] ? TState
+    : TPath extends readonly [infer TKey, ...infer TRest extends readonly string[]]
+      ? TKey extends keyof TState ? TypedStateSubtreeValueV1<TState[TKey], TRest> : unknown
+      : unknown;
+
 type NumericTypedArrayV1 =
   | Float64Array
   | Float32Array
@@ -234,6 +240,18 @@ export type TransactionalTypedStateCompletionPlanV1 = Readonly<{
   retainedBooleanSlots: readonly number[];
 }>;
 
+/** Fixed-size subtree completion. Strings are invariant labels; variable
+ * arenas and optional/external roots require the exhaustive completion API. */
+export type TransactionalTypedStateRootCompletionPlanV1 = Readonly<{
+  schemaId: "circleheart-transactional-typed-root-completion-plan-v1";
+  layoutId: string;
+  fingerprint: string;
+  rootKey: string;
+  requiredContinuousSlots: readonly number[];
+  requiredNullableContinuousSlots: readonly number[];
+  requiredBooleanSlots: readonly number[];
+}>;
+
 export type TransactionalTypedStateRequiredWritesV1 = Readonly<{
   continuous?: readonly number[];
   nullableContinuous?: readonly number[];
@@ -316,6 +334,12 @@ const PROMOTION_PLAN_INTERNALS = new WeakMap<
   TransactionalTypedStatePromotionPlanV1,
   PromotionPlanInternalV1
 >();
+type RootCompletionOperationV1 = Readonly<{
+  check(value: unknown, cursor: TransactionalTypedStateCandidateCursorV1): void;
+  write(value: unknown, cursor: TransactionalTypedStateCandidateCursorV1): void;
+}>;
+const ROOT_COMPLETION_PLAN_INTERNALS = new WeakMap<TransactionalTypedStateRootCompletionPlanV1,
+  Readonly<{ manifest: TransactionalTypedStateManifestV1; operation: RootCompletionOperationV1 }>>();
 
 /**
  * Compiles one exact, model-owned state topology. Mutable fixed leaves receive
@@ -423,6 +447,15 @@ export function createTransactionalTypedStateManifestV1(
       canonicalBytes)),
   );
   return manifest;
+}
+
+/** Proves the compiler derived every slot, node and arena offset together.
+ * Structural copies cannot carry this provenance, even with the same digest.
+ * This is a layout proof only, not admission of any numerical state. */
+export function assertTransactionalTypedStateManifestIssuedV1(manifest: TransactionalTypedStateManifestV1): void {
+  if (!EXTERNAL_IMMUTABLE_CANONICAL_BYTES.has(manifest)) {
+    throw new Error("Transactional typed state manifest is not factory-issued");
+  }
 }
 
 /**
@@ -630,6 +663,58 @@ export class TransactionalTypedStateImageV1<TState> {
       readers: compileDirectCompletionReaders(this.#manifest),
     }));
     return plan;
+  }
+
+  createRootCompletionPlan<TKey extends keyof TState & string>(rootKey: TKey): TransactionalTypedStateRootCompletionPlanV1 {
+    const root = this.#manifest.rootNode;
+    if (root.kind !== "record") throw new Error("Transactional typed state root is not a record");
+    const entry = root.entries.find(candidate => candidate.key === rootKey);
+    if (!entry) throw new Error(`Transactional typed state root ${rootKey} is unavailable`);
+    const required = { continuous: [] as number[], nullableContinuous: [] as number[], booleans: [] as number[] };
+    const operation = compileFixedRootCompletionV1(entry.node, required);
+    const plan = Object.freeze({
+      schemaId: "circleheart-transactional-typed-root-completion-plan-v1" as const,
+      layoutId: this.#manifest.layoutId, fingerprint: this.#manifest.fingerprint, rootKey,
+      requiredContinuousSlots: Object.freeze(required.continuous),
+      requiredNullableContinuousSlots: Object.freeze(required.nullableContinuous),
+      requiredBooleanSlots: Object.freeze(required.booleans),
+    });
+    ROOT_COMPLETION_PLAN_INTERNALS.set(plan, { manifest: this.#manifest, operation });
+    return plan;
+  }
+
+  /** Populate only the named fixed subtree after its model-owned scientific
+   * admission. Proves shape/types and invariant labels before any write; does
+   * not admit or promote sibling owners. Normal required-write promotion still
+   * applies, and no temporary object becomes a second accepted authority. */
+  completeCandidateRootFromObject(rootValue: unknown, plan: TransactionalTypedStateRootCompletionPlanV1): void {
+    const internal = ROOT_COMPLETION_PLAN_INTERNALS.get(plan);
+    if (!internal || internal.manifest !== this.#manifest || plan.layoutId !== this.#manifest.layoutId
+      || plan.fingerprint !== this.#manifest.fingerprint) {
+      throw new Error("Transactional typed state root completion plan has the wrong layout");
+    }
+    const generation = this.#candidateGeneration;
+    this.assertCandidateGeneration(generation);
+    // The cursor is private to this synchronous call; checks cannot retain it.
+    const cursor: TransactionalTypedStateCandidateCursorV1 = {
+      layoutId: this.#manifest.layoutId, fingerprint: this.#manifest.fingerprint,
+      readContinuous: index => this.readCandidateContinuous(generation, index),
+      writeContinuous: (index, value) => this.writeCandidateContinuous(generation, index, value),
+      readNullableContinuous: index => this.readCandidateNullableContinuous(generation, index),
+      writeNullableContinuous: (index, value) => this.writeCandidateNullableContinuous(generation, index, value),
+      readBoolean: index => this.readCandidateBoolean(generation, index),
+      writeBoolean: (index, value) => this.writeCandidateBoolean(generation, index, value),
+      readString: index => {
+        const accepted = this.readCurrentString(index);
+        if (this.readCandidateString(generation, index) !== accepted) {
+          throw new Error("Transactional typed state fixed root invariant string was changed");
+        }
+        return accepted;
+      },
+      writeStringSameByteLength: (index, value) => this.writeCandidateStringSameByteLength(generation, index, value),
+    };
+    internal.operation.check(rootValue, cursor);
+    internal.operation.write(rootValue, cursor);
   }
 
   /**
@@ -950,6 +1035,49 @@ export class TransactionalTypedStateImageV1<TState> {
       this.#images[this.#activeIndex],
       this.#manifest.externalImmutableRoots,
     ) as TState;
+  }
+
+  /** Read one root without reconstructing its siblings. Mutable numerical
+   * arrays remain detached; declared immutable constants retain their binding. */
+  rehydrateCurrentRoot<TKey extends keyof TState & string>(rootKey: TKey): TState[TKey] {
+    const root = this.#manifest.rootNode;
+    if (root.kind !== "record") {
+      throw new Error("Transactional typed state root is not a record");
+    }
+    const entry = root.entries.find(candidate => candidate.key === rootKey);
+    if (entry === undefined) {
+      throw new Error(`Transactional typed state root ${rootKey} is unavailable`);
+    }
+    return rehydrateNode(
+      entry.node,
+      this.#images[this.#activeIndex],
+      this.#manifest.externalImmutableRoots,
+    ) as TState[TKey];
+  }
+
+  /** Bind a declared record path once. Every invocation reads this authority's
+   * current accepted image and returns the usual detached subtree, never a
+   * live view or a candidate borrow. Promotion cannot change earlier results. */
+  createCurrentSubtreeReader<const TPath extends readonly string[]>(
+    path: TPath,
+  ): () => TypedStateSubtreeValueV1<TState, TPath> {
+    if (!Array.isArray(path) || path.length === 0) {
+      throw new Error("Transactional typed state subtree path is empty or invalid");
+    }
+    let node = this.#manifest.rootNode;
+    for (const key of path) {
+      if (typeof key !== "string" || node.kind !== "record") {
+        throw new Error("Transactional typed state subtree path crosses a non-record node");
+      }
+      const entry = node.entries.find(candidate => candidate.key === key);
+      if (entry === undefined) {
+        throw new Error(`Transactional typed state subtree ${key} is unavailable`);
+      }
+      node = entry.node;
+    }
+    const boundNode = node;
+    return () => rehydrateNode(boundNode, this.#images[this.#activeIndex],
+      this.#manifest.externalImmutableRoots) as TypedStateSubtreeValueV1<TState, TPath>;
   }
 
   rehydrateStaged(): TState {
@@ -1999,6 +2127,68 @@ function writeDynamicRoots(
     byteOffset += length;
   }
   return byteOffset;
+}
+
+function compileFixedRootCompletionV1(node: TypedStateNodeV1,
+  required: { continuous: number[]; nullableContinuous: number[]; booleans: number[] }): RootCompletionOperationV1 {
+  const invalid = () => { throw new Error("Transactional typed state fixed root shape or value differs"); };
+  switch (node.kind) {
+    case "f64":
+      required.continuous.push(node.slotIndex);
+      return { check(value) { if (typeof value !== "number" || !Number.isFinite(value)) invalid(); },
+        write(value, cursor) { cursor.writeContinuous(node.slotIndex, value as number); } };
+    case "nullable-f64":
+      required.nullableContinuous.push(node.slotIndex);
+      return { check(value) { if (value !== null && (typeof value !== "number" || !Number.isFinite(value))) invalid(); },
+        write(value, cursor) { cursor.writeNullableContinuous(node.slotIndex, value as number | null); } };
+    case "boolean":
+      required.booleans.push(node.slotIndex);
+      return { check(value) { if (typeof value !== "boolean") invalid(); },
+        write(value, cursor) { cursor.writeBoolean(node.slotIndex, value as boolean); } };
+    case "string":
+      return { check(value, cursor) { if (value !== cursor.readString(node.slotIndex)) invalid(); }, write() {} };
+    case "record": {
+      const entries = node.entries.map(entry => ({ key: entry.key, operation: compileFixedRootCompletionV1(entry.node, required) }));
+      return {
+        check(value, cursor) {
+          if (value === null || typeof value !== "object"
+            || Object.getPrototypeOf(value) !== (node.nullPrototype ? null : Object.prototype)
+            || Reflect.ownKeys(value).length !== entries.length) invalid();
+          for (const entry of entries) {
+            const property = Object.getOwnPropertyDescriptor(value, entry.key);
+            if (!property || !property.enumerable || !("value" in property)) invalid();
+            entry.operation.check(property!.value, cursor);
+          }
+        },
+        write(value, cursor) {
+          for (const entry of entries) entry.operation.write((value as Record<string, unknown>)[entry.key], cursor);
+        },
+      };
+    }
+    case "array":
+    case "typed-array": {
+      const items = node.items.map(item => compileFixedRootCompletionV1(item, required));
+      const prototype = node.kind === "array" ? Array.prototype : Object.getPrototypeOf(createNumericTypedArray(node.constructorTag, 0));
+      return {
+        check(value, cursor) {
+          if ((node.kind === "array" ? !Array.isArray(value) : !ArrayBuffer.isView(value))
+            || value === null || typeof value !== "object" || Object.getPrototypeOf(value) !== prototype
+            || (value as ArrayLike<unknown>).length !== items.length
+            || Reflect.ownKeys(value).length !== items.length + (node.kind === "array" ? 1 : 0)) invalid();
+          for (let index = 0; index < items.length; index++) {
+            const property = Object.getOwnPropertyDescriptor(value, String(index));
+            if (!property || !property.enumerable || !("value" in property)) invalid();
+            items[index]!.check(property!.value, cursor);
+          }
+        },
+        write(value, cursor) {
+          for (let index = 0; index < items.length; index++) items[index]!.write((value as ArrayLike<unknown>)[index], cursor);
+        },
+      };
+    }
+    default:
+      throw new Error(`Transactional typed state fixed root completion does not support ${node.kind}`);
+  }
 }
 
 function rehydrateNode(

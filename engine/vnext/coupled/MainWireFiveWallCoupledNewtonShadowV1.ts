@@ -91,8 +91,42 @@ export type MainWireFiveWallCoupledPredictedSolveResultV1 = Readonly<{
     | "cubic-extrapolation";
   extrapolationScale: number;
   fallbackUsed: boolean;
+  /** Total work includes a failed extrapolated attempt before any fallback. */
+  work: MainWireFiveWallCoupledSolveWorkV1;
   solver: MainWireFiveWallCoupledNewtonShadowResultV1;
 }>;
+
+export type MainWireFiveWallCoupledSolveWorkV1 = Readonly<{
+  attemptCount: number;
+  iterations: number;
+  residualEvaluationCount: number;
+  jacobianEvaluationCount: number;
+  lineSearchBacktrackCount: number;
+  jacobianResidualEvaluationCount: number;
+  coronaryAnalyticBlockAssemblyCount: number;
+  coronaryBoundaryAnalyticBlockAssemblyCount: number;
+  nonCoronaryAnalyticBlockAssemblyCount: number;
+}>;
+
+export function summarizeMainWireFiveWallCoupledSolveWorkV1(
+  ...attempts: readonly MainWireFiveWallCoupledNewtonShadowResultV1[]
+): MainWireFiveWallCoupledSolveWorkV1 {
+  const work = { attemptCount: attempts.length, iterations: 0, residualEvaluationCount: 0,
+    jacobianEvaluationCount: 0, lineSearchBacktrackCount: 0, jacobianResidualEvaluationCount: 0,
+    coronaryAnalyticBlockAssemblyCount: 0, coronaryBoundaryAnalyticBlockAssemblyCount: 0,
+    nonCoronaryAnalyticBlockAssemblyCount: 0 };
+  for (const attempt of attempts) {
+    work.iterations += attempt.result.iterations;
+    work.residualEvaluationCount += attempt.result.residualEvaluationCount;
+    work.jacobianEvaluationCount += attempt.result.jacobianEvaluationCount;
+    work.lineSearchBacktrackCount += attempt.result.lineSearchBacktrackCount;
+    work.jacobianResidualEvaluationCount += attempt.jacobianResidualEvaluationCount;
+    work.coronaryAnalyticBlockAssemblyCount += attempt.coronaryAnalyticBlockAssemblyCount;
+    work.coronaryBoundaryAnalyticBlockAssemblyCount += attempt.coronaryBoundaryAnalyticBlockAssemblyCount;
+    work.nonCoronaryAnalyticBlockAssemblyCount += attempt.nonCoronaryAnalyticBlockAssemblyCount;
+  }
+  return Object.freeze(work);
+}
 
 export type MainWireFiveWallCoupledNewtonAdvanceResultV1<TWallState> =
   | Readonly<{
@@ -837,6 +871,7 @@ export function solveMainWireFiveWallCoupledNewtonPredictedV1<
       predictionMode: prediction.mode,
       extrapolationScale: prediction.extrapolationScale,
       fallbackUsed: false,
+      work: summarizeMainWireFiveWallCoupledSolveWorkV1(primary),
       solver: primary,
     });
   }
@@ -852,6 +887,7 @@ export function solveMainWireFiveWallCoupledNewtonPredictedV1<
     predictionMode: prediction.mode,
     extrapolationScale: prediction.extrapolationScale,
     fallbackUsed: true,
+    work: summarizeMainWireFiveWallCoupledSolveWorkV1(primary, fallback),
     solver: fallback,
   });
 }

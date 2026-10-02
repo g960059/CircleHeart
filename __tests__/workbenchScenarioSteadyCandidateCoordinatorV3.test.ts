@@ -106,7 +106,7 @@ describe("WorkbenchScenarioSteadyCandidateCoordinatorV3", () => {
     expect(coordinator.bestAvailable(source)).toBeNull();
     const snapshotCandidate = await coordinator.resolve(source, "snapshot");
 
-    expect(snapshotCandidate.convergence).toBe("observed-period1");
+    expect(snapshotCandidate.convergence).toBe("observed-beat-summary-closure");
     expect(snapshotCandidate.completedCycleCount).toBe(4);
     expect(snapshotCandidate.scenario.capture.checkpoint.acceptedRevision)
       .toBeGreaterThan(4);

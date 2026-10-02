@@ -14,10 +14,16 @@ import {
 } from "@/engine/devices/defaultsV1";
 import {
   MAIN_WIRE_FIVE_WALL_CORONARY_TRANSACTION_CLAIM_V3,
+  advanceMainWireFiveWallCoronaryAutoregulationOwnerFromPackedV3,
   initializeMainWireFiveWallCoronaryV3,
   maximumMainWireFiveWallCoronaryStepDurationV3,
   stepMainWireFiveWallCoronaryV3,
 } from "@/engine/myocardium/MainWireFiveWallCoronaryTransactionV3";
+import { createCoronaryAcceptedAutoregulationStateV3, createCoronaryAutoregulationWindowBindingV3 }
+  from "@/engine/coronary/acceptedAutoregulationWindowV3";
+import { initialCoronaryToneStateV2 } from "@/engine/coronary/topologyPriorV2";
+import { NORMAL_CORONARY_DISEASE_INPUT_V2 } from "@/engine/coronary/backwardEulerCoronaryNetworkV2";
+import { selectValidationStampModeV1, validationStampModeV1 } from "@/engine/validationStampModeV1";
 import {
   MAIN_WIRE_FIVE_WALL_LAND_TRISEG_PROVIDER_V1_ID,
   type MainWireFiveWallFreeCalciumDriveV1,
@@ -60,6 +66,40 @@ const RUNTIME = Object.freeze({
 });
 
 describe("main-wire coronary accepted-autoregulation transaction V3", () => {
+  it("resolves packed-owner controls identically while rechecking mutable disease and drive descendants", () => {
+    const originalMode = validationStampModeV1();
+    try {
+      const traces = [];
+      for (const mode of ["validation-stamps-disabled", "validation-stamps-enabled"] as const) {
+        selectValidationStampModeV1(mode);
+        const binding = createCoronaryAutoregulationWindowBindingV3({ originAcceptedTimeSec: 0, durationSec: 1,
+          interpretation: "periodic-sinus-cycle-aligned" });
+        const owner = { acceptedTimeSec: 0, binding,
+          state: createCoronaryAcceptedAutoregulationStateV3(binding, { acceptedTimeSec: 0, revision: 0 }),
+          toneResistanceScaleByTerritoryLayer: initialCoronaryToneStateV2() };
+        const packed = new Float64Array([1, 1, 1, 1, 1, 1, 80, 80, 80, 5]);
+        const input = { dtSec: 0.1, runtime: RUNTIME,
+          calciumDriveParams: FIVE_WALL_NORMAL_CALCIUM_DRIVE_FIXED_PRIOR_V1, pericardium: PERICARDIUM };
+        const baseline = advanceMainWireFiveWallCoronaryAutoregulationOwnerFromPackedV3(owner, input, 0.1, 1, packed);
+        const repeated = advanceMainWireFiveWallCoronaryAutoregulationOwnerFromPackedV3(owner, input, 0.1, 1, packed);
+        expect(repeated).toStrictEqual(baseline);
+        const disease = structuredClone(NORMAL_CORONARY_DISEASE_INPUT_V2);
+        const drive = { controlId: "mutable-drive", demandScaleByTerritoryLayer: structuredClone(baseline.nextState.desiredControl!.demandScaleByTerritoryLayer),
+          hyperemia01ByTerritoryLayer: structuredClone(baseline.nextState.desiredControl!.hyperemia01ByTerritoryLayer) };
+        const editedInput = { ...input, coronaryDisease: Object.freeze(disease), coronaryAutoregulationDrive: Object.freeze(drive) };
+        const first = advanceMainWireFiveWallCoronaryAutoregulationOwnerFromPackedV3(owner, editedInput, 0.1, 1, packed);
+        Object.assign(disease.LAD.layers.subendocardial, { vasodilatoryToneMinimumResistanceScale: 0.7 });
+        Object.assign(drive.demandScaleByTerritoryLayer.LAD, { subendocardial: 1.2 });
+        const edited = advanceMainWireFiveWallCoronaryAutoregulationOwnerFromPackedV3(owner, editedInput, 0.1, 1, packed);
+        expect(edited.nextState.desiredControl?.effectiveMinimumToneScaleByTerritoryLayer.LAD.subendocardial).toBe(0.7);
+        expect(edited.nextState.desiredControl?.demandScaleByTerritoryLayer.LAD.subendocardial).toBe(1.2);
+        expect(first.nextState.desiredControl?.demandScaleByTerritoryLayer.LAD.subendocardial).toBe(1);
+        traces.push([baseline, repeated, first, edited]);
+      }
+      expect(traces[1]).toStrictEqual(traces[0]);
+    } finally { selectValidationStampModeV1(originalMode); }
+  });
+
   it("cold-starts a separate empty physical-time owner without reinterpreting V2", () => {
     const cold = initializeMainWireFiveWallCoronaryV3({
       provider: testProvider(),

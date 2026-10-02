@@ -16,8 +16,16 @@ import {
   StudioSimulationWorkerClientV2,
   type StudioSimulationWorkerAdmittedSnapshotCommitV2,
 } from "@/studio/workers/StudioSimulationWorkerClientV2";
-import { studioCanonicalJsonStringify } from
+import { cloneAndFreezeStudioJson, studioCanonicalJsonStringify } from
   "@/domain/json/CanonicalJson";
+import {
+  prepareStudioSnapshotCaptureV1,
+  type StudioPreparedSnapshotCaptureV1,
+  type StudioSnapshotPreparationPortV1,
+  type StudioSnapshotPreparationRequestV1,
+  type StudioSnapshotSettlementEvidenceV1,
+  type StudioSnapshotSettlementMethodV1,
+} from "@/studio/application/authoring/StudioSnapshotPreparationV1";
 import type {
   WorkbenchBackgroundJobPriorityV3,
   WorkbenchBackgroundWorkerPoolPortV3,
@@ -137,7 +145,7 @@ export class WorkbenchParallelAuthoringCoordinatorV3 {
         }
         assertSameSavedProjectionV3(input.experiment, input);
         // Publication is authorized by the clean saved projection, but the
-        // immutable Snapshot owns the detached steady-candidate checkpoints.
+        // immutable Snapshot owns the detached accepted checkpoints.
         // The authoring application intentionally compares model, Surface,
         // Scenario identity/order/label, and fixture while allowing newer
         // exact checkpoints for the same saved parameter target.
@@ -172,6 +180,64 @@ export class WorkbenchParallelAuthoringCoordinatorV3 {
         snapshotSource: inputValue.snapshotSource,
       });
     });
+  }
+
+  /**
+   * Explicit authoring preparation, before the existing numerical admission.
+   * Existing neutral createSnapshot callers and Snapshot readers are unchanged.
+   * No Worker is opened for sealing until every Scenario has been prepared.
+   */
+  async createPreparedSnapshot(
+    inputValue: WorkbenchParallelSnapshotAuthoringInputV3,
+    request: Omit<StudioSnapshotPreparationRequestV1, "reusableEvidence"> & Readonly<{
+      reusableEvidenceByScenarioId?: Readonly<Record<string, StudioSnapshotSettlementEvidenceV1>>;
+    }> = {},
+    port?: StudioSnapshotPreparationPortV1,
+  ): Promise<Readonly<{
+    commit: StudioSimulationWorkerAdmittedSnapshotCommitV2;
+    preparations: readonly Readonly<{
+      scenarioId: string;
+      preparation: StudioPreparedSnapshotCaptureV1;
+    }>[];
+  }>> {
+    const input = validateAuthoringInputV3(inputValue);
+    const releaseTicket = cloneAndFreezeStudioJson<StudioModelWorkerReleaseTicketV2>(input.releaseTicket);
+    const surfaceReleaseId = inputValue.surfaceReleaseId;
+    const snapshotSource = inputValue.snapshotSource;
+    if (releaseTicket.modelId !== input.modelId
+      || releaseTicket.surfaceRelease.surfaceSeriesId !== input.surfaceSeriesId
+      || releaseTicket.surfaceRelease.surfaceReleaseId !== surfaceReleaseId) {
+      throw new Error("Snapshot preparation release identity mismatch");
+    }
+    const mode = request.mode ?? "steady";
+    const method = request.method === undefined ? undefined
+      : cloneAndFreezeStudioJson<StudioSnapshotSettlementMethodV1>(request.method);
+    const reusableEvidence = { ...request.reusableEvidenceByScenarioId };
+    const preparations: { scenarioId: string; preparation: StudioPreparedSnapshotCaptureV1 }[] = [];
+    for (const scenario of input.scenarios) {
+      const preparation = await prepareStudioSnapshotCaptureV1({
+        identity: {
+          modelId: input.modelId,
+          artifactRevisionId: releaseTicket.artifactRevisionId,
+          surfaceReleaseId,
+        },
+        capture: scenario.capture,
+        request: { mode, method, reusableEvidence: reusableEvidence[scenario.scenarioId] },
+        port,
+      });
+      preparations.push(Object.freeze({ scenarioId: scenario.scenarioId, preparation }));
+    }
+    const commit = await this.createSnapshot({
+      ...input,
+      releaseTicket,
+      activeScenarioId: input.activeScenario.scenarioId,
+      surfaceReleaseId,
+      snapshotSource,
+      scenarios: input.scenarios.map((scenario, index) => Object.freeze({
+        ...scenario, capture: preparations[index]!.preparation.capture,
+      })),
+    });
+    return Object.freeze({ commit, preparations: Object.freeze(preparations) });
   }
 
   async #withClient<T>(

@@ -23,12 +23,10 @@ export const WORKBENCH_BALANCED_PRESENTATION_PROFILE_V3:
 export const WORKBENCH_SMOOTH_PRESENTATION_PROFILE_V3:
   WorkbenchPresentationProfileV3 = Object.freeze({
     name: "smooth",
-    // One 16-step request amortizes structured-clone and validation overhead
-    // across 32 ms of exact model time. The scheduler then publishes the
-    // already-accepted prefix in two ordered eight-frame slices so Canvas can
-    // refresh near 60 Hz without asking the numerical Worker to run twice as
-    // many request/response cycles.
-    maximumBatchSteps: 16,
+    // Start with 16 ticks, amortizing transport across 32 ms of exact model
+    // time. Measured short requests may grow to 32 ticks at accelerated rates;
+    // visible slices retain every observation independently of request size.
+    maximumBatchSteps: 32,
     preferredBatchSteps: 16,
     presentationIntervalMs: 16,
     maximumPresentationBatchFrames: 8,

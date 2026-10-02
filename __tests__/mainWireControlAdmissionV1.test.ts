@@ -496,7 +496,7 @@ describe("current exact model control admission", () => {
       const request = { ...id, analysisId: pvAnalysis, expectedInputEpoch: frame.inputEpoch,
         expectedAcceptedRevision: frame.acceptedRevision, expectedAcceptedTimeSec: frame.acceptedTimeSec,
         onProgress: (analysis: unknown) => { partial.push(analysis); throw new Error("stop after verified first progress"); } };
-      const source = { acceptedFrame: frame, surfaceRelease: surface, legacyExact: null,
+      const source = { exactNumericalExports: { ExactSessionV1: Session }, acceptedFrame: frame, surfaceRelease: surface, legacyExact: null,
         capture: async () => ({ artifactRevisionId: metadata.artifactRevisionId, scenario: before }) };
       await expect(executeMainWirePressureCrossingPvV1({ request, source })).rejects.toThrow("stop after verified first progress");
       expect(partial).toHaveLength(1);

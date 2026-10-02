@@ -42,7 +42,8 @@ export type WorkbenchSteadyCandidateV3 = Readonly<{
   completedCycleCount: number;
   consecutiveStableTransitionCount: number;
   maximumNormalizedDelta: number | null;
-  convergence: "bounded-warm-start" | "observed-period1" | "cycle-cap";
+  /** Beat summaries alone do not establish full-state periodic settlement. */
+  convergence: "bounded-warm-start" | "observed-beat-summary-closure" | "cycle-cap";
 }>;
 
 type CandidateRecordV3 = {
@@ -246,12 +247,12 @@ async function computeSteadyCandidateV3(
             convergence: "bounded-warm-start",
           });
         }
-        const observedPeriod1 =
+        const observedBeatSummaryClosure =
           completedCycleCount >= MINIMUM_OBSERVED_CYCLES_V3
           && consecutiveStableTransitionCount
             >= REQUIRED_STABLE_TRANSITIONS_V3;
         const reachedCap = completedCycleCount >= MAXIMUM_OBSERVED_CYCLES_V3;
-        if (observedPeriod1 || reachedCap) {
+        if (observedBeatSummaryClosure || reachedCap) {
           return await captureAndPublishCandidateV3(
             client,
             source,
@@ -261,8 +262,8 @@ async function computeSteadyCandidateV3(
               completedCycleCount,
               consecutiveStableTransitionCount,
               maximumNormalizedDelta,
-              convergence: observedPeriod1
-                ? "observed-period1"
+              convergence: observedBeatSummaryClosure
+                ? "observed-beat-summary-closure"
                 : "cycle-cap",
             },
           );
