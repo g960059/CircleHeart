@@ -15,7 +15,20 @@ test("@desktop cardiorespiratory Model Lab runs its own Worker, renders XY data 
   await graphs.getByText("呼吸圧・肺気量ループ", { exact: true }).click();
   const xy = page.getByTestId("generic-xy-graph").filter({ visible: true });
   await expect(xy).toBeVisible();
-  await expect(xy.locator('path[fill="none"]').first()).toHaveAttribute("d", /^M.+L/);
+  const xyCanvas = xy.getByTestId("generic-xy-canvas");
+  await expect.poll(async () => Number(await xyCanvas.getAttribute("data-display-point-count"))).toBeGreaterThan(1);
+  // The Canvas retains accessible naming and paints axes plus the live trajectory.
+  expect(await xyCanvas.evaluate(canvas => {
+    const element = canvas as HTMLCanvasElement, context = element.getContext("2d")!;
+    const legend = element.closest('[data-testid="generic-xy-graph"]')!.querySelector<HTMLElement>('span[style]')!;
+    const color = getComputedStyle(legend).color.match(/[\d.]+/g)!.slice(0, 3).map(Number);
+    const pixels = context.getImageData(0, 0, element.width, element.height).data;
+    let painted = 0;
+    for (let offset = 0; offset < pixels.length; offset += 4) {
+      if (pixels[offset + 3] > 32 && color.every((value, channel) => Math.abs(pixels[offset + channel] - value) <= 5)) painted++;
+    }
+    return painted;
+  })).toBeGreaterThan(20);
   expect(Number(await xy.getAttribute("data-x-maximum"))).toBeGreaterThan(1);
   expect(Number(await xy.getAttribute("data-x-maximum"))).toBeLessThan(20);
   await graphs.getByText("フローボリュームループ", { exact: true }).click();

@@ -9,17 +9,16 @@ import { workbenchPvTrailAlphaV3, workbenchPvInputTransitionV3, workbenchPvHisto
 import { workbenchManualChartDomainV3 } from "@/components/workbench/presentation/WorkbenchManualChartDomainV3";
 import { nextZeroBasedPvDomainV3, workbenchPvLoopDomainPointsV3 } from "@/components/workbench/presentation/PressureVolumeLoopCanvasV3";
 import { pvCompactPressureAxisTitleV3, pvPressureAxisTitleV3 } from "@/components/workbench/presentation/PressureVolumeLoopCanvasV3";
-import { coalesceSweepingWaveformDisplaySegmentV3 } from "@/components/workbench/presentation/SweepingWaveformCanvasV3";
+import { coalesceSweepingWaveformDisplaySegmentV3, WORKBENCH_SWEEP_FORWARD_GAP_FRACTION_V3 } from "@/components/workbench/presentation/sweep/SweepWaveformGeometryV1";
+import { buildSweepingWaveformSegmentsV3, latestSweepingWaveformPointV3 } from "./helpers/sweepGeometryReferenceV1";
 
 import {
   WORKBENCH_PRESENTATION_SAMPLE_CAPACITY_V3,
   WORKBENCH_PRESENTATION_HISTORY_MAX_DEPTH_V3,
-  WORKBENCH_SWEEP_FORWARD_GAP_FRACTION_V3,
   WorkbenchScenarioPresentationSampleStoreV3,
   appendWorkbenchPresentationSamplesV3,
   appendWorkbenchExactOrbitSamplesV3,
   buildPvBackBufferRemainderV3,
-  buildSweepingWaveformSegmentsV3,
   buildWorkbenchTraceLegendModelV3,
   boundedCanvasPixelRatioV3,
   createWorkbenchCanvasFrameSchedulerV3,
@@ -30,7 +29,6 @@ import {
   guytonStarlingPlotDomainV3,
   isWorkbenchPresentationSampleV3,
   lastCompleteCycleRangeV3,
-  latestSweepingWaveformPointV3,
   mixOpaqueWorkbenchCanvasColorV3,
   nextStableNumericDomainStateV3,
   niceNumericDomainV3,

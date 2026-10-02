@@ -431,7 +431,7 @@ describe("WorkbenchParallelScenarioRuntimeV3", () => {
       }));
     expect(state.activeScenarioId).toBe("scenario/comparison");
     expect(harness.conductor.dependencies).toMatchObject({
-      adaptPresentationCadenceToLaneCount: true,
+      adaptPresentationCadenceToLoad: true,
       adaptComputeBatchToPlaybackRate: true,
       batchSteps: 16,
       presentationIntervalMs: 16,

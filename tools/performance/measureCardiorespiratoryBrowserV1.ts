@@ -1,39 +1,28 @@
 import { chromium, expect, type Page } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { arch, cpus, platform } from "node:os";
-import { WORKBENCH_MINIMUM_PLAYBACK_RATE_V3, WORKBENCH_MAXIMUM_PLAYBACK_RATE_V3, WORKBENCH_PLAYBACK_RATE_STEP_V3 } from "@/components/workbench/runtime/WorkbenchGroupTimeConductorV3";
+import { WORKBENCH_PLAYBACK_RATE_STEP_V3 } from "@/components/workbench/runtime/WorkbenchGroupTimeConductorV3";
 import type { WorkbenchPerformanceDiagnosticsApiV3 } from "@/components/workbench/runtime/WorkbenchPerformanceDiagnosticsV3";
 
+import { CARDIORESPIRATORY_SAMPLE_START_MARK, CARDIORESPIRATORY_SAMPLE_END_MARK, parseCardiorespiratoryBrowserArgumentsV1, groupCardiorespiratoryRenderDiagnosticsV1 } from "./cardiorespiratoryBrowserMeasurementsV1";
+import { CardiorespiratoryBrowserTraceV1, installCardiorespiratoryBrowserObserverV1, type CardiorespiratoryBrowserObservationApiV1 } from "./cardiorespiratoryBrowserObservationV1";
+
 type DiagnosticWindow = Window & typeof globalThis & { __circleHeartWorkbenchPerfV3: WorkbenchPerformanceDiagnosticsApiV3;
+  __circleHeartBrowserObservationV1: CardiorespiratoryBrowserObservationApiV1;
   exactArtifactTickets: { artifactRevisionId: string; artifactUrl: string }[] };
-const argument = (name: string) => { const i = process.argv.indexOf(name); return i < 0 ? undefined : process.argv[i + 1]; };
-function boundedIntegerArgument(name: string, fallback: number, minimum: number, maximum: number): number {
-  const value = Number(process.argv.includes(name) ? argument(name) : fallback);
-  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) throw new Error(`${name} must be an integer in ${minimum}..${maximum}`);
-  return value;
-}
-const origin = argument("--origin") ?? "http://127.0.0.1:4216";
-const mode = argument("--view") ?? "default";
-const throttle = Number(argument("--main-thread-throttle") ?? 1);
-const useMaximumRate = process.argv.includes("--maximum-rate");
-const targetPlaybackRate = process.argv.includes("--playback-rate") ? Number(argument("--playback-rate")) : null;
-if (targetPlaybackRate !== null && (useMaximumRate || !Number.isFinite(targetPlaybackRate)
-  || targetPlaybackRate < WORKBENCH_MINIMUM_PLAYBACK_RATE_V3 || targetPlaybackRate > WORKBENCH_MAXIMUM_PLAYBACK_RATE_V3
-  || Math.abs(targetPlaybackRate / WORKBENCH_PLAYBACK_RATE_STEP_V3 - Math.round(targetPlaybackRate / WORKBENCH_PLAYBACK_RATE_STEP_V3)) > 1e-9)) {
-  throw new Error(`--playback-rate requires ${WORKBENCH_MINIMUM_PLAYBACK_RATE_V3}..${WORKBENCH_MAXIMUM_PLAYBACK_RATE_V3} in ${WORKBENCH_PLAYBACK_RATE_STEP_V3} steps and cannot be combined with --maximum-rate`);
-}
-const scenarioCount = boundedIntegerArgument("--scenarios", 1, 1, 5);
-const warmupMs = boundedIntegerArgument("--warmup-ms", 4000, 1000, 120000);
-const sampleMs = boundedIntegerArgument("--sample-ms", 5000, 1000, 600000);
-if (!["default", "xy"].includes(mode) || !Number.isFinite(throttle) || throttle < 1 || throttle > 8) throw new Error("Invalid view or throttle");
-const browser = await chromium.launch({ headless: true });
+const options = parseCardiorespiratoryBrowserArgumentsV1(process.argv.slice(2));
+const { origin, mode, throttle, useMaximumRate, targetPlaybackRate, scenarioCount, warmupMs, sampleMs } = options;
+const browser = await chromium.launch({ headless: !options.headed });
+let trace: CardiorespiratoryBrowserTraceV1 | null = null;
+let traceFinished = false;
 try {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const page = await browser.newPage({ viewport: options.viewport, deviceScaleFactor: options.dpr });
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Performance.enable");
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: throttle });
+  await page.addInitScript(installCardiorespiratoryBrowserObserverV1);
   await page.addInitScript(() => {
     const target = window as DiagnosticWindow;
     target.exactArtifactTickets = [];
@@ -46,7 +35,10 @@ try {
     };
   });
   await page.route("**/rest/v1/rpc/save_experiment_v1", route => route.abort("blockedbyclient"));
-  await page.goto(`${origin}/ja/dev/model-lab?model=cardiorespiratory&workbenchPerf=1`);
+  const url = new URL(`${origin}/ja/dev/model-lab?model=cardiorespiratory&workbenchPerf=1`);
+  if (options.sweepRenderer !== null) url.searchParams.set("workbenchSweepRenderer", options.sweepRenderer);
+  if (options.presentationMs !== null) url.searchParams.set("workbenchPresentationMs", options.presentationMs);
+  await page.goto(url.href);
   await page.waitForFunction(() => Number(document.querySelector('[data-testid="v3-dockview-workbench"]')?.getAttribute("data-model-time-sec")) > .3);
   const root = page.getByTestId("v3-dockview-workbench");
   if (await root.getAttribute("data-model-id") !== "circleheart.cardiorespiratory-dev-v1") throw new Error("Wrong exact model");
@@ -70,16 +62,32 @@ try {
   if (targetPlaybackRate !== null && requestedRate !== targetPlaybackRate) throw new Error("Target playback rate did not remain selected");
   await page.getByTestId("v3-playback-rate-trigger").click();
   if (useMaximumRate || targetPlaybackRate !== null) await page.waitForTimeout(1000);
-  await page.evaluate(() => (window as DiagnosticWindow).__circleHeartWorkbenchPerfV3.reset());
+  if (options.tracePath !== null) {
+    trace = new CardiorespiratoryBrowserTraceV1(cdp, options.tracePath);
+    await trace.start();
+  }
   const before = await cdp.send("Performance.getMetrics");
-  const first = Number(await root.getAttribute("data-model-time-sec")), started = performance.now();
+  const started = performance.now();
+  const first = await page.evaluate(mark => {
+    const target = window as DiagnosticWindow;
+    target.__circleHeartWorkbenchPerfV3.reset();
+    target.__circleHeartBrowserObservationV1.start();
+    performance.mark(mark);
+    return Number(document.querySelector('[data-testid="v3-dockview-workbench"]')?.getAttribute("data-model-time-sec"));
+  }, CARDIORESPIRATORY_SAMPLE_START_MARK);
   await page.waitForTimeout(sampleMs);
+  const { last, diagnostics, browserObservation } = await page.evaluate(mark => {
+    performance.mark(mark);
+    const target = window as DiagnosticWindow;
+    return { last: Number(document.querySelector('[data-testid="v3-dockview-workbench"]')?.getAttribute("data-model-time-sec")),
+      diagnostics: target.__circleHeartWorkbenchPerfV3.snapshot(), browserObservation: target.__circleHeartBrowserObservationV1.stop() };
+  }, CARDIORESPIRATORY_SAMPLE_END_MARK);
+  const wallMs = performance.now() - started;
   const after = await cdp.send("Performance.getMetrics");
-  const last = Number(await root.getAttribute("data-model-time-sec")), wallMs = performance.now() - started;
-  const diagnostics = await page.evaluate(() => (window as DiagnosticWindow).__circleHeartWorkbenchPerfV3.snapshot());
   const a = Object.fromEntries(after.metrics.map(m => [m.name, m.value]));
   const b = Object.fromEntries(before.metrics.map(m => [m.name, m.value]));
-  const mainThread = Object.fromEntries(["TaskDuration", "ScriptDuration", "LayoutDuration", "RecalcStyleDuration"].map(k => [k, a[k] - b[k]]));
+  const mainThread = Object.fromEntries(["TaskDuration", "ScriptDuration", "LayoutDuration", "RecalcStyleDuration"].map(k =>
+    [k, Number.isFinite(a[k]) && Number.isFinite(b[k]) ? a[k]! - b[k]! : null]));
   if (diagnostics.values["scheduler.group.live-lane-count"]?.minimum !== scenarioCount
     || diagnostics.values["scheduler.group.live-lane-count"]?.maximum !== scenarioCount) throw new Error("Measurement did not retain the requested live scenario count");
   const laneWorkers = Object.fromEntries(Object.entries(diagnostics.metrics).flatMap(([name, metric]) => {
@@ -97,7 +105,23 @@ try {
   }
   const xyPaths = await page.getByTestId("generic-xy-graph").filter({ visible: true }).locator('path[fill="none"]').evaluateAll(paths =>
     paths.map(p => ({ characters: p.getAttribute("d")?.length, vertices: p.getAttribute("d")?.match(/[ML]/g)?.length })));
-  const controlLatencyMs = await measureControlLatency(page);
+  await page.evaluate(() => (window as DiagnosticWindow).__circleHeartBrowserObservationV1.start());
+  const controlLatency = await measureControlLatency(page);
+  const controlObservation = await page.evaluate(() => (window as DiagnosticWindow).__circleHeartBrowserObservationV1.stop());
+  let traceMeasurement = null;
+  if (trace) {
+    // stop() is idempotent; even a summary failure has released CDP/file handles.
+    try { traceMeasurement = await trace.stop(); } finally { traceFinished = true; }
+    if (traceMeasurement.dataLossOccurred) throw new Error(`CDP trace lost data; raw partial trace retained at ${trace.path}`);
+  }
+  const renderSurfaces = await page.locator("canvas").evaluateAll(canvases => canvases.map(canvas => {
+    const bounds = canvas.getBoundingClientRect(), style = getComputedStyle(canvas);
+    const pane = canvas.closest("[data-render-pane-id]");
+    return { testId: canvas.getAttribute("data-testid"), paneId: pane?.getAttribute("data-render-pane-id") ?? null,
+      backend: pane?.getAttribute("data-render-backend") ?? canvas.getAttribute("data-render-backend"),
+      backingWidth: (canvas as HTMLCanvasElement).width, backingHeight: (canvas as HTMLCanvasElement).height, cssWidth: bounds.width, cssHeight: bounds.height,
+      visible: bounds.width > 0 && bounds.height > 0 && style.visibility !== "hidden" && style.display !== "none" };
+  }));
   const tickets = await page.evaluate(() => (window as DiagnosticWindow).exactArtifactTickets);
   const ticket = tickets[0];
   if (!ticket) throw new Error("Missing exact Worker artifact ticket");
@@ -105,11 +129,14 @@ try {
   const served = await page.request.get(ticket.artifactUrl);
   if (!served.ok() || createHash("sha256").update(await served.body()).digest("hex") !== ticket.artifactRevisionId) throw new Error("Served artifact differs from Worker ticket");
   if (errors.length || await page.getByTestId("workbench-calculation-stopped").count()) throw new Error(`Browser calculation failed: ${errors.join("; ")}`);
-  const environment = await page.evaluate(() => ({ userAgent: navigator.userAgent, logicalCpus: navigator.hardwareConcurrency, devicePixelRatio }));
+  const environment = await page.evaluate(() => ({ userAgent: navigator.userAgent, logicalCpus: navigator.hardwareConcurrency, devicePixelRatio, viewport: { width: innerWidth, height: innerHeight }, visibilityState: document.visibilityState }));
   const hostCpus = cpus();
   const benchmarkHost = { cpuModels: [...new Set(hostCpus.map(cpu => cpu.model))], logicalCpuCount: hostCpus.length, architecture: arch(), platform: platform() };
   console.log(JSON.stringify({ schemaId: "circleheart-cardiorespiratory-browser-performance-v1", artifactRevisionId: ticket.artifactRevisionId,
-    view: mode, requestedMainThreadThrottle: throttle, proxy: throttle === 1 ? "native-headless-chromium" : "main-thread-only-throttle-dedicated-worker-unthrottled",
+    view: mode, requestedMainThreadThrottle: throttle, proxy: throttle === 1 ? `native-${options.headed ? "headed" : "headless"}-chromium` : "main-thread-only-throttle-dedicated-worker-unthrottled",
+    browserMode: options.headed ? "headed" : "headless", requestedDpr: options.dpr, requestedViewport: options.viewport,
+    requestedSweepRenderer: options.sweepRenderer, requestedPresentationMs: options.presentationMs,
+    measurementScope: "Single isolated Chromium browser; headed mode does not prove an unobscured window or a particular physical display refresh rate; DPR changes backing resolution, not display hardware",
     scenarioCount, workerArtifactTicketCount: tickets.length, warmupMs, sampleMs, selectedMaximumRate, benchmarkHost, environment, first, last, wallMs, simulatedTimePerWallTime: (last - first) * 1000 / wallMs,
     diagnosticStatistics: { cumulativeWindow: "since reset immediately before measurement", recentObservationLimit: 240,
       durationMetrics: { countMeanMaximum: "entire measurement window", p95: "most recent up to 240 observations per metric", latest: "latest observation" },
@@ -117,12 +144,23 @@ try {
     requestedRate, requestedRateAfter, sliderMaximumRateBefore, sliderMaximumRateAfter,
     playbackRateSelection: playbackRateSelection ?? { mode: useMaximumRate ? "maximum-once" : "default", targetRate: null, readinessWaitMs: 0 },
     measuredSafePlaybackRate: diagnostics.values["scheduler.group.safe-playback-rate"],
-    mainThread, mainThreadBusyFraction: mainThread.TaskDuration * 1000 / wallMs,
+    mainThread, mainThreadBusyFraction: mainThread.TaskDuration === null ? null : mainThread.TaskDuration! * 1000 / wallMs,
+    mainThreadScope: "CDP Performance cumulative duration deltas in seconds; includes protocol boundary overhead; unsupported metrics are null",
     laneWorkers, groupRoundTrip: diagnostics.metrics["scheduler.group.worker-round-trip"],
     drawing: Object.fromEntries(Object.entries(diagnostics.metrics).filter(([name]) => name.startsWith("canvas.") || name.startsWith("svg."))),
-    controlLatencyMs, controlLatencyMeasurement: "native-keyup-to-accepted-checkpoint-dom-mutation",
+    rendering: groupCardiorespiratoryRenderDiagnosticsV1(diagnostics), renderSurfaces, browserObservation,
+    react: { metrics: Object.fromEntries(Object.entries(diagnostics.metrics).filter(([name]) => name.startsWith("react."))),
+      scope: "Existing React Profiler actualDuration/commit interval diagnostics when enabled by the app; absent in ordinary production React builds, not interpreted as zero cost" },
+    controlLatencyMs: controlLatency.acceptedDomMs, controlLatencyMeasurement: "native-keyup-to-accepted-checkpoint-dom-mutation",
+    controlLatency, controlObservation,
+    trace: traceMeasurement === null ? { enabled: false } : { enabled: true, categories: CardiorespiratoryBrowserTraceV1.categories,
+      ...traceMeasurement, overhead: "Tracing changes workload and scheduling; compare like-for-like traced runs and use untraced runs for throughput qualification" },
     xyPaths, diagnostics }, null, 2));
-} finally { await browser.close(); }
+} finally {
+  try {
+    if (trace?.started && !traceFinished) await trace.stop().catch(error => console.error(`Trace cleanup: ${String(error)}; partial path=${trace!.path}`));
+  } finally { await browser.close(); }
+}
 
 /** Follow the real control and measured capacity; a requested target is never
  * injected into the conductor or substituted for the actual selected value. */
@@ -173,7 +211,7 @@ async function ensureScenarioCount(page: Page, target: number): Promise<void> {
 }
 
 /** Start at the native commit event; polling is only a completion wait. */
-async function measureControlLatency(page: Page): Promise<number> {
+async function measureControlLatency(page: Page) {
   const slider = page.getByRole("slider", { name: "HR", exact: true }).first();
   await slider.scrollIntoViewIfNeeded();
   const initialEpoch = Number(await page.getByTestId("v3-dockview-workbench").getAttribute("data-input-epoch"));
@@ -183,6 +221,7 @@ async function measureControlLatency(page: Page): Promise<number> {
     if (!root) throw new Error("Workbench root is unavailable");
     const startMark = `${measureName}.start`, endMark = `${measureName}.end`;
     performance.clearMarks(startMark); performance.clearMarks(endMark); performance.clearMeasures(measureName);
+    performance.clearMeasures(`${measureName}.next-raf`); performance.clearMeasures(`${measureName}.second-raf`);
     let started = false;
     const onKeyUp = (event: Event) => {
       if ((event as KeyboardEvent).key !== "ArrowRight" || started) return;
@@ -192,6 +231,10 @@ async function measureControlLatency(page: Page): Promise<number> {
       if (!started || Number(root.getAttribute("data-input-epoch")) <= initialEpoch
         || Number(root.getAttribute("data-accepted-revision")) <= 0 || Number(root.getAttribute("data-model-time-sec")) <= 0) return;
       performance.mark(endMark); performance.measure(measureName, startMark, endMark); cleanup();
+      requestAnimationFrame(() => {
+        performance.measure(`${measureName}.next-raf`, { start: startMark, end: performance.now() });
+        requestAnimationFrame(() => performance.measure(`${measureName}.second-raf`, { start: startMark, end: performance.now() }));
+      });
     });
     const cleanup = () => { observer.disconnect(); element.removeEventListener("keyup", onKeyUp, true); window.clearTimeout(timeout); };
     const timeout = window.setTimeout(cleanup, 10000);
@@ -200,5 +243,9 @@ async function measureControlLatency(page: Page): Promise<number> {
   }, { initialEpoch, measureName });
   await slider.press("ArrowRight");
   await page.waitForFunction(name => performance.getEntriesByName(name, "measure").length === 1, measureName, { timeout: 10000 });
-  return page.evaluate(name => performance.getEntriesByName(name, "measure")[0]!.duration, measureName);
+  await page.waitForFunction(name => performance.getEntriesByName(`${name}.second-raf`, "measure").length === 1, measureName, { timeout: 10000 });
+  return page.evaluate(name => ({ acceptedDomMs: performance.getEntriesByName(name, "measure")[0]!.duration,
+    nextRafMs: performance.getEntriesByName(`${name}.next-raf`, "measure")[0]!.duration,
+    secondRafMs: performance.getEntriesByName(`${name}.second-raf`, "measure")[0]!.duration,
+    scope: "One native HR ArrowRight keyup to accepted checkpoint DOM mutation, then the next two rAF callbacks; callback times are rendering opportunities, not confirmed pixels or physical presentation" }), measureName);
 }

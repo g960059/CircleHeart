@@ -1,5 +1,6 @@
 import React from "react";
 import { GenericXYGraphV1 } from "./presentation/GenericXYGraphV1";
+import type { WorkbenchGraphSampleSourceV3 } from "./presentation/WorkbenchGraphSampleSourceV3";
 import { useTranslation } from "react-i18next";
 import { SimulationLegendPlaceholderV1, SimulationPanePlaceholderV1 } from "@/components/simulation/SimulationPreparationV1";
 
@@ -20,11 +21,13 @@ import {
   WorkbenchScenarioPresentationSampleStoreV3,
   resolveWorkbenchGraphTraceStyleV3,
   structuralReturnOrientationFromPayloadV3,
-  useWorkbenchSampledGraphPresentationSamplesV3,
+  useWorkbenchOptionalSampledGraphPresentationSamplesV3,
   workbenchModelCyclePhaseOutputIdV3,
   type WorkbenchScenarioOrbitHistoryV3,
   type WorkbenchScenarioPresentationSamplesV3,
+  type WorkbenchScalarSampleV3,
 } from "@/components/workbench/presentation";
+
 import {
   shouldAutoRequestStructuralReturnComparisonV3,
   structuralReturnComparisonRequestKeyV3,
@@ -50,6 +53,7 @@ import type {
   StudioSimulationFrameV2,
 } from "@/studio/contracts/v2/simulation";
 import type { StudioSimulationWorkerScenarioDescriptorV2 } from "@/studio/workers/StudioSimulationWorkerProtocolV2";
+const EMPTY_GRAPH_SAMPLES_V3: readonly WorkbenchScalarSampleV3[] = Object.freeze([]);
 const EMPTY_WORKBENCH_SCENARIO_PRESENTATION_SAMPLES_V3 = Object.freeze(
   Object.create(null),
 ) as WorkbenchScenarioPresentationSamplesV3;
@@ -271,21 +275,27 @@ function SampledGraphPaneBodyV3({
 }>) {
   const { i18n } = useTranslation();
   const { appTheme } = useAppTheme();
-  const graphPresentation = useWorkbenchSampledGraphPresentationSamplesV3(
+  const graphPresentation = useWorkbenchOptionalSampledGraphPresentationSamplesV3(
     sampleStore,
-    graph.renderer === "xy" ? "pressure-volume" : graph.renderer,
+    graph.renderer === "pressure-volume" ? "pressure-volume" : null,
   );
+  const graphSampleSource = React.useMemo<WorkbenchGraphSampleSourceV3>(() => ({
+    subscribe: graph.renderer === "xy" ? sampleStore.subscribePressureVolume : sampleStore.subscribeSweep,
+    getSamples: scenarioId => graph.renderer === "xy"
+      ? sampleStore.getScenarioExactOrbitSnapshot(scenarioId)
+      : sampleStore.getScenarioSnapshot(scenarioId),
+  }), [sampleStore, graph.renderer]);
   React.useEffect(() => { if (graph.renderer === "xy") sampleStore.ensureExactOrbitWindowSec(18); }, [graph.renderer, sampleStore]);
   const samplesByScenarioId =
-    graphPresentation.renderer === "sweep"
+    graphPresentation?.renderer === "sweep"
       ? graphPresentation.samplesByScenarioId
       : EMPTY_WORKBENCH_SCENARIO_PRESENTATION_SAMPLES_V3;
   const exactOrbitSamplesByScenarioId =
-    graphPresentation.renderer === "pressure-volume"
+    graphPresentation?.renderer === "pressure-volume"
       ? graphPresentation.exactOrbitSamplesByScenarioId
       : EMPTY_WORKBENCH_SCENARIO_PRESENTATION_SAMPLES_V3;
   const orbitHistoryByScenarioId =
-    graphPresentation.renderer === "pressure-volume"
+    graphPresentation?.renderer === "pressure-volume"
       ? graphPresentation.orbitHistoryByScenarioId
       : EMPTY_WORKBENCH_SCENARIO_ORBIT_HISTORY_V3;
   const displayedSeries = React.useMemo(
@@ -366,14 +376,14 @@ function SampledGraphPaneBodyV3({
       const p = resolveWorkbenchGraphSeriesPresentationV3({ definition, outputId: id, seriesId: id, storedLabel: undefined, locale: i18n.language.startsWith("ja") ? "ja" : "en" });
       return `${p.label}${definition?.unit && definition.unit !== "1" ? ` (${definition.unit})` : ""}`;
     };
-    return <GenericXYGraphV1 xLabel={label(first.xOutputId)} yLabel={label(first.yOutputId)} axisRanges={pane.axisRanges} actions={legendActions}
+    return <GenericXYGraphV1 xLabel={label(first.xOutputId)} yLabel={label(first.yOutputId)} axisRanges={pane.axisRanges} actions={legendActions} sampleSource={graphSampleSource}
       traces={scenarios.flatMap((scenario, scenarioIndex) => !visibleScenarioIds.includes(scenario.scenarioId) ? [] : displayedSeries.flatMap((series, seriesIndex) => {
         const binding = graph.seriesCatalog.find(b => b.seriesId === series.seriesId);
         if (!binding || isWorkbenchGraphTraceExcludedV3(pane, scenario.scenarioId, series.seriesId)) return [];
         const style = resolveWorkbenchGraphTraceStyleV3({ pane, surface, renderer: "xy", authoredScenarioCount, scenarioId: scenario.scenarioId, scenarioIndex,
           seriesId: series.seriesId, seriesIndex, appTheme });
-        return [{ id: `${scenario.scenarioId}/${series.seriesId}`, label: `${scenario.label} · ${series.label}`, color: style.color,
-          samples: exactOrbitSamplesByScenarioId[scenario.scenarioId] ?? [], ...binding }];
+        return [{ id: `${scenario.scenarioId}/${series.seriesId}`, scenarioId: scenario.scenarioId, label: `${scenario.label} · ${series.label}`, color: style.color,
+          samples: exactOrbitSamplesByScenarioId[scenario.scenarioId] ?? EMPTY_GRAPH_SAMPLES_V3, ...binding }];
       }))} />;
   }
   if (graph.renderer === "pressure-volume") {
@@ -430,9 +440,9 @@ function SampledGraphPaneBodyV3({
               scenarioStatus: workbenchScenarioRuntimeStatusV3(playbackRunning),
               scenarioStyleIndex,
               samples,
-              currentCycleSamples: graphPresentation.renderer === "pressure-volume" ? graphPresentation.currentCycleSamplesByScenarioId[scenario.scenarioId] : undefined,
-              cyclePosition: graphPresentation.renderer === "pressure-volume" ? graphPresentation.cyclePositionByScenarioId[scenario.scenarioId] : undefined,
-              completedCycleSampleSets: graphPresentation.renderer === "pressure-volume" ? graphPresentation.completedCyclesByScenarioId[scenario.scenarioId] : undefined,
+              currentCycleSamples: graphPresentation?.renderer === "pressure-volume" ? graphPresentation.currentCycleSamplesByScenarioId[scenario.scenarioId] : undefined,
+              cyclePosition: graphPresentation?.renderer === "pressure-volume" ? graphPresentation.cyclePositionByScenarioId[scenario.scenarioId] : undefined,
+              completedCycleSampleSets: graphPresentation?.renderer === "pressure-volume" ? graphPresentation.completedCyclesByScenarioId[scenario.scenarioId] : undefined,
               historyEpochs: workbenchBoundedGraphHistoryV3(
                 orbitHistoryByScenarioId[scenario.scenarioId] ?? [],
                 pane.historyDepth ?? 1,
@@ -536,8 +546,7 @@ function SampledGraphPaneBodyV3({
         !visibleScenarioIds.includes(scenario.scenarioId)
       )
         return [];
-      const samples = samplesByScenarioId[scenario.scenarioId] ?? [];
-      if (samples.length === 0) return [];
+      const samples = samplesByScenarioId[scenario.scenarioId] ?? EMPTY_GRAPH_SAMPLES_V3;
       return bindings.flatMap(({ binding, series }) => {
         if (
           isWorkbenchGraphTraceExcludedV3(
@@ -594,6 +603,7 @@ function SampledGraphPaneBodyV3({
       canvasClassName="h-full min-h-0"
     >
       <SweepingWaveformCanvasV3
+        sampleSource={graphSampleSource}
         axisRanges={pane.axisRanges}
         legendActions={legendActions}
         activeScenarioId={activeScenarioId}

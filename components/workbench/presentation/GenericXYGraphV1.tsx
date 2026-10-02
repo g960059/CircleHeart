@@ -1,10 +1,13 @@
 import React from "react";
 import type { ExperimentGraphAxisRangesV2 } from "@/studio/contracts/v2/content";
 import type { WorkbenchScalarSampleV3 } from "./WorkbenchScalarSampleV3";
+import { GenericXYCanvasPathCacheV1, genericXYCanvasViewportV1 } from "./GenericXYCanvasRendererV1";
+import { drawWorkbenchStaticCanvasLayerV3, readWorkbenchCanvasThemeVariablesV3, useResponsiveCanvasFrameV3 } from "./WorkbenchCanvasRuntimeV3";
+import type { WorkbenchGraphSampleSourceV3 } from "./WorkbenchGraphSampleSourceV3";
 import { recordWorkbenchPerformanceDurationV3, recordWorkbenchPerformanceValueV3, workbenchPerformanceDiagnosticsEnabledV3, workbenchPerformanceNowV3 } from "../runtime/WorkbenchPerformanceDiagnosticsV3";
 
 export type GenericXYTraceV1 = Readonly<{ id: string; label: string; color: string;
-  samples: readonly WorkbenchScalarSampleV3[]; xOutputId: string; yOutputId: string; cyclePhaseOutputId: string }>;
+  samples: readonly WorkbenchScalarSampleV3[]; scenarioId?: string; xOutputId: string; yOutputId: string; cyclePhaseOutputId: string }>;
 
 /** Both coordinates come from the same accepted observation. Missing data and
  * changed epochs break the path; no synthetic closure or PVA interpretation. */
@@ -24,57 +27,6 @@ export function genericXYSegmentsV1(trace: GenericXYTraceV1): readonly (readonly
   }
   if (current.length) segments.push(current);
   return segments;
-}
-
-/** Display-only coalescing of consecutive points inside one subpixel SVG cell.
- * Retain first/last and both coordinate extrema in their original order. Every
- * retained pair is an observed point, and a path never crosses a segment gap.
- * The exact sample buffer and all analysis consumers remain unreduced. */
-export function genericXYDisplayPathV1(segment: readonly (readonly [number, number])[],
-  projectX: (value: number) => number, projectY: (value: number) => number): string {
-  return coalescedXYPathV1(segment, projectX, projectY,
-    point => `${projectX(point[0]).toFixed(2)},${projectY(point[1]).toFixed(2)}`);
-}
-
-function coalescedXYPathV1(segment: readonly (readonly [number, number])[],
-  projectX: (value: number) => number, projectY: (value: number) => number,
-  coordinates: (point: readonly [number, number]) => string): string {
-  let path = "", first = 0, last = -1, minXIndex = 0, maxXIndex = 0, minYIndex = 0, maxYIndex = 0;
-  let cellX = NaN, cellY = NaN, minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  const append = (index: number) => {
-    const point = segment[index]!;
-    path += `${path.length === 0 ? "M" : " L"}${coordinates(point)}`;
-  };
-  const flush = () => {
-    if (last < first) return;
-    if ((minXIndex === first || minXIndex === last) && (maxXIndex === first || maxXIndex === last)
-      && (minYIndex === first || minYIndex === last) && (maxYIndex === first || maxYIndex === last)) {
-      append(first); if (last !== first) append(last); return;
-    }
-    const indices = [first, minXIndex, maxXIndex, minYIndex, maxYIndex, last].sort((a, b) => a - b);
-    let previous = -1;
-    for (const index of indices) {
-      if (index === previous) continue;
-      append(index);
-      previous = index;
-    }
-  };
-  for (let index = 0; index < segment.length; index++) {
-    const point = segment[index]!, x = projectX(point[0]), y = projectY(point[1]);
-    const nextCellX = Math.floor(x / .75), nextCellY = Math.floor(y / .75);
-    if (nextCellX !== cellX || nextCellY !== cellY) {
-      flush(); first = minXIndex = maxXIndex = minYIndex = maxYIndex = index;
-      cellX = nextCellX; cellY = nextCellY; minX = maxX = x; minY = maxY = y;
-    } else {
-      if (x < minX) { minX = x; minXIndex = index; }
-      if (x > maxX) { maxX = x; maxXIndex = index; }
-      if (y < minY) { minY = y; minYIndex = index; }
-      if (y > maxY) { maxY = y; maxYIndex = index; }
-    }
-    last = index;
-  }
-  flush();
-  return path;
 }
 
 const XY_CHUNK_SAMPLE_COUNT_V1 = 256;
@@ -100,7 +52,6 @@ export class GenericXYGeometryCacheV1 {
   #nextChunkId = 0;
   readonly #immutableSamples = new WeakSet<WorkbenchScalarSampleV3>();
   #chunks = new Map<WorkbenchScalarSampleV3, XYGeometryChunkV1>();
-  #paths = new WeakMap<XYGeometryChunkV1, Readonly<{ scaleX: number; scaleY: number; path: string }>>();
 
   #immutableObservation(sample: WorkbenchScalarSampleV3): boolean {
     if (this.#immutableSamples.has(sample)) return true;
@@ -169,107 +120,99 @@ export class GenericXYGeometryCacheV1 {
     return { chunks, minimumX, maximumX, minimumY, maximumY, pointCount };
   }
 
-  paths(geometry: GenericXYGeometryV1, scaleX: number, scaleY: number): readonly string[] {
-    // Round toward finer cells: a coalesced cell never exceeds .75 screen units.
-    // Small automatic-domain changes update only the SVG transform, without
-    // repeatedly serializing unchanged history. Large zoom changes reproject.
-    const cellScale = (scale: number) => 2 ** Math.ceil(Math.log2(Math.abs(scale)));
-    const cellScaleX = cellScale(scaleX), cellScaleY = cellScale(scaleY);
-    return geometry.chunks.map(chunk => {
-      const existing = this.#paths.get(chunk);
-      if (existing?.scaleX === cellScaleX && existing.scaleY === cellScaleY) return existing.path;
-      const path = chunk.segments.map(segment => coalescedXYPathV1(segment,
-        value => value * cellScaleX, value => value * cellScaleY,
-        point => `${point[0]},${point[1]}`)).join(" ");
-      this.#paths.set(chunk, { scaleX: cellScaleX, scaleY: cellScaleY, path });
-      return path;
-    });
-  }
 }
 
-export function genericXYResponsiveStrokeWidthV1(width: number, height: number): number {
-  return 1.7 * Math.min(width / 620, height / 375);
-}
-
-const GenericXYPathV1 = React.memo(function GenericXYPathV1({ path, color, strokeWidth }: Readonly<{ path: string; color: string; strokeWidth: number }>) {
-  return <path d={path} fill="none" stroke={color} strokeWidth={strokeWidth} vectorEffect="non-scaling-stroke" />;
-});
-
-export function GenericXYGraphV1({ traces, xLabel, yLabel, axisRanges, actions }: Readonly<{
+export function GenericXYGraphV1({ traces, xLabel, yLabel, axisRanges, actions, sampleSource }: Readonly<{
   traces: readonly GenericXYTraceV1[]; xLabel: string; yLabel: string; axisRanges?: ExperimentGraphAxisRangesV2; actions?: React.ReactNode;
+  sampleSource?: WorkbenchGraphSampleSourceV3;
 }>) {
-  const clipId = React.useId().replace(/:/g, "");
-  const svgRef = React.useRef<SVGSVGElement>(null);
-  const [strokeWidth, setStrokeWidth] = React.useState(1.7);
-  React.useLayoutEffect(() => {
-    const svg = svgRef.current;
-    if (!svg) return;
-    const update = (width: number, height: number) => {
-      if (width > 0 && height > 0) setStrokeWidth(genericXYResponsiveStrokeWidthV1(width, height));
-    };
-    const measure = () => { const bounds = svg.getBoundingClientRect(); update(bounds.width, bounds.height); };
-    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(entries => {
-      const bounds = entries[0]?.contentRect;
-      if (bounds) update(bounds.width, bounds.height);
-    }) : null;
-    observer?.observe(svg); window.addEventListener("resize", measure); measure();
-    return () => { observer?.disconnect(); window.removeEventListener("resize", measure); };
-  }, []);
-  const diagnostics = workbenchPerformanceDiagnosticsEnabledV3(), started = diagnostics ? workbenchPerformanceNowV3() : 0;
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const canvasPaths = React.useRef(new GenericXYCanvasPathCacheV1());
   const caches = React.useRef(new Map<string, GenericXYGeometryCacheV1>());
-  const activeIds = new Set(traces.map(trace => trace.id));
-  for (const id of caches.current.keys()) if (!activeIds.has(id)) caches.current.delete(id);
-  const data = traces.map(trace => {
-    let cache = caches.current.get(trace.id);
-    if (!cache) { cache = new GenericXYGeometryCacheV1(); caches.current.set(trace.id, cache); }
-    return { trace, cache, geometry: cache.project(trace) };
-  });
-  let minimumX = Infinity, maximumX = -Infinity, minimumY = Infinity, maximumY = -Infinity, pointCount = 0;
-  for (const { geometry } of data) {
-    minimumX = Math.min(minimumX, geometry.minimumX); maximumX = Math.max(maximumX, geometry.maximumX);
-    minimumY = Math.min(minimumY, geometry.minimumY); maximumY = Math.max(maximumY, geometry.maximumY); pointCount += geometry.pointCount;
-  }
-  const bounds = (axis: 0 | 1) => {
-    const manual = axisRanges?.[axis === 0 ? "x" : "y"];
-    if (manual) return [manual.minimum, manual.maximum] as const;
-    const minimum = axis === 0 ? minimumX : minimumY, maximum = axis === 0 ? maximumX : maximumY;
-    if (!Number.isFinite(minimum)) return [0, 1] as const;
-    const pad = Math.max((maximum - minimum) * .08, Math.abs(minimum) * .02, .01);
-    return [minimum - pad, maximum + pad] as const;
-  };
-  const [xmin, xmax] = bounds(0), [ymin, ymax] = bounds(1);
-  const x = (v: number) => 70 + (v - xmin) / (xmax - xmin) * 520;
-  const y = (v: number) => 320 - (v - ymin) / (ymax - ymin) * 285;
-  const scaleX = 520 / (xmax - xmin), scaleY = -285 / (ymax - ymin);
-  const paths = data.flatMap(({ trace, cache, geometry }) => cache.paths(geometry, scaleX, scaleY).map((path, index) => ({
-    id: `${trace.id}-${geometry.chunks[index]!.id}`, color: trace.color, path,
-  })));
-  if (diagnostics) {
-    recordWorkbenchPerformanceDurationV3("svg.generic-xy.prepare", workbenchPerformanceNowV3() - started);
-    recordWorkbenchPerformanceValueV3("svg.generic-xy.source-points", pointCount);
-    recordWorkbenchPerformanceValueV3("svg.generic-xy.path-characters", paths.reduce((sum, item) => sum + item.path.length, 0));
-  }
-  const tick = (v: number) => Number(v.toPrecision(3)).toString();
-  return <div className="flex h-full min-h-0 flex-col" data-testid="generic-xy-graph"
-    data-x-minimum={xmin} data-x-maximum={xmax} data-y-minimum={ymin} data-y-maximum={ymax}>
+  const draw = React.useCallback((context: CanvasRenderingContext2D, width: number, height: number) => {
+    const diagnostics = workbenchPerformanceDiagnosticsEnabledV3(), started = diagnostics ? workbenchPerformanceNowV3() : 0;
+    const activeIds = new Set(traces.map(trace => trace.id));
+    for (const id of caches.current.keys()) if (!activeIds.has(id)) caches.current.delete(id);
+    const data = traces.map(trace => {
+      let cache = caches.current.get(trace.id);
+      if (!cache) { cache = new GenericXYGeometryCacheV1(); caches.current.set(trace.id, cache); }
+      const samples = sampleSource && trace.scenarioId ? sampleSource.getSamples(trace.scenarioId) : trace.samples;
+      return { trace, geometry: cache.project(samples === trace.samples ? trace : { ...trace, samples }) };
+    });
+    let minimumX = Infinity, maximumX = -Infinity, minimumY = Infinity, maximumY = -Infinity, pointCount = 0;
+    for (const { geometry } of data) {
+      minimumX = Math.min(minimumX, geometry.minimumX); maximumX = Math.max(maximumX, geometry.maximumX);
+      minimumY = Math.min(minimumY, geometry.minimumY); maximumY = Math.max(maximumY, geometry.maximumY); pointCount += geometry.pointCount;
+    }
+    const bounds = (axis: 0 | 1) => {
+      const manual = axisRanges?.[axis === 0 ? "x" : "y"];
+      if (manual) return [manual.minimum, manual.maximum] as const;
+      const minimum = axis === 0 ? minimumX : minimumY, maximum = axis === 0 ? maximumX : maximumY;
+      if (!Number.isFinite(minimum)) return [0, 1] as const;
+      const pad = Math.max((maximum - minimum) * .08, Math.abs(minimum) * .02, .01);
+      return [minimum - pad, maximum + pad] as const;
+    };
+    const [xmin, xmax] = bounds(0), [ymin, ymax] = bounds(1);
+    const scaleX = 520 / (xmax - xmin), scaleY = -285 / (ymax - ymin);
+    const viewport = genericXYCanvasViewportV1(width, height);
+    const [gridColor, textColor] = readWorkbenchCanvasThemeVariablesV3(containerRef.current, [
+      ["--wb-text-subtle", "#64748b"], ["--wb-text-muted", "#94a3b8"],
+    ]);
+    if (diagnostics) {
+      recordWorkbenchPerformanceDurationV3("canvas.generic-xy.prepare", workbenchPerformanceNowV3() - started);
+      recordWorkbenchPerformanceValueV3("canvas.generic-xy.source-points", pointCount);
+    }
+    drawWorkbenchStaticCanvasLayerV3(context, width, height, [xmin, xmax, ymin, ymax, xLabel, yLabel, gridColor, textColor, pointCount === 0], layer => {
+      layer.save();
+      layer.translate(viewport.offsetX, viewport.offsetY); layer.scale(viewport.scale, viewport.scale);
+      layer.font = "11px ui-sans-serif, system-ui, sans-serif";
+      layer.lineWidth = 1;
+      const tick = (value: number) => Number(value.toPrecision(3)).toString();
+      for (let i = 0; i < 5; i++) {
+        const x = 70 + 520 * i / 4, y = 320 - 285 * i / 4;
+        layer.globalAlpha = .18; layer.strokeStyle = gridColor;
+        layer.beginPath(); layer.moveTo(x, 35); layer.lineTo(x, 320); layer.moveTo(70, y); layer.lineTo(590, y); layer.stroke();
+        layer.globalAlpha = 1; layer.fillStyle = gridColor;
+        layer.textAlign = "center"; layer.fillText(tick(xmin + (xmax - xmin) * i / 4), x, 338);
+        layer.textAlign = "right"; layer.fillText(tick(ymin + (ymax - ymin) * i / 4), 62, y + 4);
+      }
+      layer.font = "12px ui-sans-serif, system-ui, sans-serif"; layer.fillStyle = textColor; layer.textAlign = "center";
+      layer.fillText(xLabel, 330, 365);
+      if (pointCount === 0) layer.fillText("—", 330, 180);
+      layer.translate(18, 180); layer.rotate(-Math.PI / 2); layer.fillText(yLabel, 0, 0);
+      layer.restore();
+    });
+    context.save();
+    context.translate(viewport.offsetX, viewport.offsetY); context.scale(viewport.scale, viewport.scale);
+    context.beginPath(); context.rect(70, 35, 520, 285); context.clip();
+    context.lineWidth = 1.7;
+    let retainedPointCount = 0;
+    for (const { trace, geometry } of data) {
+      const projected = canvasPaths.current.project(geometry, {
+        scaleX, scaleY, offsetX: 70 - xmin * scaleX, offsetY: 320 - ymin * scaleY,
+        displayScale: viewport.scale,
+      });
+      context.strokeStyle = trace.color; context.stroke(projected.path);
+      retainedPointCount += projected.pointCount;
+    }
+    context.restore();
+    if (canvasRef.current) canvasRef.current.dataset.displayPointCount = String(retainedPointCount);
+    if (rootRef.current) {
+      for (const [key, value] of Object.entries({ xMinimum: xmin, xMaximum: xmax, yMinimum: ymin, yMaximum: ymax })) {
+        if (rootRef.current.dataset[key] !== String(value)) rootRef.current.dataset[key] = String(value);
+      }
+    }
+    if (diagnostics) recordWorkbenchPerformanceValueV3("canvas.generic-xy.display-points", retainedPointCount);
+  }, [traces, xLabel, yLabel, axisRanges, sampleSource]);
+  useResponsiveCanvasFrameV3(containerRef, canvasRef, draw, "generic-xy", sampleSource?.subscribe);
+  return <div ref={rootRef} className="flex h-full min-h-0 flex-col" data-testid="generic-xy-graph">
     <div className="flex flex-wrap items-center gap-3 px-3 py-2 text-xs text-wb-muted">
       {traces.map(trace => <span key={trace.id}><span style={{ color: trace.color }}>● </span>{trace.label}</span>)}{actions}
     </div>
-    <svg ref={svgRef} viewBox="0 0 620 375" className="min-h-0 flex-1" role="img" aria-label={`${yLabel} / ${xLabel}`}>
-      <defs><clipPath id={clipId}><rect x="70" y="35" width="520" height="285" /></clipPath></defs>
-      {Array.from({ length: 5 }, (_, i) => {
-        const xv = xmin + (xmax - xmin) * i / 4, yv = ymin + (ymax - ymin) * i / 4;
-        return <g key={i} className="text-wb-subtle" fontSize="11" fill="currentColor">
-          <path d={`M${x(xv)},35V320 M70,${y(yv)}H590`} stroke="currentColor" opacity=".18" />
-          <text x={x(xv)} y="338" textAnchor="middle">{tick(xv)}</text><text x="62" y={y(yv) + 4} textAnchor="end">{tick(yv)}</text>
-        </g>;
-      })}
-      <g clipPath={`url(#${clipId})`}><g transform={`matrix(${scaleX} 0 0 ${scaleY} ${70 - xmin * scaleX} ${320 - ymin * scaleY})`}>
-        {paths.map(path => <GenericXYPathV1 key={path.id} path={path.path} color={path.color} strokeWidth={strokeWidth} />)}
-      </g></g>
-      <g className="text-wb-muted" fill="currentColor" fontSize="12"><text x="330" y="365" textAnchor="middle">{xLabel}</text>
-        <text transform="translate(18 180) rotate(-90)" textAnchor="middle">{yLabel}</text></g>
-      {pointCount === 0 && <text x="330" y="180" textAnchor="middle" className="text-wb-muted" fill="currentColor" fontSize="12">—</text>}
-    </svg>
+    <div ref={containerRef} className="relative min-h-0 flex-1">
+      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" data-testid="generic-xy-canvas" role="img" aria-label={`${yLabel} / ${xLabel}`} />
+    </div>
   </div>;
 }

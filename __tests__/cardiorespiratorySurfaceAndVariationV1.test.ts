@@ -1,5 +1,5 @@
 import { boundCardiorespiratoryControlV1 } from "@/components/workbench/CardiorespiratoryControlBoundsV1";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import inherited from "@/studio/integrations/mainWireIntegratedV3/MainWireIntegratedStudioStaticCaseSurfaceV5";
 import surface from "@/studio/integrations/cardiorespiratoryV1/CardiorespiratorySurfaceV1";
 import { assertModelSurfaceReleaseManifestV1 } from "@/studio/contracts/v2/modelSurface";
@@ -7,7 +7,8 @@ import { CARDIORESPIRATORY_PRIMITIVE_SIGNALS_V1, CARDIORESPIRATORY_PRIMITIVE_CON
 import { resolveStudioItemPresentationV1 } from "@/studio/presentation/StudioItemPresentationCatalogV1";
 import { CardiorespiratoryVariationCollectorV1, CARDIORESPIRATORY_VARIATION_REQUIRED_IDS_V1, evaluateCardiorespiratoryVariationV1, CARDIORESPIRATORY_VARIATION_OUTPUT_IDS_V1 as ids, type CardiorespiratoryVariationSampleV1 as Sample } from "@/analysis/methods/cardiorespiratory/CardiorespiratoryVariationV1";
 import type { RegisteredModelPresentationBatchV2, StudioSimulationAnalysisV2 } from "@/studio/contracts/v2/simulation";
-import { genericXYResponsiveStrokeWidthV1, GenericXYGeometryCacheV1, type GenericXYGeometryV1, type GenericXYTraceV1, genericXYDisplayPathV1, genericXYSegmentsV1 } from "@/components/workbench/presentation/GenericXYGraphV1";
+import { GenericXYGeometryCacheV1, type GenericXYGeometryV1, type GenericXYTraceV1, genericXYSegmentsV1 } from "@/components/workbench/presentation/GenericXYGraphV1";
+import { GenericXYCanvasPathCacheV1, forEachGenericXYDisplayPointV1, genericXYCanvasViewportV1 } from "@/components/workbench/presentation/GenericXYCanvasRendererV1";
 import { WorkbenchScenarioPresentationSampleStoreV3 } from "@/components/workbench/presentation/WorkbenchPresentationSampleStoreV3";
 const samples = (): Sample[] => Array.from({ length: 10001 }, (_, i) => {
   const t = i * .002, cardiacPhase = i % 500 / 500, amplitude = [40, 50, 60, 50, 40][Math.floor(i / 500) % 5]!;
@@ -63,24 +64,30 @@ it("generic XY uses simultaneous observations and breaks gaps, phases and epochs
   expect(genericXYSegmentsV1({ id: "t", label: "t", color: "red", samples: observations, xOutputId: "x", yOutputId: "y", cyclePhaseOutputId: "phase" })).toEqual([[[0, 10], [1, 11]], [[2, 12]], [[3, 13], [4, 14]], [[5, 15]]]);
 });
 
+const xyDisplayPoints = (points: readonly (readonly [number, number])[]) => {
+  const result: (readonly [number, number])[] = [];
+  forEachGenericXYDisplayPointV1(points, x => x, y => y, point => result.push(point));
+  return result;
+};
+
 it("XY display coalescing retains paired coordinate extrema and chronology inside each subpixel run", () => {
   const points: readonly (readonly [number, number])[] = Object.freeze([
     [.3, .3], [.31, .31], [.1, .2], [.2, .1], [.6, .4], [.4, .65], [.42, .42], [.4, .4],
   ].map(p => Object.freeze(p) as readonly [number, number]));
-  expect(genericXYDisplayPathV1(points, x => x, y => y)).toBe("M0.30,0.30 L0.10,0.20 L0.20,0.10 L0.60,0.40 L0.40,0.65 L0.40,0.40");
+  expect(xyDisplayPoints(points)).toEqual([[.3, .3], [.1, .2], [.2, .1], [.6, .4], [.4, .65], [.4, .4]]);
   expect(points).toHaveLength(8);
-  expect(genericXYDisplayPathV1([[.1, .1], [1, .1], [.2, .2]], x => x, y => y)).toBe("M0.10,0.10 L1.00,0.10 L0.20,0.20");
+  expect(xyDisplayPoints([[.1, .1], [1, .1], [.2, .2]])).toEqual([[.1, .1], [1, .1], [.2, .2]]);
 });
 
 it("XY display coalescing bounds a dense subpixel path without reducing its source or joining missing-data gaps", () => {
   const points: readonly [number, number][] = Array.from({ length: 10000 }, (_, i) => [i / 9999 * .5, .2]);
-  expect(genericXYDisplayPathV1(points, x => x, y => y)).toBe("M0.00,0.20 L0.50,0.20");
+  expect(xyDisplayPoints(points)).toEqual([[0, .2], [.5, .2]]);
   expect(points).toHaveLength(10000);
   const samples = [0, 1, 2].map(i => ({ inputEpoch: 0, acceptedRevision: i, acceptedTimeSec: i * .002, presentationTimeSec: i * .002,
     values: { x: i, y: i === 1 ? NaN : i, phase: .5 } }));
   const paths = genericXYSegmentsV1({ id: "t", label: "t", color: "red", samples, xOutputId: "x", yOutputId: "y", cyclePhaseOutputId: "phase" })
-    .map(segment => genericXYDisplayPathV1(segment, x => x, y => y));
-  expect(paths).toEqual(["M0.00,0.00", "M2.00,2.00"]);
+    .map(xyDisplayPoints);
+  expect(paths).toEqual([[[0, 0]], [[2, 2]]]);
 });
 
 it("PPV/SVV collector is batch-partition invariant and invalidates a broken stream immediately", () => {
@@ -163,15 +170,13 @@ describe("incremental XY display geometry", () => {
     for (let i = 1; i < before.chunks.length - 1; i++) expect(after.chunks[i]).toBe(before.chunks[i]);
   });
 
-  it("reuses interior observed geometry and path strings while both window ends move", () => {
+  it("reuses interior observed geometry while both window ends move", () => {
     const trace = makeTrace(), cache = new GenericXYGeometryCacheV1();
     const before = cache.project({ ...trace, samples: trace.samples.slice(0, 1500) });
-    const beforePaths = cache.paths(before, 250, -250);
     const window = { ...trace, samples: trace.samples.slice(8, 1508) }, after = cache.project(window);
     assertGeometry(after, window);
     expect(after.chunks.slice(1, -1)).toEqual(before.chunks.slice(1, -1));
     for (let i = 1; i < after.chunks.length - 1; i++) expect(after.chunks[i]).toBe(before.chunks[i]);
-    expect(cache.paths(after, 251, -251).slice(1, -1)).toEqual(beforePaths.slice(1, -1));
     expect(trace.samples).toHaveLength(1800);
   });
 
@@ -218,18 +223,58 @@ describe("incremental XY display geometry", () => {
     assertGeometry(cache.project(changed), changed);
   });
 
-  it("preserves the responsive viewBox stroke scale independently of the data-axis transform", () => {
-    expect(genericXYResponsiveStrokeWidthV1(620, 375)).toBe(1.7);
-    expect(genericXYResponsiveStrokeWidthV1(1240, 750)).toBe(3.4);
-    expect(genericXYResponsiveStrokeWidthV1(620, 187.5)).toBe(.85);
-    expect(genericXYResponsiveStrokeWidthV1(310, 375)).toBe(.85);
+
+});
+
+
+describe("retained XY Canvas display", () => {
+  it("aligns Canvas with the SVG axes for wide and tall dock panels", () => {
+    expect(genericXYCanvasViewportV1(1240, 750)).toEqual({ scale: 2, offsetX: 0, offsetY: 0 });
+    expect(genericXYCanvasViewportV1(1240, 375)).toEqual({ scale: 1, offsetX: 310, offsetY: 0 });
+    expect(genericXYCanvasViewportV1(620, 750)).toEqual({ scale: 1, offsetX: 0, offsetY: 187.5 });
   });
 
-  it("keeps exact observed coordinate strings and refines coalescing on a large zoom", () => {
-    const trace = makeTrace(), cache = new GenericXYGeometryCacheV1(), geometry = cache.project(trace);
-    const zoomed = cache.paths(geometry, 10000, -10000).join(" ");
-    expect(zoomed).toContain(`M${trace.samples[0]!.values.x},${trace.samples[0]!.values.y}`);
-    expect(cache.paths(geometry, .001, -.001).join(" ").length).toBeLessThan(zoomed.length);
-    expect(cache.paths(geometry, 10000, -10000).join(" ")).toBe(zoomed);
+  it("emits original paired extrema in order, including a reversal inside one visual cell", () => {
+    const points = [[.3, .3], [.1, .2], [.2, .1], [.6, .4], [.4, .65], [.4, .4]] as const;
+    const retained: (readonly [number, number])[] = [];
+    forEachGenericXYDisplayPointV1(points, x => x, y => y, point => retained.push(point));
+    expect(retained).toEqual(points);
+    for (let i = 0; i < points.length; i++) expect(retained[i]).toBe(points[i]);
+  });
+
+  it("reuses native chunk paths while retaining gaps, exact pairs, and a fixed-stroke affine projection", () => {
+    type Command = readonly ["M" | "L", number, number];
+    class Matrix { constructor(readonly values: number[]) {} }
+    let lineCommands = 0;
+    class NativePath {
+      commands: Command[] = [];
+      moveTo(x: number, y: number) { this.commands.push(["M", x, y]); lineCommands++; }
+      lineTo(x: number, y: number) { this.commands.push(["L", x, y]); lineCommands++; }
+      addPath(path: NativePath, matrix: Matrix) {
+        const [a, b, c, d, e, f] = matrix.values;
+        for (const [kind, x, y] of path.commands) this.commands.push([kind, a * x + c * y + e, b * x + d * y + f]);
+      }
+    }
+    vi.stubGlobal("Path2D", NativePath); vi.stubGlobal("DOMMatrix", Matrix);
+    try {
+      const samples = Array.from({ length: 550 }, (_, i) => Object.freeze({ inputEpoch: i < 256 ? 0 : 1,
+        acceptedRevision: i, acceptedTimeSec: .002 * i, presentationTimeSec: .002 * i,
+        values: Object.freeze({ x: i, y: 2 * i, phase: i / 1000 }) }));
+      const trace = { id: "t", label: "t", color: "red", samples, xOutputId: "x", yOutputId: "y", cyclePhaseOutputId: "phase" };
+      const geometry = new GenericXYGeometryCacheV1().project(trace), cache = new GenericXYCanvasPathCacheV1();
+      const projection = { scaleX: 2, scaleY: -3, offsetX: 70, offsetY: 320, displayScale: 1 };
+      const first = cache.project(geometry, projection);
+      const commands = (first.path as unknown as NativePath).commands;
+      expect(commands[0]).toEqual(["M", 70, 320]);
+      expect(commands).toContainEqual(["M", 582, -1216]);
+      expect(commands).not.toContainEqual(["L", 582, -1216]);
+      for (const [, x, y] of commands) expect((320 - y) / 3).toBe(2 * ((x - 70) / 2));
+      const initiallyBuilt = lineCommands;
+      const shifted = cache.project(geometry, { ...projection, offsetX: 71 });
+      expect(lineCommands).toBe(initiallyBuilt);
+      expect((shifted.path as unknown as NativePath).commands[0]).toEqual(["M", 71, 320]);
+      cache.project(geometry, { ...projection, scaleX: 20 });
+      expect(lineCommands).toBeGreaterThan(initiallyBuilt);
+    } finally { vi.unstubAllGlobals(); }
   });
 });

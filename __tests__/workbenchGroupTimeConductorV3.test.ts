@@ -56,18 +56,20 @@ describe("WorkbenchGroupTimeConductorV3", () => {
   });
 
   it.each([
-    { laneCount: 3, adaptive: true, firstIntervalMs: 16, firstFrames: 8 },
-    { laneCount: 4, adaptive: true, firstIntervalMs: 32, firstFrames: 16 },
-    { laneCount: 5, adaptive: true, firstIntervalMs: 32, firstFrames: 16 },
-    { laneCount: 5, adaptive: false, firstIntervalMs: 16, firstFrames: 8 },
-  ])("retains every common-prefix observation for $laneCount lanes with adaptive=$adaptive", async ({ laneCount, adaptive, firstIntervalMs, firstFrames }) => {
+    { laneCount: 3, adaptive: true, multiplier: 1 as const, firstIntervalMs: 16, firstFrames: 8 },
+    { laneCount: 4, adaptive: true, multiplier: 1 as const, firstIntervalMs: 16, firstFrames: 8 },
+    { laneCount: 5, adaptive: true, multiplier: 2 as const, firstIntervalMs: 32, firstFrames: 16 },
+    { laneCount: 1, adaptive: true, multiplier: 2 as const, firstIntervalMs: 32, firstFrames: 16 },
+    { laneCount: 5, adaptive: false, multiplier: 2 as const, firstIntervalMs: 16, firstFrames: 8 },
+  ])("retains every common-prefix observation for $laneCount lanes with adaptive=$adaptive", async ({ laneCount, adaptive, multiplier, firstIntervalMs, firstFrames }) => {
     const clock = new GroupClockV3(), onFrames = vi.fn<(frames: readonly Frame[]) => void>();
     const times = Array.from({ length: laneCount }, () => 0);
     const conductor = new WorkbenchGroupTimeConductorV3({
       lanes: () => times.map((time, index) => laneV3(String(index), time, async count => {
         const frames = framesV3(String(index), times[index]!, count); times[index] = frames.at(-1)!.timeSec; return frames;
       })), onFrames, onError: vi.fn(), nowMs: clock.now, schedule: clock.schedule, cancel: clock.cancel,
-      adaptPresentationCadenceToLaneCount: adaptive,
+      adaptPresentationCadenceToLoad: adaptive,
+      presentationCadence: { start() {}, stop() {}, multiplier: () => multiplier },
     });
     conductor.play(); await clock.advanceBy(0); await clock.advanceBy(firstIntervalMs - 1);
     expect(onFrames).not.toHaveBeenCalled();
@@ -90,7 +92,7 @@ describe("WorkbenchGroupTimeConductorV3", () => {
     }
   });
 
-  it("changes display cadence only after an in-flight lane group has paused and flushed", async () => {
+  it("keeps 60 Hz delivery across a lane-count change when measured pressure is low", async () => {
     const clock = new GroupClockV3(), onFrames = vi.fn<(frames: readonly Frame[]) => void>();
     let times = [0, 0, 0]; let deferred = true;
     const replies = times.map(() => deferredV3<readonly Frame[]>());
@@ -99,7 +101,7 @@ describe("WorkbenchGroupTimeConductorV3", () => {
         const frames = deferred ? await replies[index]!.promise : framesV3(String(index), times[index]!, count);
         times[index] = frames.at(-1)!.timeSec; return frames;
       })), onFrames, onError: vi.fn(), nowMs: clock.now, schedule: clock.schedule, cancel: clock.cancel,
-      adaptPresentationCadenceToLaneCount: true,
+      adaptPresentationCadenceToLoad: true,
     });
     conductor.play(); await clock.advanceBy(0);
     expect(() => conductor.lanesChanged()).toThrow(/only while paused/);
@@ -110,12 +112,47 @@ describe("WorkbenchGroupTimeConductorV3", () => {
     expect(onFrames).toHaveBeenCalledOnce(); expect(onFrames.mock.calls[0]![0]).toHaveLength(48);
     deferred = false; times.push(.032); conductor.lanesChanged(); onFrames.mockClear();
     conductor.play(); await clock.advanceBy(0); await clock.advanceBy(16);
-    expect(onFrames).not.toHaveBeenCalled(); await clock.advanceBy(16);
-    expect(onFrames).toHaveBeenCalledOnce(); expect(onFrames.mock.calls[0]![0]).toHaveLength(64);
+    expect(onFrames).toHaveBeenCalledOnce(); expect(onFrames.mock.calls[0]![0]).toHaveLength(32);
     await conductor.pause(); times = times.slice(0, 3); conductor.lanesChanged(); onFrames.mockClear();
     conductor.play(); await clock.advanceBy(0); await clock.advanceBy(16);
     expect(onFrames).toHaveBeenCalledOnce(); expect(onFrames.mock.calls[0]![0]).toHaveLength(24);
     await conductor.pause();
+  });
+
+  it("changes live display cadence without changing group time or dropping accepted observations", async () => {
+    const clock = new GroupClockV3();
+    const times = [0, 0, 0, 0, 0];
+    const onFrames = vi.fn<(frames: readonly Frame[]) => void>();
+    let multiplier: 1 | 2 = 1;
+    const cadence = { start: vi.fn(), stop: vi.fn(), multiplier: () => multiplier };
+    const conductor = new WorkbenchGroupTimeConductorV3({
+      lanes: () => times.map((time, lane) => laneV3(String(lane), time, async count => {
+        const frames = framesV3(String(lane), time, count);
+        times[lane] = frames.at(-1)!.timeSec; return frames;
+      })), onFrames, onError: vi.fn(), nowMs: clock.now,
+      schedule: clock.schedule, cancel: clock.cancel,
+      adaptPresentationCadenceToLoad: true, presentationCadence: cadence,
+    });
+    conductor.play();
+    for (let i = 0; i < 80; i++) {
+      if (i === 11) multiplier = 2;
+      if (i === 49) multiplier = 1;
+      await clock.advanceBy(7);
+    }
+    await conductor.pause();
+    expect(cadence.start).toHaveBeenCalledOnce();
+    expect(cadence.stop).toHaveBeenCalledOnce();
+    for (const [batch] of onFrames.mock.calls) {
+      expect(new Set(times.map((_, lane) => batch.filter(f => f.laneId === String(lane)).at(-1)!.timeSec)).size).toBe(1);
+    }
+    const all = onFrames.mock.calls.flatMap(([frames]) => frames);
+    for (let lane = 0; lane < times.length; lane++) {
+      const frames = all.filter(frame => frame.laneId === String(lane));
+      expect(frames).toHaveLength(Math.round(times[lane]! / .002));
+      frames.forEach((frame, i) => expect(frame.timeSec).toBeCloseTo((i + 1) * .002, 10));
+    }
+    // Numerical pacing retains its requested 1x trajectory through both changes.
+    expect(times[0]).toBeCloseTo(.576, 10);
   });
 
   it("uses measured short 32-step requests at high rates without inflating capacity or dropping samples", async () => {
@@ -172,7 +209,7 @@ describe("WorkbenchGroupTimeConductorV3", () => {
         if (lane === 4) clock.elapse(count * perStepMs);
         const frames = framesV3(String(lane), times[lane]!, count); times[lane] = frames.at(-1)!.timeSec; return frames;
       })), onFrames: frames => published.push(...frames), onError: vi.fn(), nowMs: clock.now, schedule: clock.schedule, cancel: clock.cancel,
-      adaptComputeBatchToPlaybackRate: true, adaptPresentationCadenceToLaneCount: true, performanceRecorder: performance,
+      adaptComputeBatchToPlaybackRate: true, adaptPresentationCadenceToLoad: true, performanceRecorder: performance,
     });
     const complete = async (count: number) => {
       const target = sizes[0]!.length + count;

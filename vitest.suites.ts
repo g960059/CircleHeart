@@ -188,6 +188,9 @@ export const prSmokeTests = [
 ] as const;
 
 export const regressionTests = [
+  "__tests__/workbenchSweepRenderV1.test.ts",
+  "__tests__/workbenchPresentationCadenceV3.test.ts",
+  "__tests__/cardiorespiratoryBrowserMeasurementsV1.test.ts",
   "__tests__/cardiorespiratoryPulmonaryHydraulicsV1.test.ts",
   "__tests__/cardiorespiratoryDevCompositionV1.test.ts",
   "__tests__/cardiorespiratoryBreathMetricsV1.test.ts",

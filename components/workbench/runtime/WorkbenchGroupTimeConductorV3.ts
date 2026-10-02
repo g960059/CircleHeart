@@ -2,6 +2,7 @@ import {
   getWorkbenchPerformanceRecorderV3,
   type WorkbenchPerformanceRecorderV3,
 } from "./WorkbenchPerformanceDiagnosticsV3";
+import { createWorkbenchPresentationCadenceV3, type WorkbenchPresentationCadenceV3 } from "./WorkbenchPresentationCadenceV3";
 
 export const WORKBENCH_MINIMUM_PLAYBACK_RATE_V3 = 0.25;
 export const WORKBENCH_MAXIMUM_PLAYBACK_RATE_V3 = 5;
@@ -60,8 +61,9 @@ export type WorkbenchGroupTimeConductorDependenciesV3<TFrame> = Readonly<{
   presentationIntervalMs?: number;
   /** Frames released per lane and interval at 1× playback. */
   maximumPresentationFramesPerLane?: number;
-  /** Smooth-profile policy only: large comparisons paint at about 30 Hz. */
-  adaptPresentationCadenceToLaneCount?: boolean;
+  /** Smooth-profile policy: sustained measured pressure may use 32 ms delivery. */
+  adaptPresentationCadenceToLoad?: boolean;
+  presentationCadence?: WorkbenchPresentationCadenceV3;
   /** Smooth-profile policy only: measured short requests may batch 32 ticks. */
   adaptComputeBatchToPlaybackRate?: boolean;
   minimumPlaybackRate?: number;
@@ -103,7 +105,7 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
   readonly #batchSteps: number;
   readonly #presentationIntervalMs: number;
   readonly #maximumPresentationFramesPerLane: number;
-  readonly #adaptPresentationCadenceToLaneCount: boolean;
+  readonly #presentationCadence: WorkbenchPresentationCadenceV3 | undefined;
   readonly #adaptComputeBatchToPlaybackRate: boolean;
   #recentGroupMsPerStep: number[] = [];
   #acceleratedBatch = false;
@@ -147,7 +149,8 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
     this.#presentationIntervalMs = dependencies.presentationIntervalMs ?? 16;
     this.#maximumPresentationFramesPerLane =
       dependencies.maximumPresentationFramesPerLane ?? 8;
-    this.#adaptPresentationCadenceToLaneCount = dependencies.adaptPresentationCadenceToLaneCount ?? false;
+    this.#presentationCadence = dependencies.adaptPresentationCadenceToLoad
+      ? dependencies.presentationCadence ?? createWorkbenchPresentationCadenceV3() : undefined;
     this.#adaptComputeBatchToPlaybackRate = dependencies.adaptComputeBatchToPlaybackRate ?? false;
     this.#minimumPlaybackRate = dependencies.minimumPlaybackRate
       ?? WORKBENCH_MINIMUM_PLAYBACK_RATE_V3;
@@ -261,7 +264,9 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
       throw new Error("Workbench group TimeConductor is disposed");
     }
     if (this.#running) return;
-    this.#updatePresentationCadence(requireGroupLanesV3(this.#lanes()).length);
+    requireGroupLanesV3(this.#lanes());
+    this.#presentationCadence?.start();
+    this.#updatePresentationCadence();
     this.#running = true;
     this.#lastPresentationWallMs = this.#nowMs();
     this.#nextPumpWallMs = this.#lastPresentationWallMs;
@@ -273,6 +278,7 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
   async pause(): Promise<void> {
     if (this.#disposed) return;
     this.#running = false;
+    this.#presentationCadence?.stop();
     this.#cancelPumpTimer();
     await this.#inFlight;
     this.#cancelPresentationTimer();
@@ -287,7 +293,6 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
     }
     this.#cancelPresentationTimer();
     this.#flushAllPresentation(this.#nowMs());
-    this.#updatePresentationCadence(this.#lanes().length);
     this.#resetCapacityEstimate();
     this.#publishRateState();
     return this.playbackRateState();
@@ -297,6 +302,7 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
     if (this.#disposed) return;
     this.#disposed = true;
     this.#running = false;
+    this.#presentationCadence?.stop();
     this.#cancelPumpTimer();
     this.#cancelPresentationTimer();
     this.#pendingPresentation = [];
@@ -379,6 +385,7 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
       this.#queuePump(Math.max(0, this.#nextPumpWallMs - this.#nowMs()));
     }).catch((error) => {
       this.#running = false;
+      this.#presentationCadence?.stop();
       this.#cancelPumpTimer();
       this.#cancelPresentationTimer();
       if (!this.#disposed) this.#flushAllPresentation(this.#nowMs());
@@ -559,12 +566,12 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
     );
   }
 
-  #updatePresentationCadence(laneCount: number): void {
-    // Four or more live lanes multiply React, Canvas and SVG paint work. Only
-    // the smooth profile opts into a 32-ms display boundary: doubling its
-    // released frame credit preserves the same complete accepted-time prefix.
-    // Numerical requests, analysis samples, and pause/control flushes are unchanged.
-    this.#presentationCadenceMultiplier = this.#adaptPresentationCadenceToLaneCount && laneCount >= 4 ? 2 : 1;
+  #updatePresentationCadence(): void {
+    const multiplier = this.#presentationCadence?.multiplier() ?? 1;
+    if (multiplier === this.#presentationCadenceMultiplier) return;
+    this.#presentationCadenceMultiplier = multiplier;
+    this.#cancelPresentationTimer();
+    this.#performance.incrementCounter("scheduler.group.presentation-cadence-changes");
   }
 
   #presentationFramesPerInterval(): number {
@@ -596,6 +603,10 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
             * framesPerInterval * this.#playbackRate,
       );
       this.#flushCreditedPresentation();
+      // Settle the old interval before changing cadence. Credit accrues at the
+      // same accepted samples / wall second under either interval, and an
+      // existing fractional interval remains anchored at the same boundary.
+      this.#updatePresentationCadence();
     }
     if (
       this.#pendingPresentation.length === 0
@@ -605,7 +616,8 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
     ) return;
     const remainingMs = Math.max(
       0,
-      intervalMs - (this.#nowMs() - this.#lastPresentationWallMs),
+      this.#presentationIntervalMs * this.#presentationCadenceMultiplier
+        - (this.#nowMs() - this.#lastPresentationWallMs),
     );
     this.#presentationTimer = this.#schedule(() => {
       this.#presentationTimer = undefined;

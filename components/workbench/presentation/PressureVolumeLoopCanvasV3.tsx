@@ -29,7 +29,7 @@ import {
 } from "./WorkbenchScalarSampleV3";
 import {
   positiveModuloV3,
-} from "./SweepingWaveformCanvasV3";
+} from "./sweep/SweepWaveformGeometryV1";
 import {
   drawWorkbenchStaticCanvasLayerV3,
   workbenchCanvasObjectIdentityV3,
