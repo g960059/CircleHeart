@@ -75,7 +75,9 @@
     "test:browser:public": "VITE_SUPABASE_URL=https://public-content.test VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_fixture npm run build && playwright test --config playwright.public-content.config.ts",
     "build:model:cardiorespiratory-dev": "npm run compile:model:cardiorespiratory-dev && vite-node --script tools/model/buildCardiorespiratoryDevV1.ts",
     "compile:model:cardiorespiratory-dev": "vite-node --script tools/model/compileCardiorespiratoryExecutionPlanV1.ts --write --summary",
-    "prepare:model:cardiorespiratory-dev": "vite-node --script tools/scientific/prepareCardiorespiratoryDevPresetsV1.ts",
+    "prepare:model:cardiorespiratory-dev": "vite-node --script tools/scientific/prepareCardiorespiratoryStartupPresetsV1.ts",
+    "prepare:model:cardiorespiratory-dev:strict": "vite-node --script tools/scientific/prepareCardiorespiratoryDevPresetsV1.ts",
+    "calibrate:model:cardiorespiratory-startup": "vite-node --script tools/scientific/calibrateCardiorespiratoryStartupV1.ts",
     "qualify:model:cardiorespiratory-dev": "vite-node --script tools/scientific/qualifyCardiorespiratoryDevV1.ts",
     "benchmark:model:cardiorespiratory-dev": "vite-node --script tools/performance/benchmarkCardiorespiratoryDevV1.ts",
     "benchmark:workbench:cardiorespiratory-dev": "vite-node --script tools/performance/measureCardiorespiratoryBrowserV1.ts"

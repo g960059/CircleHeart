@@ -5,24 +5,26 @@ import { CARDIORESPIRATORY_OUTPUT_IDS_V1 as ids } from "@/studio/integrations/ca
 import { CARDIORESPIRATORY_VARIATION_OUTPUT_IDS_V1 as variation } from "@/analysis/methods/cardiorespiratory/CardiorespiratoryVariationV1";
 import { resolveStudioItemPresentationV1 } from "@/studio/presentation/StudioItemPresentationCatalogV1";
 
-export function cardiorespiratoryDevLimitationsV1(locale: string, prepared = false): readonly string[] {
+export type CardiorespiratoryDevPreparationV1 = "cold" | "startup-ready";
+
+export function cardiorespiratoryDevLimitationsV1(locale: string, preparation: CardiorespiratoryDevPreparationV1 = "cold"): readonly string[] {
   return locale.startsWith("ja") ? [
     "心肺連成モデルの開発版です。定量的な臨床妥当性は未検証です。",
-    prepared ? "初期状態とpresetは全体系の数値的整定を事前に確認しています。生理学的な教育目標への適合は未検証です。" : "初期状態は全体系の整定を確認していません。開始直後には血行動態・血液ガスの過渡応答が生じます。",
+    preparation === "startup-ready" ? "初期状態とpresetは事前にwarmupし、表示開始時の過渡変化を確認しています。呼吸に伴う変動や緩やかな血液ガスの変化は続きます。全体系の厳密な整定・生理学的な教育目標への適合は未検証です。" : "初期状態は全体系の整定を確認していません。開始直後には血行動態・血液ガスの過渡応答が生じます。",
     "2つの機能的肺領域、固定容量・完全混合の気道死腔、簡略化した血液ガス化学を用います。EtCO₂・呼吸中枢・虚血による収縮性低下は扱いません。",
     "既存の oxygen.* 項目とコントローラは独立した定常Fick推定です。動的ガス状態は cardiorespiratory.* の項目で確認してください。PEEPの新旧コントローラは同期します。",
     "酸素運搬波形は瞬時大動脈酸素流束です。心筋酸素需要は設定値であり、PVA推定からのフィードバックではありません。",
     "TBV・PV・PVA・Starling解析は、取得時の胸腔内圧・各肺胞圧・肺血管抵抗を固定した機械解析です。呼吸中の平均応答や全身ガスの整定を表すものではありません。PPV/SVVは連続する完全な受動的調節呼吸3回を要し、輸液反応性の判定には用いません。",
   ] : [
     "Development cardiorespiratory model; quantitative clinical validity has not been established.",
-    prepared ? "Initial state and presets have passed offline full-system numerical settlement. Physiological teaching targets have not been qualified." : "Full-system settlement of the initial state has not been verified. Early hemodynamic and blood gas transients are expected.",
+    preparation === "startup-ready" ? "Initial state and presets are warmed up offline and checked for startup transients. Respiratory variation and gradual blood gas drift may continue. Full-system settlement and physiological teaching targets have not been qualified." : "Full-system settlement of the initial state has not been verified. Early hemodynamic and blood gas transients are expected.",
     "Two functional lung units, a fixed mixed conducting deadspace, and reduced blood gas chemistry. No distributed anatomical dead space, EtCO₂, respiratory controller, or ischemic contractility feedback.",
     "Inherited oxygen.* outputs and controls remain an independent steady Fick estimate. Dynamic gas state uses cardiorespiratory.* outputs. Both PEEP controls are synchronized.",
     "Oxygen delivery waveform is instantaneous aortic oxygen flux. Myocardial oxygen demand is prescribed and does not receive feedback from PVA estimates.",
     "TBV, PV, PVA and Starling analysis hold captured pleural pressure, individual alveolar pressures and pulmonary resistances fixed. Results are not breathing averages or whole-system gas settlement. PPV/SVV require three complete passive controlled breaths and do not classify fluid responsiveness.",
   ];
 }
-export function adaptCardiorespiratoryDefaultSurfaceV1(base: ExperimentSurfaceV2, contract: ModelContractV2, locale: string, prepared = false): ExperimentSurfaceV2 {
+export function adaptCardiorespiratoryDefaultSurfaceV1(base: ExperimentSurfaceV2, contract: ModelContractV2, locale: string, preparation: CardiorespiratoryDevPreparationV1 = "cold"): ExperimentSurfaceV2 {
   const ja = locale.startsWith("ja");
   const label = (kind: "control" | "output", itemId: string) => resolveStudioItemPresentationV1({ kind, itemId, locale, fallbackEnglishLabel: itemId }).label;
   const graphs: readonly [string, string, string][] = [
@@ -50,5 +52,5 @@ export function adaptCardiorespiratoryDefaultSurfaceV1(base: ExperimentSurfaceV2
     outputPanes: [...base.outputPanes.map(p => ({ ...p, items: p.items.map(i => i.outputId.startsWith("oxygen.") ? { ...i, label: `${ja ? "定常推定" : "Steady estimate"} · ${i.label}` } : i) })), outputPane],
     controlPanes: [...base.controlPanes.map(p => ({ ...p, items: p.items.map(i => i.controlId.startsWith("oxygen.") ? { ...i, label: `${ja ? "定常Fick推定のみ" : "Steady Fick only"} · ${i.label}` } : i) })), controls("respiratory-controls", ja ? "人工呼吸・自発努力" : "Ventilation and effort", ["ventilator.mode", "ventilator.rate", "ventilator.peep", "ventilator.inspiratory-time", "ventilator.pressure-control", "ventilator.tidal-volume", "ventilator.pressure-limit", "gas.inspired-o2", "airway.deadspace", "muscle.pressure"], 1),
       controls("lung-gas-controls", ja ? "肺領域・酸素需要" : "Lung units and oxygen demand", ["lung.1.elastance", "lung.2.elastance", "lung.1.recruitment-preset", "lung.2.recruitment-preset", "lung.1.equilibration", "lung.2.equilibration", "gas.hemoglobin", "oxygen.systemic-demand", "oxygen.myocardial-demand", "gas.respiratory-quotient"], 2)],
-    note: { text: cardiorespiratoryDevLimitationsV1(locale, prepared).join("\n\n") } };
+    note: { text: cardiorespiratoryDevLimitationsV1(locale, preparation).join("\n\n") } };
 }

@@ -198,6 +198,8 @@ export const regressionTests = [
   "__tests__/cardiorespiratorySettlementV1.test.ts",
   "__tests__/cardiorespiratoryPreparationWorkersV1.test.ts",
   "__tests__/cardiorespiratoryMechanicalAnalysisV1.test.ts",
+  "__tests__/cardiorespiratoryStartupCalibrationV1.test.ts",
+  "__tests__/cardiorespiratoryStartupReadinessV1.test.ts",
   "__tests__/cardiorespiratoryFixedRespiratoryMechanicalV1.test.ts",
   "__tests__/cardiorespiratoryDevCompositionV1.test.ts",
   "__tests__/cardiorespiratoryBreathMetricsV1.test.ts",

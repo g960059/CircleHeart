@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCardiorespiratoryDevReleaseV1, CARDIORESPIRATORY_HOT_PATH_INTEGRITY_TIER_V1 } from "@/studio/integrations/cardiorespiratoryV1/CardiorespiratoryExactModelV1";
 import { DEFAULT_CARDIORESPIRATORY_FIXTURE_V1 } from "@/engine/cardiorespiratory/CardiorespiratoryFixtureV1";
-import { fingerprintCardiorespiratoryPreparationSourceV1 } from "../scientific/CardiorespiratoryPreparationSourceV1";
+import { fingerprintCardiorespiratoryStartupSourceV1 } from "../scientific/CardiorespiratoryStartupSourceV1";
 import { readCardiorespiratoryPreparedDevInputsV1 } from "./CardiorespiratoryPreparedDevInputsV1";
 import { studioCanonicalJsonStringify } from "@/domain/json/CanonicalJson";
 
@@ -17,10 +17,7 @@ const args = process.argv.slice(2);
 if (args.length !== 0 && (args.length !== 2 || args[0] !== "--prepared-directory" || !args[1])) {
   throw new Error("Usage: buildCardiorespiratoryDevV1.ts [--prepared-directory <local archive directory>]");
 }
-const preparationSource = args.length ? await fingerprintCardiorespiratoryPreparationSourceV1(root) : undefined;
-const prepared = preparationSource ? await readCardiorespiratoryPreparedDevInputsV1({
-  root, directory: path.resolve(args[1]!), source: preparationSource,
-}) : undefined;
+const preparationSource = args.length ? await fingerprintCardiorespiratoryStartupSourceV1(root) : undefined;
 const result = await build({ absWorkingDir: root,
   entryPoints: ["studio/integrations/cardiorespiratoryV1/CardiorespiratoryExactModelV1.entry.ts"],
   bundle: true, write: false, platform: "browser", format: "esm", target: "es2022",
@@ -28,6 +25,9 @@ const result = await build({ absWorkingDir: root,
   alias: { "@": root }, metafile: true, legalComments: "none", logLevel: "warning" });
 const artifact = result.outputFiles[0].contents;
 const artifactRevisionId = createHash("sha256").update(artifact).digest("hex");
+const prepared = preparationSource ? await readCardiorespiratoryPreparedDevInputsV1({
+  root, directory: path.resolve(args[1]!), source: preparationSource, artifactRevisionId,
+}) : undefined;
 const sourceHash = createHash("sha256");
 const sourceInputs: { path: string; sha256: string }[] = [];
 for (const file of Object.keys(result.metafile!.inputs).sort()) {
@@ -36,7 +36,7 @@ for (const file of Object.keys(result.metafile!.inputs).sort()) {
   sourceInputs.push({ path: file, sha256: createHash("sha256").update(source).digest("hex") });
 }
 const { manifest } = createCardiorespiratoryDevReleaseV1();
-if (preparationSource && studioCanonicalJsonStringify(await fingerprintCardiorespiratoryPreparationSourceV1(root))
+if (preparationSource && studioCanonicalJsonStringify(await fingerprintCardiorespiratoryStartupSourceV1(root))
   !== studioCanonicalJsonStringify(preparationSource)) {
   throw new Error("Preparation source changed during the dev build; prepared evidence cannot be attached");
 }

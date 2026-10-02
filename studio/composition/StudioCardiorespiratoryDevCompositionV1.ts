@@ -38,21 +38,25 @@ export function loadCardiorespiratoryDevClientCompositionV1(): Promise<StudioCli
     const modelSurface = composeModelSurfacePresentationBundleV1({ kernel: bundle.manifest, surfaceRelease, stage: "dev", analysis });
     const prepared = ("prepared" in bundle ? bundle.prepared : undefined) as undefined | {
       defaultCheckpoint: ScenarioCheckpointV2; presets: readonly ScenarioPresetV2[];
+      preparation: { interpretation: string; sourceSha256: string };
     };
+    if (prepared && (prepared.preparation?.interpretation !== "startup-readiness-not-full-settlement"
+      || !/^[a-f0-9]{64}$/.test(prepared.preparation.sourceSha256))) throw new Error("Invalid development startup preparation");
+    const preparation = prepared ? "startup-ready" as const : "cold" as const;
     const checkpoint = prepared ? validateScenarioCaptureV2({ fixture: bundle.defaultFixture, checkpoint: prepared.defaultCheckpoint }).checkpoint : undefined;
     const presets = prepared?.presets.map(value => {
       const preset = validateScenarioPresetV2(value);
       if (preset.modelId !== bundle.manifest.modelId) throw new Error("Prepared preset model identity mismatch");
       return preset;
     });
-    const limitations = (locale: string) => cardiorespiratoryDevLimitationsV1(locale, checkpoint !== undefined);
+    const limitations = (locale: string) => cardiorespiratoryDevLimitationsV1(locale, preparation);
     return Object.freeze({ exactModel: Object.freeze({ modelId: bundle.manifest.modelId, stage: "dev" as const,
       defaultFixture: bundle.defaultFixture as StudioJsonValueV2, ...(checkpoint ? { defaultCheckpoint: checkpoint } : {}),
       fixtureProjection: CARDIORESPIRATORY_DEV_FIXTURE_PROJECTION_V1, workerReleaseTicket }),
       ...(presets ? { presets: Object.freeze(presets) } : {}),
       modelSurface,
       presentation: Object.freeze({
-        adaptDefaultSurface: (base: ExperimentSurfaceV2, locale: string) => adaptCardiorespiratoryDefaultSurfaceV1(base, modelSurface.contract, locale, checkpoint !== undefined),
+        adaptDefaultSurface: (base: ExperimentSurfaceV2, locale: string) => adaptCardiorespiratoryDefaultSurfaceV1(base, modelSurface.contract, locale, preparation),
         limitations,
       }) });
   }).catch(error => { pending = undefined; throw error; });

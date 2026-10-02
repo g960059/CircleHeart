@@ -1,4 +1,7 @@
 import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
+
+const prepared = JSON.parse(readFileSync(new URL("../data/model-releases/cardiorespiratory-dev-v1/bundle.json", import.meta.url), "utf8")).prepared;
 
 test("@desktop cardiorespiratory Model Lab runs its own Worker, renders XY data and applies a warm PEEP edit", async ({ page }, testInfo) => {
   const errors: string[] = [];
@@ -9,7 +12,7 @@ test("@desktop cardiorespiratory Model Lab runs its own Worker, renders XY data 
   await expect(root).toHaveAttribute("data-model-id", "circleheart.cardiorespiratory-dev-v1");
   await expect(page.getByTestId("cardiorespiratory-dev-notice")).toBeVisible();
   await expect(page.getByTestId("v3-save-experiment")).toHaveCount(0);
-  await expect.poll(async () => Number(await root.getAttribute("data-model-time-sec"))).toBeGreaterThan(.3);
+  await expect.poll(async () => Number(await root.getAttribute("data-model-time-sec"))).toBeGreaterThan(prepared.defaultCheckpoint.acceptedTimeSec + .3);
   await page.getByTestId("v3-playback-toggle").click();
   const graphs = page.getByRole("region", { name: "グラフエリア" });
   await graphs.getByText("呼吸圧・肺気量ループ", { exact: true }).click();
@@ -55,7 +58,7 @@ test("@desktop cardiorespiratory mechanical analysis runs through its artifact W
   page.on("pageerror", error => errors.push(error.message));
   await page.goto("/ja/dev/model-lab?model=cardiorespiratory", { waitUntil: "domcontentloaded" });
   const root = page.getByTestId("v3-dockview-workbench");
-  await expect.poll(async () => Number(await root.getAttribute("data-model-time-sec"))).toBeGreaterThan(.3);
+  await expect.poll(async () => Number(await root.getAttribute("data-model-time-sec"))).toBeGreaterThan(prepared.defaultCheckpoint.acceptedTimeSec + .3);
   await page.getByTestId("v3-playback-toggle").click();
   const time = await root.getAttribute("data-model-time-sec");
   const graphs = page.getByRole("region", { name: "グラフエリア" });
@@ -66,6 +69,29 @@ test("@desktop cardiorespiratory mechanical analysis runs through its artifact W
   await expect.poll(async () => Number(await structural.getAttribute("data-starling-completed-points")), { timeout: 90_000 })
     .toBeGreaterThan(1);
   await expect(root).toHaveAttribute("data-model-time-sec", time!);
+  await expect(page.getByTestId("workbench-calculation-stopped")).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+
+test("@desktop cardiorespiratory default and four presets load offline startup checkpoints", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.goto("/ja/dev/model-lab?model=cardiorespiratory", { waitUntil: "domcontentloaded" });
+  const root = page.getByTestId("v3-dockview-workbench");
+  await expect.poll(async () => Number(await root.getAttribute("data-model-time-sec"))).toBeGreaterThanOrEqual(prepared.defaultCheckpoint.acceptedTimeSec);
+  await page.getByTestId("v3-playback-toggle").click();
+  await expect(page.getByTestId("cardiorespiratory-dev-notice")).toContainText("定量的妥当性は未検証");
+  const manager = page.getByTestId("workbench-scenario-manager-v3");
+  for (const preset of prepared.presets) {
+    await manager.getByRole("button", { name: "Presetから追加", exact: true }).click();
+    const picker = page.getByTestId("workbench-preset-picker-v3");
+    await picker.locator(`[data-preset-id="${preset.presetId}"]`).getByRole("button").first().click();
+    await expect(picker).toHaveCount(0);
+    await expect.poll(async () => Number(await root.getAttribute("data-model-time-sec"))).toBe(preset.capture.checkpoint.acceptedTimeSec);
+    await expect(manager.getByTitle(preset.title, { exact: true })).toHaveAttribute("aria-pressed", "true");
+  }
+  await expect(manager.locator(".workbench-scenario-row")).toHaveCount(5);
   await expect(page.getByTestId("workbench-calculation-stopped")).toHaveCount(0);
   expect(errors).toEqual([]);
 });
