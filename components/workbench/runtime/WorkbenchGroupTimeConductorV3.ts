@@ -16,6 +16,9 @@ const WORKBENCH_GROUP_CAPACITY_PERCENTILE_V3 = 0.2;
 const WORKBENCH_GROUP_OVERLOAD_SAMPLE_COUNT_V3 = 12;
 const WORKBENCH_GROUP_OVERLOAD_RATIO_V3 = 0.9;
 const WORKBENCH_GROUP_REQUALIFICATION_SAMPLE_COUNT_V3 = 24;
+const WORKBENCH_ACCELERATED_BATCH_SAMPLE_COUNT_V3 = 4;
+const WORKBENCH_ACCELERATED_BATCH_ENTER_MS_V3 = 20;
+const WORKBENCH_ACCELERATED_BATCH_EXIT_MS_V3 = 24;
 
 export type WorkbenchGroupTimeConductorTimerV3 = ReturnType<typeof setTimeout>;
 
@@ -57,6 +60,10 @@ export type WorkbenchGroupTimeConductorDependenciesV3<TFrame> = Readonly<{
   presentationIntervalMs?: number;
   /** Frames released per lane and interval at 1× playback. */
   maximumPresentationFramesPerLane?: number;
+  /** Smooth-profile policy only: large comparisons paint at about 30 Hz. */
+  adaptPresentationCadenceToLaneCount?: boolean;
+  /** Smooth-profile policy only: measured short requests may batch 32 ticks. */
+  adaptComputeBatchToPlaybackRate?: boolean;
   minimumPlaybackRate?: number;
   maximumPlaybackRate?: number;
   performanceRecorder?: WorkbenchPerformanceRecorderV3;
@@ -96,6 +103,11 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
   readonly #batchSteps: number;
   readonly #presentationIntervalMs: number;
   readonly #maximumPresentationFramesPerLane: number;
+  readonly #adaptPresentationCadenceToLaneCount: boolean;
+  readonly #adaptComputeBatchToPlaybackRate: boolean;
+  #recentGroupMsPerStep: number[] = [];
+  #acceleratedBatch = false;
+  #presentationCadenceMultiplier = 1;
   readonly #minimumPlaybackRate: number;
   readonly #maximumPlaybackRate: number;
   readonly #performance: WorkbenchPerformanceRecorderV3;
@@ -135,6 +147,8 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
     this.#presentationIntervalMs = dependencies.presentationIntervalMs ?? 16;
     this.#maximumPresentationFramesPerLane =
       dependencies.maximumPresentationFramesPerLane ?? 8;
+    this.#adaptPresentationCadenceToLaneCount = dependencies.adaptPresentationCadenceToLaneCount ?? false;
+    this.#adaptComputeBatchToPlaybackRate = dependencies.adaptComputeBatchToPlaybackRate ?? false;
     this.#minimumPlaybackRate = dependencies.minimumPlaybackRate
       ?? WORKBENCH_MINIMUM_PLAYBACK_RATE_V3;
     this.#maximumPlaybackRate = dependencies.maximumPlaybackRate
@@ -201,6 +215,7 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
       throw new Error("Workbench playback rate exceeds the calibrated limit");
     }
     this.#playbackRate = rate;
+    if (rate < 2) this.#acceleratedBatch = false;
     this.#userSelected = true;
     this.#performanceLimited = false;
     this.#steadyCapacitySamples = [];
@@ -216,7 +231,7 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
         const nextBoundaryDemand = Math.max(
           1,
           Math.floor(
-            this.#maximumPresentationFramesPerLane * this.#playbackRate
+            this.#presentationFramesPerInterval() * this.#playbackRate
               + 1e-9,
           ),
         );
@@ -228,7 +243,7 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
         this.#nextPumpWallMs = this.#inFlight === undefined
           ? changedAtMs + (startImmediately
             ? 0
-            : this.#batchModelDurationMs() / this.#playbackRate)
+            : this.#batchModelDurationMs(this.#selectBatchSteps()) / this.#playbackRate)
           : changedAtMs;
         if (this.#inFlight === undefined) {
           this.#queuePump(
@@ -246,7 +261,7 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
       throw new Error("Workbench group TimeConductor is disposed");
     }
     if (this.#running) return;
-    requireGroupLanesV3(this.#lanes());
+    this.#updatePresentationCadence(requireGroupLanesV3(this.#lanes()).length);
     this.#running = true;
     this.#lastPresentationWallMs = this.#nowMs();
     this.#nextPumpWallMs = this.#lastPresentationWallMs;
@@ -272,6 +287,7 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
     }
     this.#cancelPresentationTimer();
     this.#flushAllPresentation(this.#nowMs());
+    this.#updatePresentationCadence(this.#lanes().length);
     this.#resetCapacityEstimate();
     this.#publishRateState();
     return this.playbackRateState();
@@ -314,13 +330,19 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
     ) return;
     const lanes = requireGroupLanesV3(this.#lanes());
     const startedAtMs = this.#nowMs();
+    if (this.#performance.enabled) this.#performance.recordDuration(
+      "scheduler.group.pump-start-lateness", Math.max(0, startedAtMs - this.#nextPumpWallMs),
+    );
     const capacityEligibleAtStart = this.#capacityMeasurementEligible();
+    // Capture the count for this operation. Mid-flight rate changes affect the
+    // next request, never its validation, measured capacity, or accepted prefix.
+    const batchSteps = this.#selectBatchSteps();
     const operation = Promise.all(lanes.map(async (lane) => {
-      const frames = await lane.advance(this.#batchSteps);
+      const frames = await lane.advance(batchSteps);
       validateGroupLaneAdvanceV3(
         lane,
         frames,
-        this.#batchSteps,
+        batchSteps,
         this.#presentationDtSec,
       );
       return Object.freeze({ laneId: lane.laneId, frames });
@@ -330,18 +352,19 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
       if (!(groupWallMs >= 0) || !Number.isFinite(groupWallMs)) {
         throw new Error("Workbench group clock moved backwards");
       }
-      this.#recordGroupCompletion(groupWallMs, lanes.length);
-      this.#updateCapacityEstimate(
-        groupWallMs,
-        capacityEligibleAtStart,
-      );
+      this.#recordGroupCompletion(groupWallMs, lanes.length, batchSteps);
+      this.#recordBatchCost(groupWallMs, batchSteps, capacityEligibleAtStart && this.#capacityMeasurementEligible());
+      this.#updateCapacityEstimate(groupWallMs, capacityEligibleAtStart, batchSteps);
       this.#pendingPresentation.push({
         laneFrames: Object.freeze(laneFrames),
         offset: 0,
       });
       this.#recordPresentationBacklog();
       this.#publishOrSchedulePresentation(completedAtMs);
-      const intervalMs = this.#batchModelDurationMs() / this.#playbackRate;
+      if (this.#performance.enabled) this.#performance.recordDuration(
+        "scheduler.group.presentation-publication", this.#nowMs() - completedAtMs,
+      );
+      const intervalMs = this.#batchModelDurationMs(batchSteps) / this.#playbackRate;
       // Carry the absolute deadline forward while it is still current, so
       // ordinary sub-millisecond timer lateness cannot accumulate into a
       // visible rate error at high playback multipliers. A suspended tab or
@@ -351,7 +374,9 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
         this.#nextPumpWallMs + intervalMs,
         completedAtMs,
       );
-      this.#queuePump(Math.max(0, this.#nextPumpWallMs - completedAtMs));
+      // Publication may synchronously materialize samples and notify mounted
+      // panes. Its elapsed time consumes this deadline, not another idle delay.
+      this.#queuePump(Math.max(0, this.#nextPumpWallMs - this.#nowMs()));
     }).catch((error) => {
       this.#running = false;
       this.#cancelPumpTimer();
@@ -367,33 +392,63 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
     this.#inFlight = operation;
   }
 
-  #recordGroupCompletion(groupWallMs: number, laneCount: number): void {
+  #selectBatchSteps(): number {
+    if (!this.#adaptComputeBatchToPlaybackRate || this.#batchSteps !== 16 || this.#playbackRate < 2
+      || this.#recentGroupMsPerStep.length < WORKBENCH_ACCELERATED_BATCH_SAMPLE_COUNT_V3) {
+      this.#acceleratedBatch = false;
+      return this.#batchSteps;
+    }
+    // The slowest of four recent group round trips includes transport and main
+    // thread reply delay. Hysteresis avoids toggling around a single threshold;
+    // one slow sample immediately returns to 16 until the recent window clears.
+    const predictedMs = Math.max(...this.#recentGroupMsPerStep) * 32;
+    this.#acceleratedBatch = predictedMs <= (this.#acceleratedBatch
+      ? WORKBENCH_ACCELERATED_BATCH_EXIT_MS_V3 : WORKBENCH_ACCELERATED_BATCH_ENTER_MS_V3);
+    return this.#acceleratedBatch ? 32 : this.#batchSteps;
+  }
+
+  #recordBatchCost(groupWallMs: number, batchSteps: number, eligible: boolean): void {
+    if (!eligible || groupWallMs <= 0) {
+      this.#recentGroupMsPerStep = [];
+      this.#acceleratedBatch = false;
+      return;
+    }
+    this.#recentGroupMsPerStep.push(groupWallMs / batchSteps);
+    if (this.#recentGroupMsPerStep.length > WORKBENCH_ACCELERATED_BATCH_SAMPLE_COUNT_V3) this.#recentGroupMsPerStep.shift();
+    if (this.#performance.enabled) this.#performance.recordValue(
+      "scheduler.group.predicted-32-step-wall-ms", Math.max(...this.#recentGroupMsPerStep) * 32,
+    );
+  }
+
+  #recordGroupCompletion(groupWallMs: number, laneCount: number, batchSteps: number): void {
     if (!this.#performance.enabled) return;
     this.#performance.recordDuration(
       "scheduler.group.worker-round-trip",
       groupWallMs,
     );
     this.#performance.recordValue("scheduler.group.live-lane-count", laneCount);
+    this.#performance.recordValue("scheduler.group.presentation-interval-ms", this.#presentationIntervalMs * this.#presentationCadenceMultiplier);
     this.#performance.recordValue(
       "scheduler.group.requested-batch-steps",
-      this.#batchSteps,
+      batchSteps,
     );
     this.#performance.recordValue(
       "scheduler.group.model-time-ratio",
       groupWallMs === 0
         ? this.#maximumPlaybackRate
-        : this.#batchModelDurationMs() / groupWallMs,
+        : this.#batchModelDurationMs(batchSteps) / groupWallMs,
     );
   }
 
   #updateCapacityEstimate(
     groupWallMs: number,
     capacityEligibleAtStart: boolean,
+    batchSteps: number,
   ): void {
     // A zero-duration synthetic clock is valid in unit tests but carries no
     // throughput information.
     if (groupWallMs <= 0) return;
-    const measuredCapacity = this.#batchModelDurationMs() / groupWallMs;
+    const measuredCapacity = this.#batchModelDurationMs(batchSteps) / groupWallMs;
     // A batch starting while hidden is not evidence even if the tab becomes
     // visible before its reply. Ordinary background contention IS evidence.
     const eligible = capacityEligibleAtStart
@@ -504,30 +559,41 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
     );
   }
 
+  #updatePresentationCadence(laneCount: number): void {
+    // Four or more live lanes multiply React, Canvas and SVG paint work. Only
+    // the smooth profile opts into a 32-ms display boundary: doubling its
+    // released frame credit preserves the same complete accepted-time prefix.
+    // Numerical requests, analysis samples, and pause/control flushes are unchanged.
+    this.#presentationCadenceMultiplier = this.#adaptPresentationCadenceToLaneCount && laneCount >= 4 ? 2 : 1;
+  }
+
+  #presentationFramesPerInterval(): number {
+    return this.#maximumPresentationFramesPerLane * this.#presentationCadenceMultiplier;
+  }
+
   #publishOrSchedulePresentation(nowMs: number): void {
     if (this.#pendingPresentation.length === 0) return;
-    if (this.#presentationIntervalMs === 0) {
+    const intervalMs = this.#presentationIntervalMs * this.#presentationCadenceMultiplier;
+    const framesPerInterval = this.#presentationFramesPerInterval();
+    if (intervalMs === 0) {
       this.#cancelPresentationTimer();
       this.#flushAllPresentation(nowMs);
       return;
     }
     const elapsedIntervals = Math.floor(
       Math.max(0, nowMs - this.#lastPresentationWallMs)
-        / this.#presentationIntervalMs,
+        / intervalMs,
     );
     if (elapsedIntervals > 0) {
-      this.#lastPresentationWallMs +=
-        elapsedIntervals * this.#presentationIntervalMs;
+      this.#lastPresentationWallMs += elapsedIntervals * intervalMs;
       this.#presentationFrameCreditPerLane = Math.min(
         Math.max(
-          this.#batchSteps,
-          this.#maximumPresentationFramesPerLane
-            * this.#maximumPlaybackRate,
+          this.#adaptComputeBatchToPlaybackRate && this.#batchSteps === 16 ? 32 : this.#batchSteps,
+          framesPerInterval * this.#maximumPlaybackRate,
         ),
         this.#presentationFrameCreditPerLane
           + elapsedIntervals
-            * this.#maximumPresentationFramesPerLane
-            * this.#playbackRate,
+            * framesPerInterval * this.#playbackRate,
       );
       this.#flushCreditedPresentation();
     }
@@ -539,8 +605,7 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
     ) return;
     const remainingMs = Math.max(
       0,
-      this.#presentationIntervalMs
-        - (this.#nowMs() - this.#lastPresentationWallMs),
+      intervalMs - (this.#nowMs() - this.#lastPresentationWallMs),
     );
     this.#presentationTimer = this.#schedule(() => {
       this.#presentationTimer = undefined;
@@ -566,15 +631,21 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
   }
 
   #flushPresentationSlice(maximumFramesPerLane: number): number {
-    const pending = this.#pendingPresentation[0];
-    if (pending === undefined) return 0;
-    const available = pending.laneFrames[0]!.frames.length - pending.offset;
-    const count = Math.min(maximumFramesPerLane, available);
-    const frames = pending.laneFrames.flatMap(({ frames: laneFrames }) =>
-      laneFrames.slice(pending.offset, pending.offset + count));
-    pending.offset += count;
-    if (pending.offset === pending.laneFrames[0]!.frames.length) {
-      this.#pendingPresentation.shift();
+    const frames: TFrame[] = [];
+    let count = 0;
+    // One visible interval can cover several exact Worker batches at faster
+    // playback. Commit their whole aligned prefix once, retaining every sample
+    // in lane order without notifying/materializing the same panes repeatedly.
+    while (count < maximumFramesPerLane && this.#pendingPresentation.length > 0) {
+      const pending = this.#pendingPresentation[0]!;
+      const available = pending.laneFrames[0]!.frames.length - pending.offset;
+      const take = Math.min(maximumFramesPerLane - count, available);
+      for (const lane of pending.laneFrames) {
+        for (let i = pending.offset; i < pending.offset + take; i++) frames.push(lane.frames[i]!);
+      }
+      pending.offset += take;
+      count += take;
+      if (pending.offset === pending.laneFrames[0]!.frames.length) this.#pendingPresentation.shift();
     }
     if (!this.#disposed && frames.length > 0) {
       this.#onFrames(Object.freeze(frames));
@@ -608,6 +679,8 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
   }
 
   #resetCapacityEstimate(): void {
+    this.#recentGroupMsPerStep = [];
+    this.#acceleratedBatch = false;
     this.#maximumRate = null;
     this.#performanceLimited = false;
     this.#calibrationMeasurementCount = 0;
@@ -624,8 +697,8 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
     this.#onPlaybackRateChange?.(state);
   }
 
-  #batchModelDurationMs(): number {
-    return this.#batchSteps * this.#presentationDtSec * 1_000;
+  #batchModelDurationMs(batchSteps: number): number {
+    return batchSteps * this.#presentationDtSec * 1_000;
   }
 
   #cancelPumpTimer(): void {

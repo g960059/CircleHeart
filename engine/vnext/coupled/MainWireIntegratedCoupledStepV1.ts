@@ -34,13 +34,18 @@ import {
   resolveMainWireFiveWallCoupledSolveLayoutV1,
   solveMainWireFiveWallCoupledNewtonPredictedV1,
   solveMainWireFiveWallCoupledNewtonShadowV1,
+  summarizeMainWireFiveWallCoupledSolveWorkV1,
   type MainWireFiveWallCoupledNewtonShadowOptionsV1,
   type MainWireFiveWallCoupledNewtonShadowResultV1,
   type MainWireFiveWallCoupledNewtonShadowWorkspaceV1,
+  type MainWireFiveWallCoupledPredictedSolveResultV1,
+  type MainWireFiveWallCoupledSolveWorkV1,
 } from "@/engine/vnext/coupled/MainWireFiveWallCoupledNewtonShadowV1";
-import type {
-  MainWireFiveWallCoupledPredictionOrderV1,
-  MainWireFiveWallCoupledPredictorWorkspaceV1,
+import {
+  stageAcceptedMainWireFiveWallCoupledSolutionV1,
+  type MainWireFiveWallCoupledPredictionOrderV1,
+  type MainWireFiveWallCoupledPredictorWorkspaceV1,
+  type MainWireFiveWallCoupledPredictorPromotionV1,
 } from "@/engine/vnext/coupled/MainWireFiveWallCoupledPredictorV1";
 import type {
   MainWireFiveWallCoupledResidualContextV1,
@@ -74,6 +79,21 @@ export type MainWireIntegratedCoupledStepOptionsV1<TWallState> = Readonly<{
   onAcceptedBaseStep?: (
     step: MainWireFiveWallCoronaryStepSuccessV2<TWallState>,
   ) => void;
+  predictor?: MainWireFiveWallCoupledCandidateSolveOptionsV1["predictor"];
+  /** Work on failed extrapolated attempts is included in these diagnostics. */
+  onSolverDiagnostics?: (diagnostics: MainWireFiveWallCoupledSolveDiagnosticsV1) => void;
+  /**
+   * Emitted only after integrated hemodynamics succeeds. The outer owner must
+   * discard on later rejection, or preflight/install around its own promotion.
+   */
+  onPredictorCandidate?: (ticket: MainWireFiveWallCoupledPredictorPromotionV1) => void;
+}>;
+
+export type MainWireFiveWallCoupledSolveDiagnosticsV1 = Readonly<{
+  predictionMode: "disabled" | MainWireFiveWallCoupledPredictedSolveResultV1["predictionMode"];
+  extrapolationScale: number;
+  fallbackUsed: boolean;
+  work: MainWireFiveWallCoupledSolveWorkV1;
 }>;
 
 export type MainWireFiveWallCoupledCandidateSolveOptionsV1 = Readonly<{
@@ -91,10 +111,12 @@ export type MainWireFiveWallCoupledCandidateSolveV1<TWallState> =
     status: "converged";
     context: MainWireFiveWallCoupledResidualContextV1<TWallState>;
     solver: MainWireFiveWallCoupledNewtonShadowResultV1;
+    diagnostics: MainWireFiveWallCoupledSolveDiagnosticsV1;
   }>
   | Readonly<{
     status: "failed";
     solver: MainWireFiveWallCoupledNewtonShadowResultV1;
+    diagnostics: MainWireFiveWallCoupledSolveDiagnosticsV1;
   }>;
 
 /**
@@ -128,22 +150,24 @@ export function solveMainWireFiveWallCoupledCandidateV1<TWallState>(
     ...options.solver,
     analyticJacobianPolicy: "require-complete" as const,
   });
-  const solver = options.predictor === undefined
-    ? solveMainWireFiveWallCoupledNewtonShadowV1(
-      context,
-      solverOptions,
-      workspace,
-    )
+  const predicted = options.predictor === undefined ? undefined
     : solveMainWireFiveWallCoupledNewtonPredictedV1(
       context,
       solverOptions,
       workspace,
       options.predictor.workspace,
       options.predictor.order,
-    ).solver;
+    );
+  const solver = predicted?.solver ?? solveMainWireFiveWallCoupledNewtonShadowV1(context, solverOptions, workspace);
+  const diagnostics: MainWireFiveWallCoupledSolveDiagnosticsV1 = Object.freeze({
+    predictionMode: predicted?.predictionMode ?? "disabled",
+    extrapolationScale: predicted?.extrapolationScale ?? 0,
+    fallbackUsed: predicted?.fallbackUsed ?? false,
+    work: predicted?.work ?? summarizeMainWireFiveWallCoupledSolveWorkV1(solver),
+  });
   return solver.result.status === "converged"
-    ? Object.freeze({ status: "converged" as const, context, solver })
-    : Object.freeze({ status: "failed" as const, solver });
+    ? Object.freeze({ status: "converged" as const, context, solver, diagnostics })
+    : Object.freeze({ status: "failed" as const, solver, diagnostics });
 }
 
 /**
@@ -164,7 +188,8 @@ export function stepMainWireIntegratedModelCoupledV1<TWallState>(
   options: MainWireIntegratedCoupledStepOptionsV1<TWallState> =
     Object.freeze({}),
 ): MainWireIntegratedModelStepResultV3<TWallState> {
-  return stepMainWireIntegratedModelWithCoronaryExecutorV3(
+  let predictorTicket: MainWireFiveWallCoupledPredictorPromotionV1 | undefined;
+  const result = stepMainWireIntegratedModelWithCoronaryExecutorV3(
     previous,
     input,
     (coronaryPrevious, coronaryInput) => {
@@ -185,8 +210,10 @@ export function stepMainWireIntegratedModelCoupledV1<TWallState>(
           residualWorkspace: options.residualWorkspace,
           previousAcceptedNumericalSource:
             options.previousAcceptedNumericalSource,
+          predictor: options.predictor,
         }),
       );
+      options.onSolverDiagnostics?.(solved.diagnostics);
       if (solved.status === "failed") {
         const failure = solved.solver.result;
         if (failure.status !== "failed") {
@@ -201,6 +228,11 @@ export function stepMainWireIntegratedModelCoupledV1<TWallState>(
       const solverResult = solver.result;
       if (solverResult.status !== "converged") {
         throw new Error("coupled converged solve status/result drifted");
+      }
+      if (options.predictor !== undefined && options.onPredictorCandidate !== undefined) {
+        predictorTicket = stageAcceptedMainWireFiveWallCoupledSolutionV1(
+          context, solverResult.solution, options.predictor.workspace,
+        );
       }
       if (options.onConvergedCandidate !== undefined) {
         context.withConvergedCandidate(
@@ -243,6 +275,11 @@ export function stepMainWireIntegratedModelCoupledV1<TWallState>(
       });
     },
   );
+  if (predictorTicket !== undefined) {
+    if (result.converged) options.onPredictorCandidate!(predictorTicket);
+    else predictorTicket.discard();
+  }
+  return result;
 }
 
 function assertDeviceOff(input: MainWireFiveWallCoronaryStepInputV3): void {

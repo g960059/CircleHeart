@@ -2,7 +2,7 @@
   "schemaId": "circleheart-local-dev-model-bundle-v1",
   "stage": "dev",
   "ephemeral": true,
-  "sourceTreeHash": "4db43cbaf0a5f16d7f6348ea81ca9aa593f918719c85c6cf6e033f03cdab9a30",
+  "sourceTreeHash": "da6294f3087467f80cf0f6092bf9af75e4f88e0a4e6b4611f118838fc78c9bc5",
   "sourceInputs": [
     {
       "path": "analysis/methods/mainWire/MainWireFixedToneSettlementV2.ts",
@@ -38,11 +38,11 @@
     },
     {
       "path": "engine/cardiorespiratory/BloodGasChemistryV1.ts",
-      "sha256": "369475c66e620ae78c6bd40266ec4897eec43bea7321aa4f1e410506e07d9149"
+      "sha256": "f57585f8aa252dedf031a9fd5443c7b83473d38b1e7a204bb604d4f45a7135ec"
     },
     {
       "path": "engine/cardiorespiratory/CardiorespiratoryBloodNetworkV1.ts",
-      "sha256": "fb110c8a93121971472d6bc058dc73cb1559d801799b3042c29bf8b6db32e33e"
+      "sha256": "6db9d09d43ae15c0b73202cf71bc1221a07c2324c3639f09377db3ed8637e4d8"
     },
     {
       "path": "engine/cardiorespiratory/CardiorespiratoryExecutionPlanContractV1.ts",
@@ -62,7 +62,7 @@
     },
     {
       "path": "engine/cardiorespiratory/CardiorespiratorySessionV1.ts",
-      "sha256": "9fd203e62fd3e801dbdfedae76c10c6e7cf9bb698a2c1196042ed3be1fded917"
+      "sha256": "7ca869bc356e2506a2b90c7909f0dbbda1bfa580711b751574008017d37df439"
     },
     {
       "path": "engine/cardiorespiratory/ConservativeGasTransportV1.ts",
@@ -106,7 +106,7 @@
     },
     {
       "path": "engine/core/nonCoronaryCirculationBackwardEulerV1.ts",
-      "sha256": "9ac7c83e005cb941476796c22b85f7cb1246f66b3c1fd29b2511593a39c7242d"
+      "sha256": "bc543c25b9b352c97e0e18c32967e9b0c07d9cd374353edc5f09584aecae6f1c"
     },
     {
       "path": "engine/core/params.ts",
@@ -178,7 +178,7 @@
     },
     {
       "path": "engine/devices/dynamicNetworkV1.ts",
-      "sha256": "dcd85d1ac7ac26abc8b42d92bb484e93e59bcb2fd99650cc33ae48d9a43514e0"
+      "sha256": "74faffac8ff20d5b8cbd80747f2fb3168628e7653f80c8bcfeee6474217506cd"
     },
     {
       "path": "engine/devices/dynamicRotaryPumpV1.ts",
@@ -254,7 +254,7 @@
     },
     {
       "path": "engine/myocardium/MainWireFiveWallCoronaryTransactionV2.ts",
-      "sha256": "4aba040d0a0bce00327a8c14edbe0c7d5c0c6e0c6ffb5d227819548737d54e70"
+      "sha256": "c793f515db971b28b81c361c35ac01d7976f42db4a5009f5415a8717527a47ac"
     },
     {
       "path": "engine/myocardium/MainWireFiveWallCoronaryTransactionV3.ts",
@@ -266,7 +266,7 @@
     },
     {
       "path": "engine/myocardium/MainWireIntegratedModelBeatMetricsV3.ts",
-      "sha256": "9bd5e059973b63cecbbd5a6be0551c7b2f14ba619ec4d1fb1a58cd8dcc418650"
+      "sha256": "2959c9eda8d932bfe49171bb933d9252c0652c483b0cf77d891a2ddb280e984e"
     },
     {
       "path": "engine/myocardium/MainWireIntegratedModelCheckpointV3.ts",
@@ -582,7 +582,7 @@
     },
     {
       "path": "engine/myocardium/rhythm/acceptedComposedRhythmTransactionV2.ts",
-      "sha256": "55b0ca2f867e00d1cefcd57b3078a691a69c608bbe92f7b2eb0a6dfdea0a48e8"
+      "sha256": "ad438f17f6906fd79626a260f9d7c35992fcf2287e5ab7bfd8e1e5f5ead8e407"
     },
     {
       "path": "engine/myocardium/rhythm/acceptedDistalConductionGateV1.ts",
@@ -670,11 +670,15 @@
     },
     {
       "path": "engine/vnext/MainWireAcceptedTypedBoundaryV1.ts",
-      "sha256": "4db5dcfc23b2453b4879127fc9c8bd3d277c85b4a405c3424996d51246087b92"
+      "sha256": "975037a2f256c6f1dd43928992916b935d4b58b13b3edfb5acf3be60a8fcc14c"
+    },
+    {
+      "path": "engine/vnext/MainWireAcceptedTypedExtensionBindingV1.ts",
+      "sha256": "42a77a06e1c5e93586947fe8558cc14bca0731df8749a64dde11f568b6fbbee1"
     },
     {
       "path": "engine/vnext/MainWireAcceptedTypedHemodynamicV1.ts",
-      "sha256": "d8ef1f86257acd6955ba85476d7082b23db446342ed586f4ac449a6bcdf27b90"
+      "sha256": "195e92c3546687f700455c1e21036e8dd2f1ad2e45f723e6f68ea3c7fc64485d"
     },
     {
       "path": "engine/vnext/MainWireAcceptedTypedStateV1.ts",
@@ -717,8 +721,12 @@
       "sha256": "7814a2ad0d86ceebf52f79c2383e9f527b89066829c659b4205f8e16ec3facac"
     },
     {
+      "path": "engine/vnext/MainWireTypedOrdinaryCandidateV1.ts",
+      "sha256": "14d38175c20baf1b2faf434f3ea9276c6c137e369dd9d0f09d891798c6c9b5aa"
+    },
+    {
       "path": "engine/vnext/TransactionalTypedStateImageV1.ts",
-      "sha256": "254288a3f9836e7076cd7ff4b04fe6b21620126db331f6d05dfd517ddc7a4368"
+      "sha256": "a0a46e8fc2e99b371237ff2bee93b8b7685146726c096d36fe3f5a5d5ebcb040"
     },
     {
       "path": "engine/vnext/coupled/CoupledHemodynamicsLayoutV1.ts",
@@ -734,15 +742,15 @@
     },
     {
       "path": "engine/vnext/coupled/MainWireFiveWallCoupledNewtonShadowV1.ts",
-      "sha256": "2f7e636b138c515757c996f90c7d8155c028951e74f56c3d5cca66b573091756"
+      "sha256": "55cbf1e389ad7a0333629eb9063ef71a40d05c38d492d8a1fc733e65bcb69082"
     },
     {
       "path": "engine/vnext/coupled/MainWireFiveWallCoupledPredictorV1.ts",
-      "sha256": "a9c9fdc89bcd68f1aec3f3709209d53e68a60798b9f93136d35428071079afda"
+      "sha256": "4939bf080a1c9bbb92568786e83cfccb1f655883522ee423dbc5d474ccd00272"
     },
     {
       "path": "engine/vnext/coupled/MainWireIntegratedCoupledStepV1.ts",
-      "sha256": "88ab96c614e1f5ae755479d74f15778e1a0cb2c9da38788728404ee762303cec"
+      "sha256": "5c4ab447d27c2a7f6094e5b4be98559a43647bb59d7b21d010d51f817a2ff19c"
     },
     {
       "path": "runtime/executionPlan/BoundExecutionPlanV1.ts",
@@ -782,7 +790,7 @@
     },
     {
       "path": "studio/integrations/cardiorespiratoryV1/CardiorespiratoryExactModelV1.ts",
-      "sha256": "df28aa30ac3d77027c9daeb0bcebc20f0b3d4ecb2f1e6861e08a33d1d564b563"
+      "sha256": "f5881c144793b96fe403fc7bf7d3b91854e61ca1500c6b7be318d157a92cbbaa"
     },
     {
       "path": "studio/integrations/mainWireIntegratedV3/MainWireIntegratedExecutionPlanV1.generated.json",
@@ -821,7 +829,7 @@
       "sha256": "b9343d9ec2469940cb9c972c549165cdea1ade9a90828544599a675ba5eec1b5"
     }
   ],
-  "artifactRevisionId": "462358ad7eb91bd5fe4cc8d337f50948deb25e6b8412c7eff78c6027f1226912",
+  "artifactRevisionId": "1202c2315c52198526bf8a3521266944dec70af51d941914784eb9444266eef8",
   "manifest": {
     "schemaId": "circleheart-studio-exact-model-kernel-v3",
     "modelId": "circleheart.cardiorespiratory-dev-v1",
@@ -852,7 +860,9 @@
     "solver": {
       "candidateSemantics": "atomic-composite-hemodynamics-respiratory-gas-tissue",
       "acceptedStateMutation": false,
-      "failureRollback": "previous-accepted-composite"
+      "failureRollback": "previous-accepted-composite",
+      "predictor": "accepted-history-cubic-on-ordinary-2ms-lattice-with-context-fallback",
+      "predictorReset": "events-clipped-or-recovery-steps-respiratory-phase-ramp-pressure-limit-valve-transition-and-warm-edit"
     },
     "fixtureSchema": {
       "fixtureSchemaId": "circleheart-cardiorespiratory-fixture-v1",
@@ -862,11 +872,11 @@
       }
     },
     "checkpointCodec": {
-      "checkpointCodecId": "circleheart-cardiorespiratory-checkpoint-codec-v1",
+      "checkpointCodecId": "circleheart-cardiorespiratory-checkpoint-codec-v2",
       "definition": {
-        "checkpointId": "circleheart-cardiorespiratory-checkpoint-v1",
-        "schemaVersion": 1,
-        "restoreSemantics": "exact-composite-including-gas-inventory-ledgers-and-breath-clock"
+        "checkpointId": "circleheart-cardiorespiratory-checkpoint-v2",
+        "schemaVersion": 2,
+        "restoreSemantics": "exact-composite-including-gas-inventory-ledgers-breath-clock-and-accepted-predictor-history"
       }
     },
     "primitiveControlCatalog": [

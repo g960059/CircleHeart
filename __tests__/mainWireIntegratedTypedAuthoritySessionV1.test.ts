@@ -95,6 +95,7 @@ import {
 } from "@/engine/vnext/MainWireAcceptedTypedStateV1";
 import {
   createTransactionalTypedStateManifestV1,
+  assertTransactionalTypedStateManifestIssuedV1,
   TransactionalTypedStateImageV1,
 } from "@/engine/vnext/TransactionalTypedStateImageV1";
 import {
@@ -196,6 +197,108 @@ describe("CanonicalFlatDataV1", () => {
 });
 
 describe("TransactionalTypedStateImageV1", () => {
+  it("distinguishes compiler-issued manifests from structurally identical or forged storage metadata", () => {
+    const manifest = createTransactionalTypedStateManifestV1("test-issued-manifest", { value: 1 }, 64, 64);
+    expect(() => assertTransactionalTypedStateManifestIssuedV1(manifest)).not.toThrow();
+    expect(() => assertTransactionalTypedStateManifestIssuedV1(Object.freeze({ ...manifest }))).toThrow("not factory-issued");
+    expect(() => assertTransactionalTypedStateManifestIssuedV1(Object.freeze({ ...manifest,
+      imageLayout: Object.freeze({ ...manifest.imageLayout, continuousByteOffset: manifest.imageLayout.booleanByteOffset }),
+    }))).toThrow("not factory-issued");
+  });
+
+  it("completes one fixed root with required-write coverage and independent sibling staging", () => {
+    const initial = { selected: { label: "fixed", samples: new Float64Array([2, 3]), open: true }, sibling: { value: 11 } };
+    const manifest = createTransactionalTypedStateManifestV1("test-root-completion", initial, 64, 64);
+    const image = new TransactionalTypedStateImageV1(manifest, initial);
+    const root = image.createRootCompletionPlan("selected");
+    const siblingSlot = manifest.numericalLayout.continuousSlots.findIndex(slot => slot.pointer === "/sibling/value");
+    const promotion = image.createPromotionPlan({ continuous: [...root.requiredContinuousSlots, siblingSlot],
+      nullableContinuous: root.requiredNullableContinuousSlots, booleans: root.requiredBooleanSlots });
+    const next = { label: "fixed", samples: new Float64Array([5, 6]), open: false };
+    const cursor = image.beginCandidateFromCurrent();
+    cursor.writeContinuous(siblingSlot, 12);
+    expect(() => image.promoteCandidateWithRequiredWrites(promotion)).toThrow();
+    image.completeCandidateRootFromObject(next, root);
+    expect(image.rehydrateCurrent()).toEqual(initial);
+    expect(image.rehydrateStaged()).toEqual({ selected: next, sibling: { value: 12 } });
+    next.samples[0] = 99;
+    image.promoteCandidateWithRequiredWrites(promotion);
+    expect(image.rehydrateCurrent()).toEqual({ selected: { ...next, samples: new Float64Array([5, 6]) }, sibling: { value: 12 } });
+    expect(() => image.completeCandidateRootFromObject(next, root)).toThrow();
+    expect(() => cursor.writeContinuous(siblingSlot, 13)).toThrow();
+  });
+
+  it("rejects fixed-root forgery, topology drift and invalid values before any root write", () => {
+    const initial = { selected: { label: "fixed", values: [2, 3], open: true }, sibling: 11 };
+    const manifest = createTransactionalTypedStateManifestV1("test-root-completion-shape", initial, 64, 64,
+      { fixedArrayPointers: ["/selected/values"] });
+    const image = new TransactionalTypedStateImageV1(manifest, initial);
+    const root = image.createRootCompletionPlan("selected");
+    const foreign = new TransactionalTypedStateImageV1(
+      createTransactionalTypedStateManifestV1("test-root-completion-shape", initial, 64, 64,
+        { fixedArrayPointers: ["/selected/values"] }), initial).createRootCompletionPlan("selected");
+    let getterReads = 0;
+    const accessor = Object.defineProperty({ ...initial.selected }, "open", { enumerable: true, get() { getterReads++; return true; } });
+    const hole = [2, 3]; delete hole[0];
+    const invalidRoots: unknown[] = [
+      { ...initial.selected, label: "other" }, { ...initial.selected, extra: 1 },
+      { ...initial.selected, values: [NaN, 3] }, { ...initial.selected, open: 1 },
+      { ...initial.selected, values: [2] }, { ...initial.selected, values: new Float64Array([2, 3]) },
+      { ...initial.selected, values: Object.assign(Object.create(Array.prototype), { 0: 2, 1: 3, length: 2 }) },
+      { ...initial.selected, values: hole }, Object.assign(Object.create(null), initial.selected), accessor,
+    ];
+    image.beginCandidateFromCurrent();
+    for (const plan of [{ ...root }, foreign]) expect(() => image.completeCandidateRootFromObject(initial.selected, plan)).toThrow("wrong layout");
+    for (const invalid of invalidRoots) {
+      expect(() => image.completeCandidateRootFromObject(invalid, root)).toThrow();
+      expect(image.rehydrateStaged()).toEqual(initial);
+    }
+    expect(getterReads).toBe(0);
+    image.completeCandidateRootFromObject({ ...initial.selected, values: [7, 8] }, root);
+    image.abort();
+    expect(image.rehydrateCurrent()).toEqual(initial);
+    expect(() => image.createRootCompletionPlan("missing" as "selected")).toThrow("unavailable");
+    const dynamic = new TransactionalTypedStateImageV1(
+      createTransactionalTypedStateManifestV1("test-variable-root-completion", initial, 64, 128), initial);
+    expect(() => dynamic.createRootCompletionPlan("selected")).toThrow("does not support");
+  });
+
+  it("rehydrates only an accepted root with detached mutable arrays across promotion and abort", () => {
+    const initial = {
+      selected: { samples: new Float64Array([2, 3]), nested: { value: 7 } },
+      sibling: { value: 11 },
+    };
+    const image = new TransactionalTypedStateImageV1(
+      createTransactionalTypedStateManifestV1("test-root-reader", initial, 8, 64),
+      initial,
+    );
+    const first = image.rehydrateCurrentRoot("selected");
+    expect(first).toEqual(image.rehydrateCurrent().selected);
+    expect(first.samples).not.toBe(image.rehydrateCurrentRoot("selected").samples);
+    first.samples[0] = 99;
+    expect(() => Object.assign(first.nested, { value: 99 })).toThrow(TypeError);
+    expect(image.rehydrateCurrentRoot("selected")).toEqual(initial.selected);
+    const candidate = { selected: { samples: new Float64Array([5, 6]), nested: { value: 8 } }, sibling: { value: 12 } };
+    image.stage(candidate);
+    expect(image.rehydrateCurrentRoot("selected")).toEqual(initial.selected);
+    image.abort();
+    expect(image.rehydrateCurrentRoot("selected")).toEqual(initial.selected);
+    image.stage(candidate);
+    image.promote();
+    expect(image.rehydrateCurrentRoot("selected")).toEqual(candidate.selected);
+    expect(image.rehydrateCurrentRoot("sibling")).toEqual(candidate.sibling);
+    expect(() => image.rehydrateCurrentRoot("missing" as "selected")).toThrow("root missing is unavailable");
+  });
+
+  it("rejects named root reads from a non-record authority", () => {
+    const image = new TransactionalTypedStateImageV1(
+      createTransactionalTypedStateManifestV1("test-non-record-root-reader", 1, 8, 64),
+      1,
+    );
+    expect(image.rehydrateCurrent()).toBe(1);
+    expect(() => image.rehydrateCurrentRoot("toFixed")).toThrow("root is not a record");
+  });
+
   it("keeps declared frozen configuration roots outside hot images", () => {
     type State = Readonly<{
       value: number;
@@ -224,6 +327,7 @@ describe("TransactionalTypedStateImageV1", () => {
     const image = new TransactionalTypedStateImageV1(manifest, initial);
     expect(image.rehydrateCurrent()).toEqual(initial);
     expect(image.rehydrateCurrent().configuration).toBe(configuration);
+    expect(image.rehydrateCurrentRoot("configuration")).toBe(configuration);
     expect(image.report()).toMatchObject({
       externalImmutableRootCount: 1,
       externalImmutableIdentityMatchCount: 1,
@@ -1337,6 +1441,11 @@ describe("MainWireIntegratedTypedAuthoritySessionV1", () => {
       Object.freeze({
         candidateTimeSec: coronary.acceptedTimeSec,
         candidateRevision: coronary.revision,
+        stepDtSec: .002,
+        assertCurrent() {},
+        nonCoronaryNodeAbsolutePressuresMmHg: new Float64Array(15),
+        nonCoronaryEdgeFlowsMlPerSec: new Float64Array(15),
+        coronarySignedEdgeFlowsMlPerSec: new Float64Array(22),
         fixedGlobalTotalBloodVolumeMl:
           coronary.fixedGlobalTotalBloodVolumeMl,
         nonCoronaryNodeVolumesMl,

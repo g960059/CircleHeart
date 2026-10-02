@@ -14,9 +14,9 @@ import type { RegisteredModelSimulationAdapterV2, StudioSimulationFrameV2, Studi
 import type { BoundExecutionPlanV1 } from "@/runtime/executionPlan/BoundExecutionPlanV1";
 import { studioCanonicalJsonStringify } from "@/domain/json/CanonicalJson";
 
-export const CARDIORESPIRATORY_CHECKPOINT_CODEC_ID_V1 = "circleheart-cardiorespiratory-checkpoint-codec-v1";
+export const CARDIORESPIRATORY_CHECKPOINT_CODEC_ID_V2 = "circleheart-cardiorespiratory-checkpoint-codec-v2";
 export const CARDIORESPIRATORY_HOT_PATH_INTEGRITY_TIER_V1 = "hot-path-lean";
-const checkpointCodecId = CARDIORESPIRATORY_CHECKPOINT_CODEC_ID_V1;
+const checkpointCodecId = CARDIORESPIRATORY_CHECKPOINT_CODEC_ID_V2;
 const snapshotGateId = STUDIO_COMMON_SNAPSHOT_ADMISSION_ID_V1;
 const dt = .002;
 const json = (value: unknown) => value as StudioJsonValueV2;
@@ -109,9 +109,11 @@ export function createCardiorespiratoryDevReleaseV1(): Readonly<{ manifest: Exac
     runtime: Object.freeze({ numericalSessionId: "cardiorespiratory-session-v1", presentationDtSec: dt,
       hotPathIntegrityTier: CARDIORESPIRATORY_HOT_PATH_INTEGRITY_TIER_V1,
       acceptedBoundaryCapture: true, scope: "local-development-no-publication", fixtureChangeSemantics: "atomic-warm-edit-anatomy-blood-chemistry-or-respiratory-capacity-cold-restart" }),
-    solver: Object.freeze({ candidateSemantics: "atomic-composite-hemodynamics-respiratory-gas-tissue", acceptedStateMutation: false, failureRollback: "previous-accepted-composite" }),
+    solver: Object.freeze({ candidateSemantics: "atomic-composite-hemodynamics-respiratory-gas-tissue", acceptedStateMutation: false, failureRollback: "previous-accepted-composite",
+      predictor: "accepted-history-cubic-on-ordinary-2ms-lattice-with-context-fallback",
+      predictorReset: "events-clipped-or-recovery-steps-respiratory-phase-ramp-pressure-limit-valve-transition-and-warm-edit" }),
     fixtureSchema: Object.freeze({ fixtureSchemaId, definition: Object.freeze({ schemaId: fixtureSchemaId, validationOwner: "CardiorespiratoryFixtureV1" }) }),
-    checkpointCodec: Object.freeze({ checkpointCodecId, definition: Object.freeze({ checkpointId: "circleheart-cardiorespiratory-checkpoint-v1", schemaVersion: 1, restoreSemantics: "exact-composite-including-gas-inventory-ledgers-and-breath-clock" }) }),
+    checkpointCodec: Object.freeze({ checkpointCodecId, definition: Object.freeze({ checkpointId: "circleheart-cardiorespiratory-checkpoint-v2", schemaVersion: 2, restoreSemantics: "exact-composite-including-gas-inventory-ledgers-breath-clock-and-accepted-predictor-history" }) }),
     primitiveControlCatalog: controls, primitiveSignalCatalog: signals,
     capabilities: Object.freeze([...new Set([...inherited.capabilities, ...CARDIORESPIRATORY_PRIMITIVE_SIGNALS_V1.map(x => `output/${x.outputId}`), ...CARDIORESPIRATORY_PRIMITIVE_CONTROLS_V1.map(x => `control/${x.controlId}`)])]),
   });

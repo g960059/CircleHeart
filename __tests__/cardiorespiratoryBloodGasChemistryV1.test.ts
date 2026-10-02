@@ -8,7 +8,21 @@ import {
   bloodGasPressuresFromContentsV1,
   oxygenSaturationFromPressureAndPHV1,
   validateBloodGasContentsV1,
+  type BloodGasChemistryParametersV1,
+  type BloodGasContentV1,
 } from '../engine/cardiorespiratory/BloodGasChemistryV1';
+import { selectValidationStampModeV1, validationStampModeV1, type ValidationStampModeV1 }
+  from '../engine/validationStampModeV1';
+
+function underStampMode<T>(mode: ValidationStampModeV1, operation: () => T): T {
+  const previous = validationStampModeV1();
+  try { selectValidationStampModeV1(mode); return operation(); }
+  finally { selectValidationStampModeV1(previous); }
+}
+function admission(contents: BloodGasContentV1, parameters: BloodGasChemistryParametersV1) {
+  try { validateBloodGasContentsV1(contents, parameters); return 'accepted'; }
+  catch (error) { if (!(error instanceof RangeError)) throw error; return error.message; }
+}
 
 describe('reduced fixed-buffer blood chemistry', () => {
   it('matches the independent standard Severinghaus anchors and whole-blood unit scale', () => {
@@ -109,6 +123,76 @@ describe('reduced fixed-buffer blood chemistry', () => {
     expect(b.o2Mol).toBe(a.o2Mol * 2);
     expect(b.co2Mol).toBe(a.co2Mol * 2);
     expect(bloodGasPressuresFromAmountsV1(b, 200).o2MmHg).toBeCloseTo(100, 6);
+  });
+  it('preserves complete-domain admission with the conservative interior shortcut and immutable coefficient cache', () => {
+    let seed = 0x182ab71, accepted = 0, rejected = 0;
+    const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 2 ** 32; };
+    for (const hemoglobinGPerDl of [3, 15, 22]) for (const baseExcessMmolPerL of [-10, 0, 10]) {
+      const parameters = Object.freeze({ hemoglobinGPerDl, baseExcessMmolPerL });
+      const bounds = bloodGasCo2PressureBoundsV1(parameters);
+      const probes: BloodGasContentV1[] = [];
+      for (const o2MmHg of [0, 1e-8, 3, 40, 100, 1000, 2000]) {
+        for (const fraction of [0, 1e-12, .001, .25, .75, 1 - 1e-12, 1]) {
+          const forward = bloodGasContentsFromPressuresV1({ o2MmHg,
+            co2MmHg: bounds.minimumMmHg + fraction * (bounds.maximumMmHg - bounds.minimumMmHg) }, parameters);
+          probes.push(forward);
+          // Exercise both the content-dependent PO2 ceiling and the original
+          // CO2 endpoint tolerance on each side of the feasible region.
+          for (const delta of [-2e-12, -2e-14, -5e-15, 5e-15, 2e-14, 2e-12]) {
+            probes.push({ o2MolPerL: forward.o2MolPerL, co2MolPerL: forward.co2MolPerL + delta });
+          }
+          probes.push({ o2MolPerL: forward.o2MolPerL + 5e-15, co2MolPerL: forward.co2MolPerL });
+        }
+      }
+      const maximum = bloodGasContentsFromPressuresV1({ o2MmHg: 2000, co2MmHg: bounds.minimumMmHg }, parameters);
+      const highestCo2 = bloodGasContentsFromPressuresV1({ o2MmHg: 0, co2MmHg: bounds.maximumMmHg }, parameters).co2MolPerL;
+      for (let i = 0; i < 120; i++) probes.push({ o2MolPerL: random() * maximum.o2MolPerL * 1.1,
+        co2MolPerL: random() * highestCo2 * 1.1 });
+      for (const invalid of [-1, NaN, Infinity, -Infinity]) probes.push(
+        { o2MolPerL: invalid, co2MolPerL: .02 }, { o2MolPerL: .008, co2MolPerL: invalid });
+      const full = underStampMode('validation-stamps-disabled', () => probes.map(contents => admission(contents, parameters)));
+      const reused = underStampMode('validation-stamps-enabled', () => probes.map(contents => admission(contents, parameters)));
+      expect(reused).toEqual(full);
+      for (const result of full) result === 'accepted' ? accepted++ : rejected++;
+    }
+    expect(accepted).toBeGreaterThan(1000);
+    expect(rejected).toBeGreaterThan(500);
+  });
+  it('returns bit-identical inverse results with coefficient reuse disabled, including pressure-domain boundaries', () => {
+    for (const hemoglobinGPerDl of [3, 15, 22]) for (const baseExcessMmolPerL of [-10, 0, 10]) {
+      const parameters = Object.freeze({ hemoglobinGPerDl, baseExcessMmolPerL });
+      const bounds = bloodGasCo2PressureBoundsV1(parameters);
+      for (const o2MmHg of [0, 3, 40, 100, 2000]) for (const co2MmHg of [bounds.minimumMmHg, 40, bounds.maximumMmHg]) {
+        const contents = bloodGasContentsFromPressuresV1({ o2MmHg, co2MmHg }, parameters);
+        const full = underStampMode('validation-stamps-disabled', () => bloodGasPressuresFromContentsV1(contents, parameters));
+        expect(underStampMode('validation-stamps-enabled', () => bloodGasPressuresFromContentsV1(contents, parameters))).toEqual(full);
+      }
+    }
+  });
+  it('does not reuse parameter coefficients after mutable values or frozen getter-backed values change', () => {
+    underStampMode('validation-stamps-enabled', () => {
+      const mutable = { hemoglobinGPerDl: 15, baseExcessMmolPerL: 0 };
+      const values = { ...mutable };
+      const getterBacked = Object.freeze({ get hemoglobinGPerDl() { return values.hemoglobinGPerDl; },
+        get baseExcessMmolPerL() { return values.baseExcessMmolPerL; } });
+      const original = bloodGasContentsFromPressuresV1({ o2MmHg: 100, co2MmHg: 40 }, mutable);
+      for (const parameters of [mutable, getterBacked]) {
+        validateBloodGasContentsV1(original, parameters);
+        bloodGasPressuresFromContentsV1(original, parameters);
+      }
+      for (const next of [{ hemoglobinGPerDl: 3, baseExcessMmolPerL: -10 },
+        { hemoglobinGPerDl: 22, baseExcessMmolPerL: 10 }, { hemoglobinGPerDl: 7.5, baseExcessMmolPerL: 0 }]) {
+        Object.assign(mutable, next); Object.assign(values, next);
+        const contents = bloodGasContentsFromPressuresV1({ o2MmHg: 100, co2MmHg: 40 }, next);
+        const expected = bloodGasPressuresFromContentsV1(contents, next);
+        const originalAdmission = admission(original, next);
+        for (const parameters of [mutable, getterBacked]) {
+          expect(admission(original, parameters)).toBe(originalAdmission);
+          expect(admission(contents, parameters)).toBe('accepted');
+          expect(bloodGasPressuresFromContentsV1(contents, parameters)).toEqual(expected);
+        }
+      }
+    });
   });
   it('rejects invalid or chemically unsupported input instead of clipping', () => {
     expect(() => bloodGasContentsFromPressuresV1({ o2MmHg: -1, co2MmHg: 40 })).toThrow();

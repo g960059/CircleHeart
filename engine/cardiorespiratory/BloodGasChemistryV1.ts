@@ -15,6 +15,8 @@
  * changes are outside this model. Mixing different Hb/BE populations requires
  * transporting those inventories too and is not supported by fixed parameters.
  */
+import { isTransitivelyFrozenPlainDataV1, validationStampReuseEligibleV1 } from "@/engine/validationStampModeV1";
+
 export const MOLAR_GAS_VOLUME_STPD_L_PER_MOL_V1 = 22.414;
 export type BloodGasAmountV1 = Readonly<{ o2Mol: number; co2Mol: number }>;
 export type BloodGasContentV1 = Readonly<{ o2MolPerL: number; co2MolPerL: number }>;
@@ -46,6 +48,13 @@ const ALPHA_CO2_MMOL_PER_L_PER_MMHG = 0.0307;
 const PK = 6.1;
 const HCO3_REFERENCE = 24.5;
 const BISECTION_ITERATIONS = 64;
+const inverseDomainParameters = new WeakMap<BloodGasChemistryParametersV1, PreparedInverseDomainParameters>();
+type PreparedInverseDomainParameters = Readonly<{
+  terms: ReturnType<typeof fixedBufferTerms>;
+  lowPH: number; highPH: number;
+  maximumO2Low: number; maximumO2High: number;
+  interiorMinimumCo2: number; interiorMaximumCo2: number;
+}>;
 
 function finiteRange(value: number, low: number, high: number, label: string): void {
   if (!Number.isFinite(value) || value < low || value > high) {
@@ -169,23 +178,39 @@ function oxygenPressureAtContentAndPH(
   throw new RangeError('O2 content inversion failed to converge');
 }
 
+/** Pure fixed-parameter work only. No accepted or warm numerical state is cached. */
+function prepareInverseDomainParameters(parameters: BloodGasChemistryParametersV1): PreparedInverseDomainParameters {
+  const reuse = validationStampReuseEligibleV1();
+  const cached = reuse ? inverseDomainParameters.get(parameters) : undefined;
+  if (cached) return cached;
+  const terms = fixedBufferTerms(parameters);
+  const lowPH = respiratoryPHAtFixedBuffer(terms.minimumMmHg, terms);
+  const highPH = respiratoryPHAtFixedBuffer(terms.maximumMmHg, terms);
+  const lowMaximum = bloodGasContentsAtResolvedPH({ o2MmHg: 2000, co2MmHg: terms.minimumMmHg }, parameters, lowPH);
+  const highMaximum = bloodGasContentsAtResolvedPH({ o2MmHg: 2000, co2MmHg: terms.maximumMmHg }, parameters, highPH);
+  const prepared = Object.freeze({ terms: Object.freeze(terms), lowPH, highPH,
+    maximumO2Low: lowMaximum.o2MolPerL, maximumO2High: highMaximum.o2MolPerL,
+    interiorMinimumCo2: bloodGasContentsAtResolvedPH({ o2MmHg: 0, co2MmHg: terms.minimumMmHg }, parameters, lowPH).co2MolPerL,
+    interiorMaximumCo2: highMaximum.co2MolPerL });
+  if (reuse && isTransitivelyFrozenPlainDataV1(parameters)) inverseDomainParameters.set(parameters, prepared);
+  return prepared;
+}
+
 /** Same feasible domain used by the full inverse, without solving its interior. */
 function bloodGasInverseDomain(contents: BloodGasContentV1, parameters: BloodGasChemistryParametersV1) {
   validateBloodGasChemistryV1(parameters);
   finiteRange(contents.o2MolPerL, 0, Number.MAX_VALUE, 'o2MolPerL');
   finiteRange(contents.co2MolPerL, 0, Number.MAX_VALUE, 'co2MolPerL');
-  // Per-call fixed coefficients only: mutable caller parameter objects are never
-  // cached, and identical equations/domain checks serve validation and inversion.
-  const terms = fixedBufferTerms(parameters);
+  const prepared = prepareInverseDomainParameters(parameters);
+  const { terms, lowPH } = prepared;
   const low = terms.minimumMmHg;
   let high = terms.maximumMmHg;
-  const lowPH = respiratoryPHAtFixedBuffer(low, terms);
-  let highPH = respiratoryPHAtFixedBuffer(high, terms);
+  let highPH = prepared.highPH;
   // The finite PO2 ceiling makes the feasible PCO2 interval content-dependent.
   // Restrict the SEARCH interval, never the accepted inventory or returned state.
   const maximumO2At = (co2MmHg: number, pH: number) => bloodGasContentsAtResolvedPH({ o2MmHg: 2000, co2MmHg }, parameters, pH).o2MolPerL;
-  finiteRange(contents.o2MolPerL, 0, maximumO2At(low, lowPH), 'o2MolPerL (chemical domain)');
-  if (contents.o2MolPerL > maximumO2At(high, highPH)) {
+  finiteRange(contents.o2MolPerL, 0, prepared.maximumO2Low, 'o2MolPerL (chemical domain)');
+  if (contents.o2MolPerL > prepared.maximumO2High) {
     let allowed = low;
     let excluded = high;
     for (let i = 0; i < BISECTION_ITERATIONS; i += 1) {
@@ -211,6 +236,22 @@ export function validateBloodGasContentsV1(
   contents: BloodGasContentV1,
   parameters: BloodGasChemistryParametersV1 = DEFAULT_BLOOD_GAS_CHEMISTRY_V1,
 ): void {
+  validateBloodGasChemistryV1(parameters);
+  finiteRange(contents.o2MolPerL, 0, Number.MAX_VALUE, 'o2MolPerL');
+  finiteRange(contents.co2MolPerL, 0, Number.MAX_VALUE, 'co2MolPerL');
+  if (validationStampReuseEligibleV1()) {
+    const domain = prepareInverseDomainParameters(parameters);
+    // At fixed endpoint pH/PCO2, CO2 content strictly decreases with O2
+    // saturation. S=0 bounds every lower endpoint from above; PO2=2000 bounds
+    // every upper endpoint from below. Restrict O2 to both endpoint domains.
+    // This conservative interior therefore needs no content-dependent roots.
+    // Keep an inward margin (100x the inverse's content tolerance); boundary
+    // cases and stamp-disabled audits retain the complete original checks.
+    const margin = 1e-12;
+    if (contents.o2MolPerL < Math.min(domain.maximumO2Low, domain.maximumO2High) - margin
+      && contents.co2MolPerL > domain.interiorMinimumCo2 + margin
+      && contents.co2MolPerL < domain.interiorMaximumCo2 - margin) return;
+  }
   bloodGasInverseDomain(contents, parameters);
 }
 /** Bounded coupled inversion; impossible contents fail instead of changing inventory. */

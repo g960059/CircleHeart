@@ -54,6 +54,8 @@ import type {
   TransactionalTypedStateManifestV1,
 } from "@/engine/vnext/TransactionalTypedStateImageV1";
 
+import { assertMainWireAcceptedTypedExtensionBindingV1, type MainWireAcceptedTypedExtensionBindingV1 } from "./MainWireAcceptedTypedExtensionBindingV1";
+
 export const MAIN_WIRE_ACCEPTED_TYPED_BOUNDARY_V1_ID =
   "main-wire-integrated-accepted-typed-boundary-v1" as const;
 
@@ -151,8 +153,8 @@ type NonCoronaryAcceptedNumericalBindingV1 = Readonly<{
 }>;
 
 export type MainWireAcceptedTypedBoundaryBindingV1 = Readonly<{
-  layoutId: typeof MAIN_WIRE_ACCEPTED_TYPED_STATE_LAYOUT_V1_ID;
-  fingerprint: typeof MAIN_WIRE_ACCEPTED_TYPED_STATE_LAYOUT_V1_FINGERPRINT;
+  layoutId: string;
+  fingerprint: string;
   continuous: ContinuousBinding;
   boundedArray: BoundedArrayBinding;
   calcium: Readonly<Record<CalciumWall, Readonly<{
@@ -166,14 +168,31 @@ export type MainWireAcceptedTypedBoundaryBindingV1 = Readonly<{
 }>;
 
 /** Resolves model paths once; the accepted hot loop performs no string lookup. */
+const ISSUED_BOUNDARY_BINDINGS = new WeakSet<object>();
+
 export function createMainWireAcceptedTypedBoundaryBindingV1(
   manifest: TransactionalTypedStateManifestV1,
 ): MainWireAcceptedTypedBoundaryBindingV1 {
-  if (
+  return createBoundaryBinding(manifest);
+}
+
+export function createMainWireExtendedAcceptedTypedBoundaryBindingV1(
+  manifest: TransactionalTypedStateManifestV1,
+  extension: MainWireAcceptedTypedExtensionBindingV1,
+): MainWireAcceptedTypedBoundaryBindingV1 {
+  assertMainWireAcceptedTypedExtensionBindingV1(extension, manifest);
+  return createBoundaryBinding(manifest, extension);
+}
+
+function createBoundaryBinding(
+  manifest: TransactionalTypedStateManifestV1,
+  extension?: MainWireAcceptedTypedExtensionBindingV1,
+): MainWireAcceptedTypedBoundaryBindingV1 {
+  if (extension === undefined && (
     manifest.layoutId !== MAIN_WIRE_ACCEPTED_TYPED_STATE_LAYOUT_V1_ID
     || manifest.fingerprint
       !== MAIN_WIRE_ACCEPTED_TYPED_STATE_LAYOUT_V1_FINGERPRINT
-  ) {
+  )) {
     throw new Error("Main Wire typed boundary manifest identity is unsupported");
   }
   const continuous = Object.freeze({
@@ -402,9 +421,9 @@ export function createMainWireAcceptedTypedBoundaryBindingV1(
       (deviceId) => continuous.dynamicMechanicalSupport[deviceId],
     ),
   ]);
-  return Object.freeze({
-    layoutId: MAIN_WIRE_ACCEPTED_TYPED_STATE_LAYOUT_V1_ID,
-    fingerprint: MAIN_WIRE_ACCEPTED_TYPED_STATE_LAYOUT_V1_FINGERPRINT,
+  const binding = Object.freeze({
+    layoutId: manifest.layoutId,
+    fingerprint: manifest.fingerprint,
     continuous,
     boundedArray,
     calcium,
@@ -418,6 +437,8 @@ export function createMainWireAcceptedTypedBoundaryBindingV1(
     regularAtrialSourceContinuousSlots,
     postSolverContinuousSlots,
   });
+  ISSUED_BOUNDARY_BINDINGS.add(binding);
+  return binding;
 }
 
 /**
@@ -1471,9 +1492,7 @@ function assertCursor(
   binding: MainWireAcceptedTypedBoundaryBindingV1,
 ): void {
   if (
-    cursor.layoutId !== MAIN_WIRE_ACCEPTED_TYPED_STATE_LAYOUT_V1_ID
-    || cursor.fingerprint
-      !== MAIN_WIRE_ACCEPTED_TYPED_STATE_LAYOUT_V1_FINGERPRINT
+    !ISSUED_BOUNDARY_BINDINGS.has(binding)
     || cursor.layoutId !== binding.layoutId
     || cursor.fingerprint !== binding.fingerprint
   ) {
@@ -1486,9 +1505,7 @@ function assertCandidateCursor(
   binding: MainWireAcceptedTypedBoundaryBindingV1,
 ): void {
   if (
-    cursor.layoutId !== MAIN_WIRE_ACCEPTED_TYPED_STATE_LAYOUT_V1_ID
-    || cursor.fingerprint
-      !== MAIN_WIRE_ACCEPTED_TYPED_STATE_LAYOUT_V1_FINGERPRINT
+    !ISSUED_BOUNDARY_BINDINGS.has(binding)
     || cursor.layoutId !== binding.layoutId
     || cursor.fingerprint !== binding.fingerprint
   ) {

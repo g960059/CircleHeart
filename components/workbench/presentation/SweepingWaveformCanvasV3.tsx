@@ -52,6 +52,41 @@ export type SweepingWaveformPointV3 = Readonly<{
 
 export type SweepingWaveformSegmentV3 = readonly SweepingWaveformPointV3[];
 
+/** Canvas-only column envelope. Retained points are original time/value pairs;
+ * keep the first, both extrema and last in accepted order. Each existing gap
+ * or sweep wrap is supplied separately and remains a separate stroke. */
+export function coalesceSweepingWaveformDisplaySegmentV3(
+  segment: SweepingWaveformSegmentV3,
+  projectX: (phaseSec: number) => number,
+): SweepingWaveformSegmentV3 {
+  if (segment.length < 2) return segment;
+  const firstColumn = Math.floor(projectX(segment[0]!.phaseSec));
+  const lastColumn = Math.floor(projectX(segment.at(-1)!.phaseSec));
+  // Sparse trajectories already fit this budget; avoid another pass/allocation.
+  if (segment.length <= 4 * (Math.abs(lastColumn - firstColumn) + 1)) return segment;
+  const result: SweepingWaveformPointV3[] = [];
+  let column = firstColumn, first = 0, last = 0, low = 0, high = 0;
+  const flush = () => {
+    result.push(segment[first]!);
+    const earlier = Math.min(low, high), later = Math.max(low, high);
+    if (earlier !== first && earlier !== last) result.push(segment[earlier]!);
+    if (later !== earlier && later !== first && later !== last) result.push(segment[later]!);
+    if (last !== first) result.push(segment[last]!);
+  };
+  for (let i = 1; i < segment.length; i++) {
+    const point = segment[i]!, nextColumn = Math.floor(projectX(point.phaseSec));
+    if (nextColumn !== column) {
+      flush(); column = nextColumn; first = low = high = i;
+    } else {
+      if (point.value < segment[low]!.value) low = i;
+      if (point.value > segment[high]!.value) high = i;
+    }
+    last = i;
+  }
+  flush();
+  return result;
+}
+
 type WaveformSourcePointV3 = Readonly<{
   presentationTimeSec: number;
   value: number;
@@ -490,7 +525,7 @@ export function SweepingWaveformCanvasV3(
       for (const segment of segments) {
         if (segment.length === 0) continue;
         context.beginPath();
-        segment.forEach((point, index) => {
+        coalesceSweepingWaveformDisplaySegmentV3(segment, x).forEach((point, index) => {
           if (index === 0) context.moveTo(x(point.phaseSec), y(point.value));
           else context.lineTo(x(point.phaseSec), y(point.value));
         });

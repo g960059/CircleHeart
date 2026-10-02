@@ -14,6 +14,29 @@ import {
 } from "@/engine/myocardium/MainWireFiveWallCoronaryTransactionV2";
 
 describe("Main Wire Integrated Model V3 accepted-step beat metrics", () => {
+  it("forks trial integrals independently and preserves checkpoint-equivalent completed beats", () => {
+    const original = new MainWireIntegratedModelBeatAccumulatorV3();
+    const empty = original.fork();
+    original.acceptNumericalReadback(readbackV1(0, 100, 0, { aorticValveFlowMlPerSec: 10 }), "capture/start");
+    expect(empty.checkpoint().active).toBeNull();
+    const baseline = original.checkpoint();
+    const trial = original.fork();
+    const reference = MainWireIntegratedModelBeatAccumulatorV3.restore(baseline);
+    const next = readbackV1(.1, 120, 80, { aorticValveFlowMlPerSec: -5,
+      leftVentricularAbsolutePressureMmHg: 90, aorticPressureMmHg: 80 });
+    trial.acceptNumericalReadback(next, null);
+    reference.acceptNumericalReadback(next, null);
+    expect(original.checkpoint()).toEqual(baseline);
+    expect(trial.checkpoint()).toEqual(reference.checkpoint());
+    const trialState = trial.checkpoint();
+    original.acceptNumericalReadback(readbackV1(.1, 90, 10), null);
+    expect(trial.checkpoint()).toEqual(trialState);
+    const end = readbackV1(.2, 110, 5);
+    expect(trial.acceptNumericalReadback(end, "capture/end"))
+      .toEqual(reference.acceptNumericalReadback(end, "capture/end"));
+    expect(trial.checkpoint()).toEqual(reference.checkpoint());
+  });
+
   it("integrates positive external work from a counter-clockwise transmural LV PV path", () => {
     const accumulator = new MainWireIntegratedModelBeatAccumulatorV3();
     expect(

@@ -7,7 +7,8 @@ import { CARDIORESPIRATORY_PRIMITIVE_SIGNALS_V1, CARDIORESPIRATORY_PRIMITIVE_CON
 import { resolveStudioItemPresentationV1 } from "@/studio/presentation/StudioItemPresentationCatalogV1";
 import { CardiorespiratoryVariationCollectorV1, CARDIORESPIRATORY_VARIATION_REQUIRED_IDS_V1, evaluateCardiorespiratoryVariationV1, CARDIORESPIRATORY_VARIATION_OUTPUT_IDS_V1 as ids, type CardiorespiratoryVariationSampleV1 as Sample } from "@/analysis/methods/cardiorespiratory/CardiorespiratoryVariationV1";
 import type { RegisteredModelPresentationBatchV2, StudioSimulationAnalysisV2 } from "@/studio/contracts/v2/simulation";
-import { genericXYDisplayPathV1, genericXYSegmentsV1 } from "@/components/workbench/presentation/GenericXYGraphV1";
+import { genericXYResponsiveStrokeWidthV1, GenericXYGeometryCacheV1, type GenericXYGeometryV1, type GenericXYTraceV1, genericXYDisplayPathV1, genericXYSegmentsV1 } from "@/components/workbench/presentation/GenericXYGraphV1";
+import { WorkbenchScenarioPresentationSampleStoreV3 } from "@/components/workbench/presentation/WorkbenchPresentationSampleStoreV3";
 const samples = (): Sample[] => Array.from({ length: 10001 }, (_, i) => {
   const t = i * .002, cardiacPhase = i % 500 / 500, amplitude = [40, 50, 60, 50, 40][Math.floor(i / 500) % 5]!;
   return { inputEpoch: 0, acceptedRevision: i, acceptedTimeSec: t, values: {
@@ -132,4 +133,103 @@ it("retains a rolling PPV window at the minimum 3/min ventilator rate", () => {
     }) ?? result;
   }
   expect(result?.payload).toMatchObject({ status: "available", startTimeSec: 40, endTimeSec: 100 });
+});
+
+
+describe("incremental XY display geometry", () => {
+  const makeTrace = (): GenericXYTraceV1 => ({ id: "t", label: "t", color: "red", xOutputId: "x", yOutputId: "y", cyclePhaseOutputId: "phase",
+    samples: Array.from({ length: 1800 }, (_, i) => Object.freeze({ inputEpoch: 0, acceptedRevision: i, acceptedTimeSec: i * .002,
+      presentationTimeSec: i * .002, values: Object.freeze({ x: Math.sin(i / 100), y: Math.cos(i / 100), phase: (i % 333) / 333, other: i }) })) });
+  const edges = (segments: readonly (readonly (readonly [number, number])[])[]) => segments.flatMap(segment =>
+    segment.slice(1).map((point, index) => [segment[index], point]));
+  const assertGeometry = (geometry: GenericXYGeometryV1, trace: GenericXYTraceV1) => {
+    const expected = genericXYSegmentsV1(trace), points = expected.flat();
+    expect(edges(geometry.chunks.flatMap(chunk => chunk.segments))).toEqual(edges(expected));
+    expect(geometry.pointCount).toBe(points.length);
+    expect(geometry.minimumX).toBe(Math.min(...points.map(point => point[0])));
+    expect(geometry.maximumX).toBe(Math.max(...points.map(point => point[0])));
+    expect(geometry.minimumY).toBe(Math.min(...points.map(point => point[1])));
+    expect(geometry.maximumY).toBe(Math.max(...points.map(point => point[1])));
+  };
+
+  it("reuses chunks from the production presentation store after another delivery", () => {
+    const trace = makeTrace(), store = new WorkbenchScenarioPresentationSampleStoreV3();
+    const cache = new GenericXYGeometryCacheV1();
+    store.append("s", trace.samples.slice(0, 1500));
+    const before = cache.project({ ...trace, samples: store.getScenarioExactOrbitSnapshot("s") });
+    store.append("s", trace.samples.slice(1500, 1532));
+    const after = cache.project({ ...trace, samples: store.getScenarioExactOrbitSnapshot("s") });
+    expect(before.chunks.length).toBeGreaterThan(3);
+    for (let i = 1; i < before.chunks.length - 1; i++) expect(after.chunks[i]).toBe(before.chunks[i]);
+  });
+
+  it("reuses interior observed geometry and path strings while both window ends move", () => {
+    const trace = makeTrace(), cache = new GenericXYGeometryCacheV1();
+    const before = cache.project({ ...trace, samples: trace.samples.slice(0, 1500) });
+    const beforePaths = cache.paths(before, 250, -250);
+    const window = { ...trace, samples: trace.samples.slice(8, 1508) }, after = cache.project(window);
+    assertGeometry(after, window);
+    expect(after.chunks.slice(1, -1)).toEqual(before.chunks.slice(1, -1));
+    for (let i = 1; i < after.chunks.length - 1; i++) expect(after.chunks[i]).toBe(before.chunks[i]);
+    expect(cache.paths(after, 251, -251).slice(1, -1)).toEqual(beforePaths.slice(1, -1));
+    expect(trace.samples).toHaveLength(1800);
+  });
+
+  it.each(["missing", "epoch", "gap", "phase", "revision"].flatMap(defect => [255, 256].map(index => [defect, index] as const)))("preserves a %s break at chunk-boundary index %i", (defect, index) => {
+    const trace = makeTrace(), rows = [...trace.samples], sample = rows[index]!;
+    rows[index] = { ...sample,
+      inputEpoch: defect === "epoch" ? 1 : sample.inputEpoch,
+      acceptedTimeSec: defect === "gap" ? sample.acceptedTimeSec + .01 : sample.acceptedTimeSec,
+      acceptedRevision: defect === "revision" ? 0 : sample.acceptedRevision,
+      values: { ...sample.values, y: defect === "missing" ? null : sample.values.y!, phase: defect === "phase" ? 0 : sample.values.phase! } };
+    const changed = { ...trace, samples: rows }, cache = new GenericXYGeometryCacheV1();
+    cache.project(trace);
+    assertGeometry(cache.project(changed), changed);
+  });
+
+  it("detects changed interior observations and rebinds outputs without relying only on endpoint clocks", () => {
+    const trace = makeTrace(), cache = new GenericXYGeometryCacheV1();
+    const before = cache.project(trace), rows = [...trace.samples], sample = rows[600]!;
+    rows[600] = { ...sample, values: { ...sample.values, y: 123 } };
+    const changed = { ...trace, samples: rows }, after = cache.project(changed);
+    assertGeometry(after, changed);
+    expect(after.chunks[2]).not.toBe(before.chunks[2]);
+    expect(after.chunks[3]).toBe(before.chunks[3]);
+    const rebound = { ...changed, xOutputId: "other" };
+    assertGeometry(cache.project(rebound), rebound);
+    const reset = { ...trace, samples: trace.samples.slice(0, 20).map(sample => ({ ...sample, inputEpoch: 1 })) };
+    assertGeometry(cache.project(reset), reset);
+    expect(cache.project({ ...trace, samples: [] }).pointCount).toBe(0);
+  });
+
+  it.each(["mutable-values", "getter-values", "mutable-clock"])("does not cache a %s observation or its outgoing chunk boundary", defect => {
+    const trace = makeTrace(), rows = [...trace.samples], original = rows[255]!;
+    let value = original.values.y!;
+    const mutableValues = { ...original.values };
+    const getterValues = Object.freeze({ ...original.values, get y() { return value; } });
+    const mutableSample = { ...original };
+    rows[255] = defect === "mutable-clock" ? mutableSample : Object.freeze({ ...original,
+      values: defect === "getter-values" ? getterValues : mutableValues });
+    const changed = { ...trace, samples: rows }, cache = new GenericXYGeometryCacheV1();
+    cache.project(changed);
+    if (defect === "mutable-values") mutableValues.y = 99;
+    else if (defect === "getter-values") value = 99;
+    else mutableSample.acceptedTimeSec += .01;
+    assertGeometry(cache.project(changed), changed);
+  });
+
+  it("preserves the responsive viewBox stroke scale independently of the data-axis transform", () => {
+    expect(genericXYResponsiveStrokeWidthV1(620, 375)).toBe(1.7);
+    expect(genericXYResponsiveStrokeWidthV1(1240, 750)).toBe(3.4);
+    expect(genericXYResponsiveStrokeWidthV1(620, 187.5)).toBe(.85);
+    expect(genericXYResponsiveStrokeWidthV1(310, 375)).toBe(.85);
+  });
+
+  it("keeps exact observed coordinate strings and refines coalescing on a large zoom", () => {
+    const trace = makeTrace(), cache = new GenericXYGeometryCacheV1(), geometry = cache.project(trace);
+    const zoomed = cache.paths(geometry, 10000, -10000).join(" ");
+    expect(zoomed).toContain(`M${trace.samples[0]!.values.x},${trace.samples[0]!.values.y}`);
+    expect(cache.paths(geometry, .001, -.001).join(" ").length).toBeLessThan(zoomed.length);
+    expect(cache.paths(geometry, 10000, -10000).join(" ")).toBe(zoomed);
+  });
 });

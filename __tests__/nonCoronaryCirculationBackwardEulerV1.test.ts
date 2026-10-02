@@ -54,6 +54,9 @@ import {
   composeMainWireFourValveDiseaseResearchInputV1,
 } from "@/engine/valves/MainWireFourValveDiseaseResearchBracketsV1";
 import { stressedVolumeFromPtm } from "@/engine/vascularPv";
+import * as valveResearchValidation from "@/engine/valves/MainWireFourValveDiseaseResearchBracketsV1";
+import * as vascularProfileValidation from "@/engine/core/MainWireSelectedAorticOutflowCirculationProfileV1";
+import { selectValidationStampModeV1, validationStampModeV1 } from "@/engine/validationStampModeV1";
 
 const RUNTIME: NonCoronaryCirculationRuntimeParamsV1 = Object.freeze({
   vascular: Object.freeze({ venousTone: 0, arterialStiffness: 1 }),
@@ -69,6 +72,119 @@ const RUNTIME: NonCoronaryCirculationRuntimeParamsV1 = Object.freeze({
 });
 
 describe("main-wire-derived non-coronary experimental backward Euler V1", () => {
+  it("reuses only immutable static runtime components across changing respiratory pressure and audits every component when disabled", () => {
+    const previousMode = validationStampModeV1();
+    const valveSpy = vi.spyOn(valveResearchValidation, "validateMainWireFourValveDiseaseResearchInputV1");
+    const vascularSpy = vi.spyOn(vascularProfileValidation, "validateMainWireSelectedAorticOutflowCirculationProfileV1");
+    try {
+      selectValidationStampModeV1("validation-stamps-enabled");
+      const runtime = freezeRuntimeTestData({ ...RUNTIME,
+        valveResearchInput: structuredClone(RUNTIME.valveResearchInput),
+        vascular: { ...RUNTIME.vascular, selectedAorticOutflowProfile: structuredClone(MAIN_WIRE_SELECTED_AORTIC_OUTFLOW_CIRCULATION_PROFILE_V1) },
+      });
+      const first = resolveNonCoronaryCirculationColdSeedV1(runtime);
+      const firstValveCount = valveSpy.mock.calls.length, firstVascularCount = vascularSpy.mock.calls.length;
+      expect(firstValveCount).toBeGreaterThan(0); expect(firstVascularCount).toBeGreaterThan(0);
+      const changed = { ...runtime, respiratory: { ...runtime.respiratory, Pth0: 3,
+        coupledPressures: { pthMmHg: 3, palvMmHg: 8 } } };
+      expect(resolveNonCoronaryCirculationColdSeedV1(changed)).toEqual(first);
+      expect(valveSpy).toHaveBeenCalledTimes(firstValveCount);
+      expect(vascularSpy).toHaveBeenCalledTimes(firstVascularCount);
+      // A static component proof makes no claim about current loss or pressure values.
+      expect(() => resolveNonCoronaryCirculationColdSeedV1({ ...changed, losses: { ...changed.losses, systemicResistance: 0 } }))
+        .toThrow(/systemicResistance/);
+      expect(() => resolveNonCoronaryCirculationColdSeedV1({ ...changed, respiratory: { ...changed.respiratory, Pth0: NaN } }))
+        .toThrow(/Pth0/);
+      selectValidationStampModeV1("validation-stamps-disabled");
+      // Re-enter the exact previously stamped outer object as well as its subtrees.
+      expect(resolveNonCoronaryCirculationColdSeedV1(runtime)).toEqual(first);
+      expect(resolveNonCoronaryCirculationColdSeedV1(runtime)).toEqual(first);
+      expect(valveSpy).toHaveBeenCalledTimes(firstValveCount + 2);
+      expect(vascularSpy.mock.calls.length).toBeGreaterThanOrEqual(firstVascularCount + 2);
+      const previouslyAudited = freezeRuntimeTestData({ ...runtime, valveResearchInput: structuredClone(runtime.valveResearchInput) });
+      resolveNonCoronaryCirculationColdSeedV1(previouslyAudited);
+      const afterAudit = valveSpy.mock.calls.length;
+      selectValidationStampModeV1("validation-stamps-enabled");
+      resolveNonCoronaryCirculationColdSeedV1(previouslyAudited);
+      expect(valveSpy).toHaveBeenCalledTimes(afterAudit + 1); // Disabled validation issued no proof.
+      resolveNonCoronaryCirculationColdSeedV1(previouslyAudited);
+      expect(valveSpy).toHaveBeenCalledTimes(afterAudit + 1);
+    } finally { valveSpy.mockRestore(); vascularSpy.mockRestore(); selectValidationStampModeV1(previousMode); }
+  });
+
+  it("rejects mutations under both mutable and shallow-frozen runtimes after successful admission", () => {
+    const previousMode = validationStampModeV1();
+    try {
+      selectValidationStampModeV1("validation-stamps-enabled");
+      for (const freezeOuter of [false, true]) {
+        const vascular = { ...RUNTIME.vascular };
+        const respiratory = { ...RUNTIME.respiratory };
+        const researchInput = { ...RUNTIME.valveResearchInput, valves: { ...RUNTIME.valveResearchInput.valves,
+          MV: { ...RUNTIME.valveResearchInput.valves.MV } } };
+        const runtime = { ...RUNTIME, vascular, respiratory, valveResearchInput: researchInput };
+        if (freezeOuter) Object.freeze(runtime);
+        resolveNonCoronaryCirculationColdSeedV1(runtime);
+        vascular.arterialStiffness = 0;
+        expect(() => resolveNonCoronaryCirculationColdSeedV1(runtime)).toThrow(/arterialStiffness/);
+        vascular.arterialStiffness = 1;
+        respiratory.PEEP = Infinity;
+        expect(() => resolveNonCoronaryCirculationColdSeedV1(runtime)).toThrow(/PEEP/);
+        respiratory.PEEP = 0;
+        researchInput.valves.MV.openingGainPerMmHg = 0;
+        expect(() => resolveNonCoronaryCirculationColdSeedV1(runtime)).toThrow(/valveResearchInput/);
+      }
+    } finally { selectValidationStampModeV1(previousMode); }
+  });
+
+  it("never proves frozen getter-backed runtime components or excludes the vascular ownership tuple from validation", () => {
+    const previousMode = validationStampModeV1();
+    try {
+      selectValidationStampModeV1("validation-stamps-enabled");
+      let stiffness = 1, claim = RUNTIME.valveResearchInput.claim;
+      const runtime = Object.freeze({ ...RUNTIME,
+        vascular: Object.freeze({ venousTone: 0, get arterialStiffness() { return stiffness; } }),
+        valveResearchInput: Object.freeze({ ...RUNTIME.valveResearchInput, get claim() { return claim; } }),
+      });
+      resolveNonCoronaryCirculationColdSeedV1(runtime);
+      stiffness = NaN;
+      expect(() => resolveNonCoronaryCirculationColdSeedV1(runtime)).toThrow(/arterialStiffness/);
+      stiffness = 1;
+      claim = { ...claim, hidden: "forged" } as unknown as typeof claim;
+      expect(() => resolveNonCoronaryCirculationColdSeedV1(runtime)).toThrow(/claim/);
+      const selected = Object.freeze({ ...RUNTIME.vascular,
+        selectedAorticOutflowProfile: MAIN_WIRE_SELECTED_AORTIC_OUTFLOW_CIRCULATION_PROFILE_V1 });
+      resolveNonCoronaryCirculationColdSeedV1({ ...RUNTIME, vascular: selected });
+      expect(() => resolveNonCoronaryCirculationColdSeedV1({ ...RUNTIME,
+        vascular: Object.freeze({ ...selected, aorticRootInertanceResearchScale: 1 }) })).toThrow(/another aortic root owner/);
+    } finally { selectValidationStampModeV1(previousMode); }
+  });
+
+  it("preserves an accepted dynamic-pressure trial exactly with runtime proofs enabled or disabled", () => {
+    const previousMode = validationStampModeV1();
+    try {
+      const initial = createInitialNonCoronaryCirculationStateV1({ timeSec: 0, runtime: RUNTIME, ...coldSeedOwner(RUNTIME) });
+      const runtime = freezeRuntimeTestData({ ...RUNTIME, respiratory: { ...RUNTIME.respiratory,
+        coupledPressures: { pthMmHg: 4, palvMmHg: 8 } },
+        parallelPulmonaryPaths: [{ resistanceMmHgSecPerMl: .02, externalPressureMmHg: 8 },
+          { resistanceMmHgSecPerMl: .08, externalPressureMmHg: 10 }] as const });
+      const solve = () => evaluateNonCoronaryCirculationBackwardEulerTrialV1({ previousAcceptedState: initial,
+        dtSec: .001, runtime, evaluateCandidateMechanics: elasticMechanicsCallback(initial) });
+      selectValidationStampModeV1("validation-stamps-enabled");
+      const reused = solve(); expect(reused.converged).toBe(true);
+      selectValidationStampModeV1("validation-stamps-disabled");
+      expect(solve()).toEqual(reused);
+      selectValidationStampModeV1("validation-stamps-enabled");
+      expect(() => evaluateNonCoronaryCirculationBackwardEulerTrialV1({ previousAcceptedState: initial,
+        dtSec: .001, runtime: { ...runtime, respiratory: { ...runtime.respiratory,
+          coupledPressures: { pthMmHg: NaN, palvMmHg: 8 } } }, evaluateCandidateMechanics: elasticMechanicsCallback(initial) }))
+        .toThrow(/Invalid coupled respiratory pressure/);
+      const badResistance = evaluateNonCoronaryCirculationBackwardEulerTrialV1({ previousAcceptedState: initial,
+        dtSec: .001, runtime: { ...runtime, parallelPulmonaryPaths: [{ ...runtime.parallelPulmonaryPaths[0], resistanceMmHgSecPerMl: 0 },
+          runtime.parallelPulmonaryPaths[1]] }, evaluateCandidateMechanics: elasticMechanicsCallback(initial) });
+      expect(badResistance.converged).toBe(false);
+    } finally { selectValidationStampModeV1(previousMode); }
+  });
+
   it("derives the 15-node scope from the authoritative graph and excludes every coronary element", () => {
     const graph = buildNonCoronaryCirculationGraphV1();
     expect(graph.nodes.map((node) => node.name)).toEqual(
@@ -1632,6 +1748,14 @@ function steadyStateFixture() {
     }),
   });
   return Object.freeze({ state, chamberPressures });
+}
+
+function freezeRuntimeTestData<T>(value: T): T {
+  if (value && typeof value === "object") {
+    for (const child of Object.values(value)) freezeRuntimeTestData(child);
+    Object.freeze(value);
+  }
+  return value;
 }
 
 function coldSeedOwner(

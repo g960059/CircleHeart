@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as proximalAv from "@/engine/myocardium/rhythm/recoveryConcealmentAvGateV2";
 import {
   MAIN_WIRE_INTEGRATED_MATCHED_ALPHA_FIXED_REGULAR_SINUS_PROFILE_V1_CLAIM,
   MAIN_WIRE_INTEGRATED_MATCHED_ALPHA_FIXED_REGULAR_SINUS_PROFILE_V1_ID,
@@ -34,6 +35,7 @@ import {
   rebindAcceptedComposedRegularSinusStateV2,
   rollbackAcceptedComposedRhythmTransactionCandidateV2,
   validateAcceptedComposedRhythmTransactionBoundaryV2,
+  validateAcceptedComposedRhythmTransactionStateV2,
   type AcceptedComposedRhythmTransactionConfigurationV2,
   type AcceptedComposedRhythmTransactionStateV2,
 } from "@/engine/myocardium/rhythm/acceptedComposedRhythmTransactionV2";
@@ -834,6 +836,29 @@ describe("AcceptedComposedRhythmTransactionV2", () => {
         ),
       ).toBe(candidate.candidateState);
     });
+  });
+
+  it("reuses the fixed proximal AV conversion while retaining full state validation", () => {
+    const mode = validationStampModeV1();
+    const { state } = fixture({ firstRegularTimeSec: 10 });
+    const conversion = vi.spyOn(proximalAv, "createRecoveryConcealmentAvGateConfigurationV2");
+    try {
+      selectValidationStampModeV1("validation-stamps-enabled");
+      validateAcceptedComposedRhythmTransactionStateV2(state);
+      validateAcceptedComposedRhythmTransactionStateV2(Object.freeze({ ...state }));
+      expect(conversion).not.toHaveBeenCalled();
+      expect(() => validateAcceptedComposedRhythmTransactionStateV2(Object.freeze({
+        ...state, proximalAvGateState: Object.freeze({ ...state.proximalAvGateState,
+          configuration: Object.freeze({ ...state.proximalAvGateState.configuration,
+            proximalAvOwnerInstanceId: "different-owner" }) }),
+      }))).toThrow(/proximal AV V2 configuration split/);
+      selectValidationStampModeV1("validation-stamps-disabled");
+      validateAcceptedComposedRhythmTransactionStateV2(state);
+      expect(conversion).toHaveBeenCalled();
+    } finally {
+      conversion.mockRestore();
+      selectValidationStampModeV1(mode);
+    }
   });
 
   it("never stamps an outer-frozen state with mutable descendants", () => {

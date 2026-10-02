@@ -13,6 +13,10 @@ import { createMainWireExtendedAcceptedTypedStateManifestV1 } from "@/engine/vne
 import { TransactionalTypedStateImageV1 } from "@/engine/vnext/TransactionalTypedStateImageV1";
 import { bindExecutionPlanAcceptedTypedStateV1, readExecutionPlanAcceptedTypedStateIntoLogicalV1 }
   from "@/engine/vnext/ExecutionPlanAcceptedTypedStateBindingV1";
+import { bindMainWireAcceptedTypedExtensionV1 } from "@/engine/vnext/MainWireAcceptedTypedExtensionBindingV1";
+import { createMainWireAcceptedTypedBoundaryBindingV1, createMainWireExtendedAcceptedTypedBoundaryBindingV1,
+  readMainWireAcceptedTypedClockV1 } from "@/engine/vnext/MainWireAcceptedTypedBoundaryV1";
+import { createMainWireExtendedAcceptedTypedHemodynamicBindingV1 } from "@/engine/vnext/MainWireAcceptedTypedHemodynamicV1";
 
 describe("cardiorespiratory development execution plan", () => {
   it("reproduces the checked-in descriptor with the pure build compiler", () => {
@@ -59,6 +63,12 @@ describe("cardiorespiratory development execution plan", () => {
     const bound = bindCardiorespiratoryExecutionPlanV1();
     const binding = bindExecutionPlanAcceptedTypedStateV1(bound, manifest);
     const image = new TransactionalTypedStateImageV1(manifest, initial);
+    const extension = bindMainWireAcceptedTypedExtensionV1(hemo, manifest, ["cardiorespiratory"]);
+    expect(() => createMainWireAcceptedTypedBoundaryBindingV1(manifest)).toThrow(/identity is unsupported/);
+    expect(readMainWireAcceptedTypedClockV1(image.currentCursor(), createMainWireExtendedAcceptedTypedBoundaryBindingV1(manifest, extension)))
+      .toEqual({ acceptedTimeSec: initial.acceptedTimeSec, revision: initial.revision });
+    expect(createMainWireExtendedAcceptedTypedHemodynamicBindingV1(manifest, extension, binding).canonicalContinuousSlots).toHaveLength(100);
+    expect(() => createMainWireExtendedAcceptedTypedBoundaryBindingV1(manifest, { ...extension })).toThrow(/foreign or unproved/);
     const values = new Float64Array(binding.logicalSlotCount);
     readExecutionPlanAcceptedTypedStateIntoLogicalV1(binding, image.currentCursor(), values);
     const newSlots = descriptor.stateLayout.slots.filter((slot) => slot.authorityPointer.startsWith("/cardiorespiratory/"));
@@ -67,6 +77,30 @@ describe("cardiorespiratory development execution plan", () => {
       const value = slot.authorityPointer.slice(1).split("/").reduce((v, key) => (v as Record<string, unknown>)[key], initial as unknown);
       expect(values[slot.logicalIndex]).toBe(typeof value === "boolean" ? Number(value) : value);
     }
+  });
+
+  it("admits only factory-issued fixed extensions that preserve every base owner and immutable binding", () => {
+    const { cardiorespiratory: _cr, ...base } = createCardiorespiratoryColdStateV1();
+    const make = (hemo = base) => createMainWireExtendedAcceptedTypedStateManifestV1(hemo, {
+      layoutId: "test-cardiorespiratory-extension", state: { extra: { value: 1 } },
+    });
+    const manifest = make(), extension = bindMainWireAcceptedTypedExtensionV1(base, manifest, ["extra"]);
+    expect(() => createMainWireExtendedAcceptedTypedBoundaryBindingV1(make(), extension)).toThrow(/foreign or unproved/);
+    for (const forged of [
+      { ...manifest },
+      { ...manifest, imageLayout: { ...manifest.imageLayout, continuousByteOffset: 8 } },
+      { ...manifest, boundedArrayNodes: [] },
+      { ...manifest, stringArenaCapacityBytes: manifest.stringArenaCapacityBytes + 1 },
+    ]) expect(() => bindMainWireAcceptedTypedExtensionV1(base, Object.freeze(forged), ["extra"])).toThrow(/not factory-issued/);
+    expect(() => bindMainWireAcceptedTypedExtensionV1(base, manifest, ["coronary"])).toThrow(/shadows or omits/);
+    const changed = { ...base, coronary: { ...base.coronary, mvcReferenceState: { ...base.coronary.mvcReferenceState, hiddenValue: 1 } } };
+    expect(() => bindMainWireAcceptedTypedExtensionV1(base, make(changed), ["extra"])).toThrow(/changed base/);
+    const changedKind = { ...base, coronary: { ...base.coronary, circulation: { ...base.coronary.circulation,
+      nodeVolumesMl: { ...base.coronary.circulation.nodeVolumesMl, Ao: true } } } } as unknown as typeof base;
+    expect(() => bindMainWireAcceptedTypedExtensionV1(base, make(changedKind), ["extra"])).toThrow(/changed base/);
+    const immutableChanged = { ...base, dynamicMechanicalSupport: { ...base.dynamicMechanicalSupport,
+      inertanceProfileSnapshot: Object.freeze({ ...base.dynamicMechanicalSupport.inertanceProfileSnapshot, profileId: "altered-profile" }) } };
+    expect(() => bindMainWireAcceptedTypedExtensionV1(base, make(immutableChanged), ["extra"])).toThrow(/immutable bindings|immutable binding contents/);
   });
 
   it("prepares an admitted dev topology on the compiler-owned coupled workspace", () => {

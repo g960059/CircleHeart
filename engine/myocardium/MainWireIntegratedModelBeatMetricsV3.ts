@@ -254,6 +254,23 @@ export type MainWireIntegratedModelBeatAccumulatorCheckpointV3 = Readonly<{
 export class MainWireIntegratedModelBeatAccumulatorV3 {
   #active: ActiveBeatV3 | null = null;
 
+  /** A private in-memory trial owns its mutable integrals independently.
+   * Immutable samples and landmarks are replaced, never mutated. Durable or
+   * external data still enter through the complete checkpoint validator. */
+  fork(): MainWireIntegratedModelBeatAccumulatorV3 {
+    const fork = new MainWireIntegratedModelBeatAccumulatorV3();
+    const active = this.#active;
+    if (active !== null) fork.#active = {
+      ...active,
+      pressureSummaryAccumulators: copyAccumulatorRecordV3(active.pressureSummaryAccumulators),
+      ventricularAbsolutePressureRateExtrema: copyAccumulatorRecordV3(active.ventricularAbsolutePressureRateExtrema),
+      valveFlowVolumes: copyAccumulatorRecordV3(active.valveFlowVolumes),
+      valveForwardPressureGradientAccumulators: copyAccumulatorRecordV3(active.valveForwardPressureGradientAccumulators),
+      valveClosureLandmarks: { ...active.valveClosureLandmarks },
+    };
+    return fork;
+  }
+
   static restore(input: unknown): MainWireIntegratedModelBeatAccumulatorV3 {
     const checkpoint = ownBeatAccumulatorCheckpointV3(input);
     const accumulator = new MainWireIntegratedModelBeatAccumulatorV3();
@@ -318,6 +335,10 @@ export class MainWireIntegratedModelBeatAccumulatorV3 {
     this.#active = beginBeatV3(capturedAtrialActivationId, sample);
     return completed;
   }
+}
+
+function copyAccumulatorRecordV3<T extends Record<string, object>>(record: T): T {
+  return Object.fromEntries(Object.entries(record).map(([key, value]) => [key, { ...value }])) as T;
 }
 
 export function validateAndOwnMainWireIntegratedModelCompletedBeatMetricsV3(

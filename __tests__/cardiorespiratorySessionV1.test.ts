@@ -15,6 +15,9 @@ import { createCardiorespiratoryDevReleaseV1 } from '../studio/integrations/card
 import * as pulmonaryExchange from '../engine/cardiorespiratory/PulmonaryGasExchangeV1';
 import * as bloodGasChemistry from '../engine/cardiorespiratory/BloodGasChemistryV1';
 import * as respiratoryMechanics from '../engine/cardiorespiratory/RespiratoryMechanicsV1';
+import * as integratedTransaction from '../engine/myocardium/MainWireIntegratedModelTransactionV3';
+import * as typedOrdinary from '../engine/vnext/MainWireTypedOrdinaryCandidateV1';
+import * as coupledStep from '../engine/vnext/coupled/MainWireIntegratedCoupledStepV1';
 import { TransactionalTypedStateImageV1 } from '../engine/vnext/TransactionalTypedStateImageV1';
 
 function total(state: CardiorespiratoryStateV1) {
@@ -75,16 +78,19 @@ describe('development cardiorespiratory exact session', () => {
   it('binds restored immutable device roots to the runtime-owned roots before repeated accepted staging', () => {
     const original = run(.002, .006);
     const checkpoint = JSON.parse(JSON.stringify(original.checkpoint()));
-    const stage = TransactionalTypedStateImageV1.prototype.stage;
+    const forceRaw = vi.spyOn(typedOrdinary, 'isMainWireTypedOrdinaryCandidateV1').mockReturnValue(false);
+    const complete = TransactionalTypedStateImageV1.prototype.completeCandidateFromObject;
     const matches: { identity: number; canonical: number }[] = [];
-    const monitor = vi.spyOn(TransactionalTypedStateImageV1.prototype, 'stage').mockImplementation(function (
+    const monitor = vi.spyOn(TransactionalTypedStateImageV1.prototype, 'completeCandidateFromObject').mockImplementation(function (
       this: TransactionalTypedStateImageV1<unknown>, candidate: unknown,
+      plan: Parameters<TransactionalTypedStateImageV1<unknown>["completeCandidateFromObject"]>[1],
     ) {
       const before = this.report();
-      stage.call(this, candidate);
+      const admitted = complete.call(this, candidate, plan);
       const after = this.report();
       matches.push({ identity: after.externalImmutableIdentityMatchCount - before.externalImmutableIdentityMatchCount,
         canonical: after.externalImmutableCanonicalMatchCount - before.externalImmutableCanonicalMatchCount });
+      return admitted;
     });
     try {
       const restored = CardiorespiratorySessionV1.restore(original.fixture, checkpoint);
@@ -94,7 +100,7 @@ describe('development cardiorespiratory exact session', () => {
       expect(matches.every(match => match.identity > 0 && match.canonical === 0), JSON.stringify(matches)).toBe(true);
       original.advanceToPresentationTime(.016);
       expect(restored.checkpoint()).toEqual(original.checkpoint());
-    } finally { monitor.mockRestore(); }
+    } finally { monitor.mockRestore(); forceRaw.mockRestore(); }
   });
   it('rejects modified nested device bindings before rebinding a restored checkpoint to trusted runtime roots', () => {
     const original = run(.002, .006);
@@ -111,6 +117,20 @@ describe('development cardiorespiratory exact session', () => {
     const surplus = checkpoint();
     surplus.state.dynamicMechanicalSupport.structuralHydraulicProjection.byDevice.LVAD.hiddenResistance = 1;
     expect(() => CardiorespiratorySessionV1.restore(original.fixture, surplus)).toThrow();
+  });
+  it('retains restored noncanonical device flows instead of replacing them with the cold live tuple', () => {
+    const session = CardiorespiratorySessionV1.create();
+    const checkpoint = JSON.parse(JSON.stringify(session.checkpoint()));
+    checkpoint.state.dynamicMechanicalSupport.acceptedFlowMlPerSec.LVAD = 1.25;
+    checkpoint.state.dynamicMechanicalSupport.acceptedFlowMlPerSec.IMPELLA = -.25;
+    const restored = CardiorespiratorySessionV1.restore(session.fixture, checkpoint);
+    const flows = restored.currentAcceptedState().dynamicMechanicalSupport.acceptedFlowMlPerSec;
+    expect(flows.LVAD).toBe(1.25);
+    expect(flows.IMPELLA).toBe(-.25);
+    expect(restored.checkpoint().state.dynamicMechanicalSupport.acceptedFlowMlPerSec.LVAD).toBe(1.25);
+    restored.advanceToPresentationTime(.002);
+    // The disabled device owner makes this transition in its accepted step.
+    expect(restored.currentAcceptedState().dynamicMechanicalSupport.acceptedFlowMlPerSec.LVAD).toBe(0);
   });
   it('preserves all primitive selected outputs immediately after JSON restore and on continuation', () => {
     const outputIds = createCardiorespiratoryDevReleaseV1().manifest.primitiveSignalCatalog.map(output => output.outputId);
@@ -160,6 +180,26 @@ describe('development cardiorespiratory exact session', () => {
       expect(mechanics).toHaveBeenCalledTimes(1);
     } finally { chemistry.mockRestore(); mechanics.mockRestore(); }
   });
+  it('projects admitted numerical readback without materializing sibling owners and retains the unavailable fallback', () => {
+    const outputIds = createCardiorespiratoryDevReleaseV1().manifest.primitiveSignalCatalog.map(output => output.outputId);
+    const session = run(.002, .006);
+    const expected = session.projectValues(outputIds), expectedState = session.cardiorespiratoryState();
+    const bytes = session.snapshotAcceptedStateBytes();
+    const fullRead = vi.spyOn(TransactionalTypedStateImageV1.prototype, 'rehydrateCurrent');
+    try {
+      expect(session.projectValues(outputIds)).toEqual(expected);
+      expect(session.cardiorespiratoryState()).toEqual(expectedState);
+      expect(fullRead).not.toHaveBeenCalled();
+      expect(session.snapshotAcceptedStateBytes()).toEqual(bytes);
+      const cold = CardiorespiratorySessionV1.create();
+      fullRead.mockClear();
+      cold.projectValues(outputIds);
+      expect(fullRead).toHaveBeenCalledTimes(1);
+      fullRead.mockClear();
+      cold.projectValues(['cardiorespiratory.gas.pressure.arterial-o2']);
+      expect(fullRead).not.toHaveBeenCalled();
+    } finally { fullRead.mockRestore(); }
+  });
   it('returns detached scalar clocks and state snapshots while retaining the private accepted authority', () => {
     const session = run(.002, .006), reference = run(.002, .006);
     const clock = session.currentAcceptedClock(), hemo = session.currentAcceptedState();
@@ -176,7 +216,27 @@ describe('development cardiorespiratory exact session', () => {
     reference.advanceToPresentationTime(.008);
     expect(session.checkpoint()).toEqual(reference.checkpoint());
   });
-  it('keeps the unpredicted coupled path byte-identical across integrity tiers and disabled validation stamps', () => {
+  it('retains raw fallback entry admission while avoiding an extra public wrap for its private typed adapter', () => {
+    const session = run(.002, .006);
+    const forceRaw = vi.spyOn(typedOrdinary, 'isMainWireTypedOrdinaryCandidateV1').mockReturnValue(false);
+    const wrap = vi.spyOn(integratedTransaction, 'wrapMainWireIntegratedModelAcceptedStateV3');
+    try {
+      session.advanceToPresentationTime(.008);
+      expect(wrap).not.toHaveBeenCalled();
+      session.currentAcceptedState();
+      expect(wrap).toHaveBeenCalledTimes(1);
+      const before = session.checkpoint(), step = coupledStep.stepMainWireIntegratedModelCoupledV1;
+      const corruptEntry = vi.spyOn(coupledStep, 'stepMainWireIntegratedModelCoupledV1')
+        .mockImplementation((provider, state, ...args) => step(provider, { ...state, revision: state.revision + 1 }, ...args));
+      try {
+        expect(() => session.advanceToPresentationTime(.010)).toThrow(/owner clocks differ/);
+        expect(session.checkpoint()).toEqual(before);
+      } finally { corruptEntry.mockRestore(); }
+      session.advanceToPresentationTime(.010);
+      expect(session.currentAcceptedClock().acceptedTimeSec).toBe(.010);
+    } finally { wrap.mockRestore(); forceRaw.mockRestore(); }
+  });
+  it('keeps the same coupled numerical path byte-identical across integrity tiers and disabled validation stamps', () => {
     const previousTier = hotPathIntegrityTierV1(), previousStamps = validationStampModeV1();
     const outputIds = createCardiorespiratoryDevReleaseV1().manifest.primitiveSignalCatalog.map(output => output.outputId);
     const bytesHash = (session: CardiorespiratorySessionV1) => {
@@ -254,6 +314,119 @@ describe('development cardiorespiratory exact session', () => {
       selectHotPathIntegrityTierV1(previousTier);
     }
   }, 60_000);
+  it('persists cubic predictor history for exact continuation and resets at edited or clipped boundaries', () => {
+    const session = run(.002, .04);
+    const checkpoint = session.checkpoint();
+    expect(checkpoint.schemaId).toBe('circleheart-cardiorespiratory-checkpoint-v2');
+    expect(checkpoint.coupledPredictor.history.historyDepth).toBeGreaterThan(0);
+    expect(session.solverWorkReport().cubicSolves).toBeGreaterThan(0);
+    const restored = CardiorespiratorySessionV1.restore(session.fixture, JSON.parse(JSON.stringify(checkpoint)));
+    session.advanceToPresentationTime(.08);
+    restored.advanceToPresentationTime(.08);
+    expect(restored.checkpoint()).toEqual(session.checkpoint());
+    const warm = restored.reconfigure({ ...restored.fixture,
+      cardiorespiratory: { ...restored.fixture.cardiorespiratory, systemicDemandMlMin: 200 } });
+    expect(warm.checkpoint().coupledPredictor.history.historyDepth).toBe(0);
+    restored.advanceToPresentationTime(.081);
+    expect(restored.checkpoint().coupledPredictor).toMatchObject({ previousStepDtSec: 0, history: { historyDepth: 0 } });
+    session.advanceToPresentationTime(.1);
+    expect(session.checkpoint().coupledPredictor.history.historyDepth).toBe(0);
+  });
+  it('matches the whole public checkpoint across a ventilator cycle, PCV ramps, cardiac boundaries and a clipped endpoint', () => {
+    const fast = CardiorespiratorySessionV1.create(), reference = CardiorespiratorySessionV1.create();
+    const outputIds = createCardiorespiratoryDevReleaseV1().manifest.primitiveSignalCatalog.map(output => output.outputId);
+    let maximumScaledOutputDifference = 0, maximumGasDifference = 0;
+    let dormantRightVentricularFallback = false;
+    const compareCheckpoint = (actual: unknown, expected: unknown, path = 'checkpoint'): void => {
+      if (path === 'checkpoint') {
+        // Admission independently checks each exact material fingerprint. A
+        // tolerance comparison of its floats cannot require equal byte hashes.
+        expect(() => CardiorespiratorySessionV1.restore(fast.fixture, actual)).not.toThrow();
+        expect(() => CardiorespiratorySessionV1.restore(reference.fixture, expected)).not.toThrow();
+        const a = (actual as ReturnType<CardiorespiratorySessionV1['checkpoint']>).beatAccumulator.active;
+        const b = (expected as ReturnType<CardiorespiratorySessionV1['checkpoint']>).beatAccumulator.active;
+        // Strict argmin can select different pressure witnesses on an
+        // isovolumic plateau after ulp-sized volume changes. When PV closure
+        // exists it supersedes this fallback; compare that entire event below.
+        dormantRightVentricularFallback = a != null && b != null
+          && a.valveClosureLandmarks.PV != null && b.valveClosureLandmarks.PV != null
+          && Math.abs(a.minimumRightVentricularLandmark.volumeMl - b.minimumRightVentricularLandmark.volumeMl) < 1e-10;
+      }
+      if (path === 'checkpoint.state.coronary.mechanics.materialStateFingerprint') return;
+      if (path === 'checkpoint.beatAccumulator.active.minimumRightVentricularLandmark.pressureMmHg'
+        && dormantRightVentricularFallback) return;
+      if (typeof actual === 'number' && typeof expected === 'number') {
+        expect(Number.isFinite(actual), path).toBe(true);
+        expect(Math.abs(actual - expected) / Math.max(1, Math.abs(expected)),
+          `${path} at ${fast.currentAcceptedClock().acceptedTimeSec}: ${actual} versus ${expected}`).toBeLessThan(1e-8);
+      } else if (actual !== null && expected !== null && typeof actual === 'object' && typeof expected === 'object') {
+        expect(Object.keys(actual), path).toEqual(Object.keys(expected));
+        for (const key of Object.keys(expected)) compareCheckpoint(
+          (actual as Record<string, unknown>)[key], (expected as Record<string, unknown>)[key], `${path}.${key}`);
+      } else expect(actual, path).toBe(expected);
+    };
+    for (let ordinal = 1; ordinal <= 2650; ordinal++) {
+      const target = ordinal * .002;
+      fast.advanceToPresentationTime(target);
+      const forceRaw = vi.spyOn(typedOrdinary, 'isMainWireTypedOrdinaryCandidateV1').mockReturnValue(false);
+      try { reference.advanceToPresentationTime(target); } finally { forceRaw.mockRestore(); }
+      expect(fast.currentAcceptedClock()).toEqual(reference.currentAcceptedClock());
+      if ([50, 500, 2500, 2550].includes(ordinal)) {
+        // PCV ramp end, expiration, mandatory breath restart, next ramp end.
+        expect(fast.checkpoint().coupledPredictor.history.historyDepth).toBe(0);
+        compareCheckpoint(fast.checkpoint(), reference.checkpoint());
+      } else if (ordinal % 250 === 0) compareCheckpoint(fast.checkpoint(), reference.checkpoint());
+      if (ordinal % 25 !== 0) continue;
+      const actual = fast.projectValues(outputIds), expected = reference.projectValues(outputIds);
+      for (const id of outputIds) {
+        expect(actual[id].availability, id).toBe(expected[id].availability);
+        const a = actual[id].value, b = expected[id].value;
+        if (a === null || b === null) expect(a, id).toBe(b);
+        else maximumScaledOutputDifference = Math.max(maximumScaledOutputDifference, Math.abs(a - b) / Math.max(1, Math.abs(b)));
+      }
+      const actualGas = inventoryVector(fast.cardiorespiratoryState()), expectedGas = inventoryVector(reference.cardiorespiratoryState());
+      actualGas.forEach((value, i) => { maximumGasDifference = Math.max(maximumGasDifference, Math.abs(value - expectedGas[i])); });
+    }
+    expect(fast.cardiorespiratoryState().respiratory.completedBreaths).toBe(1);
+    fast.advanceToPresentationTime(5.301);
+    const forceRaw = vi.spyOn(typedOrdinary, 'isMainWireTypedOrdinaryCandidateV1').mockReturnValue(false);
+    try { reference.advanceToPresentationTime(5.301); } finally { forceRaw.mockRestore(); }
+    expect(fast.currentAcceptedClock()).toEqual(reference.currentAcceptedClock());
+    expect(maximumScaledOutputDifference).toBeLessThan(1e-7);
+    expect(maximumGasDifference).toBeLessThan(1e-12);
+    expect(fast.checkpoint().coupledPredictor.history.historyDepth).toBe(0);
+    compareCheckpoint(fast.checkpoint(), reference.checkpoint());
+  });
+  it('rejects mismatched predictor roots, unknown continuation fields and incompatible step history', () => {
+    const original = run(.002, .04);
+    const checkpoint = () => JSON.parse(JSON.stringify(original.checkpoint()));
+    const root = checkpoint();
+    root.coupledPredictor.history.currentAcceptedMl[0] += 1;
+    expect(() => CardiorespiratorySessionV1.restore(original.fixture, root)).toThrow(/predictor checkpoint root/);
+    const step = checkpoint();
+    step.coupledPredictor.previousStepDtSec = .001;
+    expect(() => CardiorespiratorySessionV1.restore(original.fixture, step)).toThrow(/predictor continuation/);
+    const empty = checkpoint();
+    empty.coupledPredictor.previousStepDtSec = 0;
+    expect(() => CardiorespiratorySessionV1.restore(original.fixture, empty)).toThrow(/history and step/);
+    const unknown = checkpoint();
+    unknown.coupledPredictor.hidden = 1;
+    expect(() => CardiorespiratorySessionV1.restore(original.fixture, unknown)).toThrow(/predictor continuation/);
+  });
+  it('rejects a substituted direct candidate and preserves numerical and predictor accepted ownership', () => {
+    const session = run(.002, .04), checkpoint = session.checkpoint();
+    const forceRaw = vi.spyOn(typedOrdinary, 'isMainWireTypedOrdinaryCandidateV1').mockReturnValue(false);
+    const complete = TransactionalTypedStateImageV1.prototype.completeCandidateFromObject;
+    const substitute = vi.spyOn(TransactionalTypedStateImageV1.prototype, 'completeCandidateFromObject').mockImplementation(function (
+      this: TransactionalTypedStateImageV1<unknown>, candidate: unknown,
+      plan: Parameters<TransactionalTypedStateImageV1<unknown>["completeCandidateFromObject"]>[1],
+    ) { return complete.call(this, { ...(candidate as object) }, plan); });
+    try { expect(() => session.advanceToPresentationTime(.042)).toThrow(/Unowned cardiorespiratory direct candidate/); }
+    finally { substitute.mockRestore(); forceRaw.mockRestore(); }
+    expect(session.checkpoint()).toEqual(checkpoint);
+    session.advanceToPresentationTime(.042);
+    expect(session.currentAcceptedClock().acceptedTimeSec).toBe(.042);
+  });
   it('rejects stale or malformed numerical readback and invalidates it across a warm fixture edit', () => {
     const original = run(.002, .006);
     for (const mutation of [
@@ -282,10 +455,14 @@ describe('development cardiorespiratory exact session', () => {
     const original = run(.002, .006), checkpoint = original.checkpoint(), bytes = original.snapshotAcceptedStateBytes();
     const outputIds = createCardiorespiratoryDevReleaseV1().manifest.primitiveSignalCatalog.map(output => output.outputId);
     const outputs = original.projectValues(outputIds);
+    expect(checkpoint.coupledPredictor.history.historyDepth).toBeGreaterThan(0);
+    const typedStage = vi.spyOn(typedOrdinary, 'stageMainWireTypedOrdinaryCandidateV1');
     const failure = vi.spyOn(pulmonaryExchange, 'exchangePerfusedBloodWithAlveolarGasV1')
       .mockImplementation(() => { throw new Error('injected post-hemodynamic gas rejection'); });
-    try { expect(() => original.advanceToPresentationTime(.008)).toThrow('injected post-hemodynamic gas rejection'); }
-    finally { failure.mockRestore(); }
+    try {
+      expect(() => original.advanceToPresentationTime(.008)).toThrow('injected post-hemodynamic gas rejection');
+      expect(typedStage).toHaveBeenCalled();
+    } finally { failure.mockRestore(); typedStage.mockRestore(); }
     expect(original.checkpoint()).toEqual(checkpoint);
     expect(original.snapshotAcceptedStateBytes()).toEqual(bytes);
     expect(original.projectValues(outputIds)).toEqual(outputs);
