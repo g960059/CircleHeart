@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdtemp, writeFile, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -11,8 +12,32 @@ import { composeStandardModelContractV1 } from "@/studio/contracts/v2/modelSurfa
 import surfaceRelease from "@/studio/integrations/cardiorespiratoryV1/CardiorespiratorySurfaceV1";
 import { StudioSimulationWorkerRuntimeV2 } from "@/studio/workers/StudioSimulationWorkerRuntimeV2";
 import { createStudioSimulationInitializeRequestV2, createStudioSimulationReadScenariosRequestV2, createStudioSimulationAdvancePresentationRequestV2, createStudioSimulationApplyControlRequestV2, validateStudioSimulationWorkerResponseV2 } from "@/studio/workers/StudioSimulationWorkerProtocolV2";
+import { readCardiorespiratoryPreparedDevInputsV1 } from "@/tools/model/CardiorespiratoryPreparedDevInputsV1";
+import { CardiorespiratorySessionV1 } from "@/engine/cardiorespiratory/CardiorespiratorySessionV1";
+import { DEFAULT_CARDIORESPIRATORY_FIXTURE_V1 } from "@/engine/cardiorespiratory/CardiorespiratoryFixtureV1";
+import { CardiorespiratorySettlementMonitorV1 } from "@/analysis/methods/cardiorespiratory/CardiorespiratorySettlementV1";
+import { studioCanonicalJsonStringify } from "@/domain/json/CanonicalJson";
 
 describe("explicit local cardiorespiratory Model Lab composition", () => {
+  it("does not import a self-declared qualified preset without current method evidence", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "cardiorespiratory-prepared-admission-"));
+    try {
+      const session = CardiorespiratorySessionV1.create(DEFAULT_CARDIORESPIRATORY_FIXTURE_V1);
+      const monitor = new CardiorespiratorySettlementMonitorV1(["reference", "lower", "upper"],
+        [0, 1, 2].map(() => session.physicalSettlementProjectionV1()));
+      const evidence = monitor.evidence(), checkpoint = session.checkpoint();
+      const source = { sha256: "a".repeat(64), files: [] };
+      const body = { schemaId: "cardiorespiratory-dev-preparation-v1", scope: "local-development-no-publication",
+        source, caseId: "dev-baseline", sourcePresetId: null, fixture: session.fixture, config: monitor.config,
+        histories: [checkpoint, checkpoint, checkpoint], monitor: monitor.checkpoint(),
+        evidence: { ...evidence, status: "qualified", issues: [] }, qualifiedCheckpoint: checkpoint };
+      await writeFile(path.join(directory, "dev-baseline.json"), JSON.stringify({ ...body,
+        recordSha256: createHash("sha256").update(studioCanonicalJsonStringify(body)).digest("hex") }));
+      await expect(readCardiorespiratoryPreparedDevInputsV1({
+        root: path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."), directory, source,
+      })).rejects.toThrow("no current full-system qualification");
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
   it("binds the compiled artifact and every bundled source input to this checkout", async () => {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
     const bundle = JSON.parse(await readFile(path.join(root, "data/model-releases/cardiorespiratory-dev-v1/bundle.json"), "utf8")) as { artifactRevisionId: string; sourceTreeHash: string; sourceInputs: { path: string; sha256: string }[] };

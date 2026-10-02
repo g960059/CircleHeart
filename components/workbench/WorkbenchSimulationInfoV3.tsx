@@ -15,9 +15,13 @@ import { useTranslation } from "react-i18next";
 
 import type { ModelContractV2 } from "@/studio/contracts/v2/model";
 import { MAIN_WIRE_PRESSURE_CROSSING_PV_ANALYSIS_V1_ID } from "@/analysis/methods/mainWire/MainWireStructuralAnalysisContractV3";
+import { CARDIORESPIRATORY_MECHANICAL_ANALYSIS_V1_ID } from "@/analysis/methods/cardiorespiratory/CardiorespiratoryMechanicalAnalysisV1";
 
 /** Disclosure follows the pinned measurement, including on public routes. */
 export function workbenchAnalysisLimitationsV3(analysisId: string, locale: string): readonly string[] {
+  if (analysisId === CARDIORESPIRATORY_MECHANICAL_ANALYSIS_V1_ID) return [locale === "ja"
+    ? "このPV解析は、取得時点の胸膜圧、2領域の肺胞圧と肺血管抵抗、および血管トーンを固定した条件で計算します。呼吸周期の平均応答や、ガス交換を含む全身の定常状態を表すものではありません。独立した解析用の計算で測定し、元の保存状態やライブ計算は変更しません。"
+    : "This PV analysis holds the captured pleural pressure, both regional alveolar pressures and pulmonary vascular resistances, and vascular tone fixed. It does not represent a breath-averaged response or whole-system gas-exchange settlement. Measurements use isolated analysis sessions without changing the source capture or live calculation."];
   if (analysisId !== MAIN_WIRE_PRESSURE_CROSSING_PV_ANALYSIS_V1_ID) return [];
   return [locale === "ja"
     ? "PV解析では、準定常弁の前向き駆出が終わる位置を、弁前後の圧差のゼロ交差から補間します。実際の弁尖の接触時刻を測るものではありません。ライブ計算や保存状態は変更せず、独立した解析用の計算で測定します。"
@@ -53,6 +57,18 @@ export type WorkbenchSimulationInfoScenarioV3 = Readonly<{
   numericalSafety: "not-checked" | "checking" | "passed" | "unavailable";
   analysis: "idle" | "checking" | "unavailable";
 }>;
+
+/** Snapshot admission proves executable consistency, never settlement. */
+export function workbenchSnapshotChecksV3(
+  state: "idle" | "creating" | "created" | "error" | null,
+): Pick<WorkbenchSimulationInfoScenarioV3, "settlement" | "numericalSafety"> {
+  return Object.freeze({
+    settlement: "not-assessed",
+    numericalSafety: state === "created" ? "passed"
+      : state === "creating" ? "checking"
+        : state === "error" ? "unavailable" : "not-checked",
+  });
+}
 
 export type WorkbenchSimulationInfoTabV3 = "status" | "model" | "note";
 

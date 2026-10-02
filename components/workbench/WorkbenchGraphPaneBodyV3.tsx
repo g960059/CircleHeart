@@ -36,6 +36,7 @@ import {
 } from "@/components/workbench/WorkbenchAnalysisState";
 import { workbenchScenarioRuntimeStatusV3 } from "@/components/workbench/WorkbenchSessionPolicy";
 import { mainWireFormalPvAnalysisIdV1 } from "@/analysis/methods/mainWire/MainWireStructuralAnalysisContractV3";
+import { CARDIORESPIRATORY_MECHANICAL_ANALYSIS_V1_ID } from "@/analysis/methods/cardiorespiratory/CardiorespiratoryMechanicalAnalysisV1";
 import { periodicPvaFromAnalysisV3 } from "./presentation/WorkbenchPeriodicPvaProjectionV3";
 import { CompletedEjectionWaveformV1 } from "./presentation/CompletedEjectionWaveformV1";
 import { WorkbenchChartLegendRowV3 } from "./presentation/WorkbenchChartTraceStyleV3";
@@ -74,6 +75,19 @@ export function workbenchPvGraphUsesPeriodicPvaAnalysisV3(
     pressureVolumeAnalysisMode !== "raw-exact-orbit" &&
     displayedSeriesIds.some((seriesId) => seriesId === "LV" || seriesId === "RV")
   );
+}
+
+export function WorkbenchMechanicalAnalysisCaptionV3({ analysisId, kind }: Readonly<{
+  analysisId: string;
+  kind: "pressure-volume" | "structural-return";
+}>) {
+  const { t } = useTranslation();
+  if (analysisId !== CARDIORESPIRATORY_MECHANICAL_ANALYSIS_V1_ID) return null;
+  return <p className="shrink-0 px-3 py-1 text-[10px] text-wb-muted" data-testid="workbench-mechanical-analysis-caption">
+    {t(kind === "pressure-volume"
+      ? "workbench.live.fixedRespiratoryPvCaption"
+      : "workbench.live.fixedRespiratoryMechanicalCaption")}
+  </p>;
 }
 
 export function GraphPaneBodyV3({
@@ -480,23 +494,26 @@ function SampledGraphPaneBodyV3({
       <ExperimentGraphPresentationV3
         variant="pane"
         data-workbench-graph-pane={pane.paneId}
-        canvasClassName="h-full min-h-0"
+        canvasClassName="flex h-full min-h-0 flex-col"
       >
-        <PressureVolumeLoopCanvasV3
-          axisRanges={pane.axisRanges}
-          pvTrailBeats={pane.pvTrailBeats}
-          playbackRunning={playbackRunning}
-          legendActions={legendActions}
-          periodicPvaSupported={periodicPvaEnabled}
-          traces={traces}
-          onRetryAnalysis={retryScenarioIds.length === 0 || operationPending
-            ? undefined
-            : () => onRequestAnalysis(pressureVolumeAnalysisId, retryScenarioIds)}
-          showPressureEnvelope={
-            periodicPvaEnabled ? pane.showPressureEnvelope : false
-          }
-          showPvaBoundary={periodicPvaEnabled ? pane.showPvaBoundary : false}
-        />
+        {periodicPvaEnabled && <WorkbenchMechanicalAnalysisCaptionV3 analysisId={pressureVolumeAnalysisId} kind="pressure-volume" />}
+        <div className="min-h-0 flex-1">
+          <PressureVolumeLoopCanvasV3
+            axisRanges={pane.axisRanges}
+            pvTrailBeats={pane.pvTrailBeats}
+            playbackRunning={playbackRunning}
+            legendActions={legendActions}
+            periodicPvaSupported={periodicPvaEnabled}
+            traces={traces}
+            onRetryAnalysis={retryScenarioIds.length === 0 || operationPending
+              ? undefined
+              : () => onRequestAnalysis(pressureVolumeAnalysisId, retryScenarioIds)}
+            showPressureEnvelope={
+              periodicPvaEnabled ? pane.showPressureEnvelope : false
+            }
+            showPvaBoundary={periodicPvaEnabled ? pane.showPvaBoundary : false}
+          />
+        </div>
       </ExperimentGraphPresentationV3>
     );
   }
@@ -759,6 +776,7 @@ function StructuralReturnGraphPaneV3({
       data-analysis-pending={pending ? "true" : "false"}
     >
       <>
+        <WorkbenchMechanicalAnalysisCaptionV3 analysisId={analysisId} kind="structural-return" />
         {comparisonTraces.length === 0 && <WorkbenchChartLegendRowV3 actions={legendActions}
           updatingLabel={traces.length > 0 && (pending || error === null) ? t("workbench.live.analysisRunning") : undefined}>
           {traces.length > 0 && <SimulationLegendPlaceholderV1 />}

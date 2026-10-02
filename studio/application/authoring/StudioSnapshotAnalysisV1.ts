@@ -40,7 +40,7 @@ export type StudioSnapshotAnalysisAssessmentV1 = Readonly<{
 export interface StudioSnapshotAnalysisModelPortV1 {
   resolveAnalysisModel(pin: StudioAuthoringExactModelPinV1): Promise<Pick<
     StudioModelWorkerReleaseTicketV2, "modelId" | "artifactRevisionId" | "surfaceRelease"
-  >>;
+  > & Readonly<{ exactNumericalExports?: Readonly<Record<string, unknown>> }>>;
   /** Judges display completeness with the Surface's pinned derivation and the display's
    * payload decoder. The host owns both; this port keeps them outside the application. */
   assessAnalysis(
@@ -123,6 +123,7 @@ export async function analyzeStudioSnapshotV1(
           acceptedFrame: { modelId: exactModel.modelId, runtimeSessionId, scenarioId: scenario.scenarioId,
             inputEpoch: 0, acceptedRevision: source.acceptedRevision, acceptedTimeSec: source.acceptedTimeSec, outputs: {} },
           surfaceRelease: surface, legacyExact: null,
+          exactNumericalExports: release.exactNumericalExports,
           capture: async () => ({ artifactRevisionId: release.artifactRevisionId, scenario: structuredClone(scenario.capture) }),
         },
         request: { runtimeSessionId, scenarioId: scenario.scenarioId, analysisId,

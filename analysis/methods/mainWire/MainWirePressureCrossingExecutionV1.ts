@@ -1,19 +1,11 @@
 import type { AnalysisExecutorV1 } from "@/analysis/contracts/AnalysisExecutionV1";
-import { MainWireStaticCaseSessionV1 as Session } from "@/engine/vnext/MainWireStaticCaseSessionV1";
+import type { MainWireStaticCaseSessionV1 as Session } from "@/engine/vnext/MainWireStaticCaseSessionV1";
 import { MAIN_WIRE_STATIC_CASE_MODEL_ID_V1, MAIN_WIRE_STATIC_CASE_FIXTURE_SCHEMA_ID_V1 } from "@/domain/model/MainWireStaticCaseIdentityV1";
 import { hotPathIntegrityTierV1, selectHotPathIntegrityTierV1 } from "@/engine/hotPathIntegrityTierV1";
 import { studioCanonicalJsonStringify as canonical } from "@/domain/json/CanonicalJson";
-import { validateStudioSimulationAnalysisV2 } from "@/studio/contracts/v2/simulation";
 import { MAIN_WIRE_PRESSURE_CROSSING_PV_ANALYSIS_V1_ID as analysisId,
-  MAIN_WIRE_PRESSURE_CROSSING_PV_PROTOCOL_V1_ID as protocolId,
-  type MainWireIntegratedModelResponsiveStarlingPartitionV3 } from "./MainWireStructuralAnalysisContractV3";
-import { runMainWireIntegratedModelFormalPressureVolumeProtocolV3 as protocol } from "./MainWirePressureVolumeProtocolsV3";
-import { buildMainWireIntegratedModelGuytonStarlingOrientationV3 as orientation } from "./MainWireGuytonStarlingOrientationV3";
-import { wrapMainWirePressureCrossingSessionV1 as wrap, MAIN_WIRE_SEMILUNAR_PRESSURE_CROSSING_V1_ID as measurementId } from "./MainWirePressureCrossingSessionV1";
-import { sha256StudioCanonicalJsonHex as digest } from "@/domain/json/CanonicalJsonSha256";
-import { prepareMainWirePressureVolumeAnchorV1 as prepare, runMainWirePressureVolumeFromAnchorV1 as runPrepared,
-  mainWirePressureVolumeAnchorLociV1 as anchorLoci } from "./MainWireSharedPressureVolumeAnchorV1";
-import { captureMainWirePressureVolumeContinuationV1 as captureContinuation, restoreMainWirePressureVolumeContinuationV1 as restoreContinuation } from "./MainWirePressureVolumeContinuationV1";
+  MAIN_WIRE_PRESSURE_CROSSING_PV_PROTOCOL_V1_ID as protocolId } from "./MainWireStructuralAnalysisContractV3";
+import { executeFixedBoundaryPressureVolumeV1 } from "./FixedBoundaryPressureVolumeExecutionV1";
 
 // Exact-owner source compatibility is deliberately narrow. Changing this pin
 // requires source/compiled continuation tests, not merely a matching modelId.
@@ -68,59 +60,16 @@ export const executeMainWirePressureCrossingPvV1: AnalysisExecutorV1["execute"] 
   try {
     selectHotPathIntegrityTierV1("hot-path-lean");
     // Restore/checkpoint semantics remain in the exact owner, not the analysis.
-    const restore = Session.restore;
+    const exactOwner = source.exactNumericalExports?.ExactSessionV1 as typeof Session | undefined;
+    if (typeof exactOwner?.restore !== "function") throw new Error("Pressure-crossing analysis requires its admitted exact artifact exports");
+    const restore = exactOwner.restore;
     const session = await restore(checkpoint.payload, fixture.anatomyId,
       fixture.hemodynamicResearchInputs, 1, fixture.mechanismResearchInputs);
     const accepted = session.currentAcceptedState();
     if (accepted.revision !== frame.acceptedRevision || accepted.acceptedTimeSec !== frame.acceptedTimeSec)
       throw new Error("Restored pressure-crossing source clocks differ");
-    const toLoci = (result: Pick<Awaited<ReturnType<typeof protocol>>, "right" | "left">) => Object.freeze({
-        right: Object.freeze({ ...result.right, protocolId, exactAnatomy: session.anatomy }),
-        left: Object.freeze({ ...result.left, protocolId, exactAnatomy: session.anatomy }),
-      });
-    const withEnvelope = (payload: ReturnType<typeof orientation>) => {
-      if (payload.status !== "available") throw new Error("Pressure-volume anchor has no accepted readback");
-      return validateStudioSimulationAnalysisV2({ modelId: frame.modelId, runtimeSessionId: request.runtimeSessionId,
-        scenarioId: frame.scenarioId, inputEpoch: frame.inputEpoch, sourceAcceptedRevision: frame.acceptedRevision,
-        sourceAcceptedTimeSec: frame.acceptedTimeSec, analysisId,
-        payload: { ...payload, measurement: { methodId: measurementId, protocolId,
-          maximumStepSec: .002, interpolation: "signed-pressure-linear-bracket", pressureBasis: "transmural",
-          exactNativeMetricsUnchanged: true } } });
-    };
-    const toAnalysis = (result: Awaited<ReturnType<typeof protocol>>) =>
-      withEnvelope(orientation(result.anchorObservation, fixture.hemodynamicResearchInputs, toLoci(result)));
-    if (request.sharePreparation || request.preparedAnalysis !== undefined) {
-      const sourceBinding = await digest({ modelId: frame.modelId, artifactRevisionId: captured.artifactRevisionId,
-        scenarioId: frame.scenarioId, analysisId, measurementId, fixture, checkpoint });
-      const partition = request.analysisPartition as MainWireIntegratedModelResponsiveStarlingPartitionV3;
-      const center = await (async () => {
-        if (request.preparedAnalysis !== undefined) return restoreContinuation(request.preparedAnalysis, sourceBinding,
-          payload => restore(payload, fixture.anatomyId, fixture.hemodynamicResearchInputs, 1, fixture.mechanismResearchInputs));
-        const prepared = await prepare(wrap(session), fixture.hemodynamicResearchInputs!);
-        const base = orientation(prepared.observation, fixture.hemodynamicResearchInputs, toLoci(anchorLoci(prepared, partition)));
-        if (base.status !== "available") throw new Error("Pressure-volume anchor has no accepted readback");
-        return { ...prepared, orientation: base };
-      })();
-      // The fixed Guyton orientation depends only on the common anchor. Keep
-      // it once; only the measured Starling/PV locus changes during each sweep.
-      const toPreparedAnalysis = (result: Awaited<ReturnType<typeof runPrepared>>) => {
-        const loci = toLoci(result);
-        return withEnvelope({ ...center.orientation,
-          right: { ...center.orientation.right, starlingLocus: loci.right },
-          left: { ...center.orientation.left, starlingLocus: loci.left } });
-      };
-      let preparation = request.sharePreparation ? await captureContinuation(center, sourceBinding, center.orientation) : undefined;
-      const result = await runPrepared(center, fixture.hemodynamicResearchInputs!,
-        partition, progress => {
-          request.onProgress?.(toPreparedAnalysis(progress), preparation);
-          preparation = undefined;
-        });
-      return toPreparedAnalysis(result);
-    }
-    const result = await protocol(wrap(session), fixture.hemodynamicResearchInputs,
-      progress => request.onProgress?.(toAnalysis(progress)),
-      request.analysisPartition as MainWireIntegratedModelResponsiveStarlingPartitionV3 | undefined);
-    return toAnalysis(result);
+    return await executeFixedBoundaryPressureVolumeV1({ source, request, captured, session, analysisId, protocolId,
+      restore: payload => restore(payload, fixture.anatomyId, fixture.hemodynamicResearchInputs, 1, fixture.mechanismResearchInputs) });
   } finally {
     try { selectHotPathIntegrityTierV1(previousTier); }
     finally { releaseExecution(); }

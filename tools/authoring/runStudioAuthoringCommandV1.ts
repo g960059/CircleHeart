@@ -297,11 +297,13 @@ function createAuthoringModelPortV1(
   return Object.freeze({
     async resolveAnalysisModel(input) {
       // Registry validation binds model, artifact and Surface. The registered executor
-      // uses reviewed local analysis code; no remote ESM enters this authenticated process.
+      // restores through the reviewed local artifact; no remote ESM enters this authenticated process.
       const { ticket } = await exactModels.resolveExactModel(input.modelId, {
         kind: "release" as const, surfaceSeriesId: input.surfaceSeriesId, surfaceReleaseId: input.surfaceReleaseId,
       });
-      return { modelId: ticket.modelId, artifactRevisionId: ticket.artifactRevisionId, surfaceRelease: ticket.surfaceRelease };
+      const runtime = await runtimes.load(ticket);
+      return { modelId: ticket.modelId, artifactRevisionId: ticket.artifactRevisionId, surfaceRelease: ticket.surfaceRelease,
+        exactNumericalExports: runtime.exactNumericalExports };
     },
     // Host-owned display completeness: the Workbench decoder plus the pinned derivation.
     assessAnalysis: inspectModelAnalysisV1,

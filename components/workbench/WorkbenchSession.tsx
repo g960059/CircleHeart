@@ -56,7 +56,7 @@ import {
   RuntimeStatusV3,
   type WorkbenchStatusV3,
 } from "@/components/workbench/WorkbenchPaneBodiesV3";
-import { WorkbenchSimulationInfoV3, workbenchAnalysisLimitationsV3 } from "@/components/workbench/WorkbenchSimulationInfoV3";
+import { WorkbenchSimulationInfoV3, workbenchAnalysisLimitationsV3, workbenchSnapshotChecksV3 } from "@/components/workbench/WorkbenchSimulationInfoV3";
 import { WorkbenchPlaybackControlV3 } from "@/components/workbench/WorkbenchPlaybackControlV3";
 import { WorkbenchPublishMenuV3, type WorkbenchPublicationStageV3 } from "./WorkbenchPublishMenuV3";
 import {
@@ -2949,20 +2949,9 @@ export const WorkbenchSession = ({
         colorHex: authoredColor ?? scenarioIdentityColorV3(index),
         active: scenario.scenarioId === activeScenarioId,
         runtime: isPlaying ? ("live" as const) : ("paused" as const),
-        settlement:
-          snapshotPurpose === "publication" && snapshotState === "created"
-            ? ("settled" as const)
-            : snapshotPurpose === "publication" && snapshotState === "creating"
-              ? ("checking" as const)
-              : ("not-assessed" as const),
-        numericalSafety:
-          snapshotPurpose !== null && snapshotState === "created"
-            ? ("passed" as const)
-            : snapshotPurpose !== null && snapshotState === "creating"
-              ? ("checking" as const)
-              : snapshotPurpose !== null && snapshotState === "error"
-                ? ("unavailable" as const)
-                : ("not-checked" as const),
+        ...workbenchSnapshotChecksV3(
+          snapshotPurpose === null ? null : snapshotState,
+        ),
         analysis: pendingAnalysisScenarioIds.has(scenario.scenarioId)
           ? ("checking" as const)
           : unavailableAnalysisScenarioIds.has(scenario.scenarioId)

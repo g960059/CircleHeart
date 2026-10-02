@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { canonicalJsonStringify as canonical } from "@/engine/integrity";
-import { createMainWireIntegratedStudioStaticCaseCoreReleaseV1 as release } from "@/studio/integrations/mainWireIntegratedV3/MainWireIntegratedStudioSelectedAorticOutflowExactModelV1";
+import { importExactExecutableArtifactModuleV2 } from "@/runtime/ExactExecutableArtifactModuleLoaderV2";
+import type { RegisteredModelExecutableBundleV2 } from "@/studio/contracts/v2/executable";
+import type { ExactModelKernelManifestV3 } from "@/studio/contracts/v2/modelSurface";
 import surface from "@/studio/integrations/mainWireIntegratedV3/MainWireIntegratedStudioStaticCaseSurfaceV5";
 import { composeStandardModelContractV1 } from "@/studio/contracts/v2/modelSurface";
 import { resolveRegisteredAnalysisMethodsV1 } from "@/analysis/registry/RegisteredAnalysisMethodsV1";
@@ -37,6 +39,11 @@ export async function prepareCurrentModelPublicationV1(root: string, input: Read
   requireProof(sha(rawPackage) === "28dfc475c562cce5871934c465e142aa27c1209d04c2a4e54b015e6351213061"
     && sha(rawPackage) === lock.reviewedLocalPackageSha256, "reviewed local package changed");
   const reviewed = JSON.parse(rawPackage);
+  // Authenticate bytes before evaluating any executable. The frozen artifact,
+  // rather than a factory imported from current development source, owns its
+  // checkpoint admission semantics.
+  const artifactSha256 = sha(artifact);
+  requireProof(artifactSha256 === reviewed.artifactSha256 && artifactSha256 === lock.artifactSha256, "artifact differs from qualification");
   const evidencePath = resolve(root, reviewed.workerEvidence.path);
   const evidenceSha = sha(readFileSync(evidencePath));
   requireProof(evidenceSha === "013a304bdde48a0e6607cbab27bec07ad67a5defaa30d373035a731dee502406"
@@ -59,7 +66,14 @@ export async function prepareCurrentModelPublicationV1(root: string, input: Read
   const { recordSha256, ...body } = bundle;
   requireProof(sha(canonical(body)) === recordSha256 && recordSha256 === reviewed.bundleSha256
     && recordSha256 === lock.bundleSha256, "qualified bundle changed");
-  const exact = release(), manifest = exact.manifest;
+  const namespace = await importExactExecutableArtifactModuleV2(artifact);
+  const factory = namespace.createCircleHeartExactModelReleaseV1;
+  requireProof(typeof factory === "function", "artifact release factory missing");
+  const exact = await factory() as Readonly<{
+    manifest: ExactModelKernelManifestV3;
+    executables: RegisteredModelExecutableBundleV2;
+  }>;
+  const manifest = exact.manifest;
   requireProof(input.expectedModelId === manifest.modelId && manifest.modelId === lock.modelId
     && manifest.modelId === reviewed.modelId, "unsupported modelId");
   same(manifest, bundle.manifest, "exact manifest changed");
@@ -67,8 +81,6 @@ export async function prepareCurrentModelPublicationV1(root: string, input: Read
   requireProof(surface.surfaceReleaseId === lock.surfaceReleaseId, "Surface identity");
   const methods = resolveRegisteredAnalysisMethodsV1(surface);
   const model = composeStandardModelContractV1(manifest, surface, methods.capabilities).contract;
-  const artifactSha256 = sha(artifact);
-  requireProof(artifactSha256 === reviewed.artifactSha256 && artifactSha256 === lock.artifactSha256, "artifact differs from qualification");
   const manifestBytes = Buffer.from(canonical(manifest)), lengths = Buffer.alloc(8);
   lengths.writeUInt32BE(manifestBytes.length, 0); lengths.writeUInt32BE(artifact.length, 4);
   requireProof(sha(Buffer.concat([lengths, manifestBytes, artifact])) === lock.artifactRevisionId

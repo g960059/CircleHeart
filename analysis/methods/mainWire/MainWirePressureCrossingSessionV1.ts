@@ -18,7 +18,18 @@ const ids = Object.freeze(sides.flatMap(({ ventricle, valve, downstream }) => [
 ]) as Id[]);
 type Sample = Readonly<{ timeSec: number; values: Readonly<Record<string, Value>> }>;
 type Crossing = Readonly<{ timeSec: number; bracketEndSec: number; landmark: Landmark & { event: "semilunar-valve-closure" } }>;
-const owners = new WeakMap<StructuralSession, Session>();
+/** The analysis borrows only this exact-owned continuation interface. A
+ * respiratory intervention may supply another numerical owner with the same
+ * hemodynamic projection, without claiming to be a production session. */
+export type PressureCrossingExactSessionV1 = Pick<Session, "currentAcceptedState" | "observe"
+  | "projectCurrentAcceptedValuesV1" | "advanceToPresentationTime"
+  | "advanceToPresentationTimeWithSelectedOutputProjectionV1"> & {
+    checkpoint(): unknown | Promise<unknown>;
+    advancePressureCrossingPresentationV1?: Session["advancePressureCrossingPresentationV1"];
+    forkAtFixedGlobalTotalBloodVolume(tbv: number): PressureCrossingExactSessionV1;
+    forkResponsiveStarlingAtFixedGlobalTotalBloodVolume(tbv: number): PressureCrossingExactSessionV1;
+  };
+const owners = new WeakMap<StructuralSession, PressureCrossingExactSessionV1>();
 
 /** Exact continuation remains owned by the model; event collectors are not
  * serialized into its checkpoint. Every subsequent load forks a new collector. */
@@ -48,11 +59,13 @@ export function interpolateMainWireSemilunarClosureV1(
 
 /** Ephemeral analysis view; it does not mutate or relabel native beat metrics.
  * Each fixed-TBV fork owns its own event collector and the same requested dt. */
-export function wrapMainWirePressureCrossingSessionV1(source: Session, dt: .002 | .001 = .002): StructuralSession {
-  return wrapPressureCrossingSession(source, dt, true);
+export function wrapMainWirePressureCrossingSessionV1(source: PressureCrossingExactSessionV1, dt: .002 | .001 = .002,
+  requireReservoirClosure = false): StructuralSession {
+  return wrapPressureCrossingSession(source, dt, true, requireReservoirClosure);
 }
 
-function wrapPressureCrossingSession(source: Session, dt: .002 | .001, retainDiagnosticReadback: boolean): StructuralSession {
+function wrapPressureCrossingSession(source: PressureCrossingExactSessionV1, dt: .002 | .001, retainDiagnosticReadback: boolean,
+  requireReservoirClosure: boolean): StructuralSession {
   let previous: Sample | null = null;
   const initial = source.currentAcceptedState();
   const origin = initial.acceptedTimeSec;
@@ -94,7 +107,7 @@ function wrapPressureCrossingSession(source: Session, dt: .002 | .001, retainDia
     currentAcceptedState: () => source.currentAcceptedState(), observe,
     projectCurrentAcceptedValuesV1: outputIds => source.projectCurrentAcceptedValuesV1(outputIds),
     advanceToPresentationTime: target => {
-      const result = !retainDiagnosticReadback && "advancePressureCrossingPresentationV1" in source
+      const result = !retainDiagnosticReadback && source.advancePressureCrossingPresentationV1
         ? source.advancePressureCrossingPresentationV1(target)
         : source.advanceToPresentationTime(target);
       if (result.status === "advanced") collect({ timeSec: result.acceptedTimeSec, values: source.projectCurrentAcceptedValuesV1(ids) });
@@ -137,6 +150,7 @@ function wrapPressureCrossingSession(source: Session, dt: .002 | .001, retainDia
       }) });
   };
   const wrapped: StructuralSession = Object.freeze({ ...numerical,
+    ...(requireReservoirClosure ? { requireReservoirClosureV1: true } : {}),
     pressureVolumeLandmarksForBeatV1: landmarksForBeat,
     // Only analysis advances see measured landmarks; native metrics are intact.
     advanceStructuralAnalysisToPresentationTimeV1: target => structuralAdvance(numerical, target),
@@ -144,8 +158,8 @@ function wrapPressureCrossingSession(source: Session, dt: .002 | .001, retainDia
     // step for vascular-return construction. Changed-load forks only sample PV
     // primitives and beats. Re-entering at the same load restores diagnostics,
     // including when a caller starts a new protocol from an existing branch.
-    forkAtFixedGlobalTotalBloodVolume: tbv => wrapPressureCrossingSession(source.forkAtFixedGlobalTotalBloodVolume(tbv), dt, tbv === sourceTbv),
-    forkResponsiveStarlingAtFixedGlobalTotalBloodVolume: tbv => wrapPressureCrossingSession(source.forkResponsiveStarlingAtFixedGlobalTotalBloodVolume(tbv), dt, tbv === sourceTbv),
+    forkAtFixedGlobalTotalBloodVolume: tbv => wrapPressureCrossingSession(source.forkAtFixedGlobalTotalBloodVolume(tbv), dt, tbv === sourceTbv, requireReservoirClosure),
+    forkResponsiveStarlingAtFixedGlobalTotalBloodVolume: tbv => wrapPressureCrossingSession(source.forkResponsiveStarlingAtFixedGlobalTotalBloodVolume(tbv), dt, tbv === sourceTbv, requireReservoirClosure),
   });
   owners.set(wrapped, source);
   return wrapped;

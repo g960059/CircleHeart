@@ -1,3 +1,5 @@
+import { CARDIORESPIRATORY_MECHANICAL_ANALYSIS_V1_ID, CARDIORESPIRATORY_MECHANICAL_PVA_V1_ID } from "@/analysis/methods/cardiorespiratory/CardiorespiratoryMechanicalAnalysisV1";
+import { resolveRegisteredAnalysisMethodsV1 } from "@/analysis/registry/RegisteredAnalysisMethodsV1";
 import { boundCardiorespiratoryControlV1 } from "@/components/workbench/CardiorespiratoryControlBoundsV1";
 import { describe, expect, it, vi } from "vitest";
 import inherited from "@/studio/integrations/mainWireIntegratedV3/MainWireIntegratedStudioStaticCaseSurfaceV5";
@@ -20,11 +22,21 @@ const samples = (): Sample[] => Array.from({ length: 10001 }, (_, i) => {
   } };
 });
 describe("cardiorespiratory dev Surface compatibility", () => {
-  it("retains every production output, control, graph, knob, protocol and pinned analysis", () => {
+  it("retains every production item with explicit fixed-respiratory source and PVA substitutions", () => {
     expect(() => assertModelSurfaceReleaseManifestV1(surface)).not.toThrow();
-    for (const key of ["exposedExactOutputIds", "controlCatalog", "derivedOutputCatalog", "graphCatalog", "knobCatalog", "protocolCatalog"] as const) {
+    for (const key of ["exposedExactOutputIds", "controlCatalog", "knobCatalog", "protocolCatalog"] as const) {
       for (const item of inherited[key]) expect(surface[key]).toContainEqual(item);
     }
+    expect(surface.derivedOutputCatalog.map(x => x.outputId)).toEqual(expect.arrayContaining(inherited.derivedOutputCatalog.map(x => x.outputId)));
+    expect(surface.graphCatalog.map(x => x.graphId)).toEqual(expect.arrayContaining(inherited.graphCatalog.map(x => x.graphId)));
+    for (const graph of inherited.graphCatalog) {
+      const current = surface.graphCatalog.find(x => x.graphId === graph.graphId)!;
+      expect(current.renderer).toBe(graph.renderer);
+      if (current.renderer === "structural-return") expect(current.analysisId).toBe(CARDIORESPIRATORY_MECHANICAL_ANALYSIS_V1_ID);
+    }
+    expect(resolveRegisteredAnalysisMethodsV1(surface).periodicPvaDerivation).toMatchObject({
+      methodId: CARDIORESPIRATORY_MECHANICAL_PVA_V1_ID, sourceAnalysisId: CARDIORESPIRATORY_MECHANICAL_ANALYSIS_V1_ID,
+    });
     expect(surface.surfaceReleaseId).not.toBe(inherited.surfaceReleaseId);
   });
   it("gives every new control and signal readable bilingual labels", () => {

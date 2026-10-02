@@ -1,4 +1,5 @@
 import type { MainWireIntegratedModelGuytonSideV3, MainWireIntegratedModelStructuralReturnOrientationV3 } from "./MainWireGuytonStarlingOrientationV3";
+import { MAIN_WIRE_FIXED_TONE_SETTLEMENT_V2, validMainWireFixedTonePointSettlementV2 } from "./MainWireFixedToneSettlementV2";
 
 /**
  * Shared decoder for the portable model-analysis payload. Validation and
@@ -68,6 +69,8 @@ function validStructuralAnchoringV3(value: unknown): boolean {
 
 function validStarlingLocusV3(value: unknown): boolean {
   if (!plainRecordV3(value) || !Array.isArray(value.points)) return false;
+  const reservoirClosure = value.convergencePolicy ===
+    "complete-beat-output-and-reservoir-period1-closure";
   if (value.status === "requires-protocol") return value.points.length === 0;
   if (value.status === "responsive-fixed-tbv-preview") {
     if (
@@ -94,9 +97,17 @@ function validStarlingLocusV3(value: unknown): boolean {
       !Number.isSafeInteger(value.maximumBeatCount) ||
       value.slowControllerPolicy !==
         "active-source-period1-then-coronary-tone-frozen" ||
-      value.convergencePolicy !==
-        "complete-beat-output-period1-closure"
+      (!reservoirClosure && value.convergencePolicy !==
+        "complete-beat-output-period1-closure")
     ) return false;
+    if (reservoirClosure) {
+      const policy = value.settlementPolicy;
+      if (!plainRecordV3(policy)
+        || Object.keys(policy).length !== Object.keys(MAIN_WIRE_FIXED_TONE_SETTLEMENT_V2).length
+        || Object.entries(MAIN_WIRE_FIXED_TONE_SETTLEMENT_V2).some(([key, expected]) => policy[key] !== expected)
+        || value.minimumBeatCount !== MAIN_WIRE_FIXED_TONE_SETTLEMENT_V2.consecutiveComparisonCount + 1
+        || value.maximumBeatCount !== MAIN_WIRE_FIXED_TONE_SETTLEMENT_V2.maximumCompleteBeatCount) return false;
+    } else if (value.settlementPolicy !== undefined) return false;
   } else return false;
   const minimumPointCount =
     value.status === "responsive-fixed-tbv-preview" ? 1 : 2;
@@ -141,7 +152,8 @@ function validStarlingLocusV3(value: unknown): boolean {
         return (point.acceptedMeasurementDurationSec as number) <=
           (value.measurementDurationSec as number) + 1e-9;
       }
-      return point.quality === "locally-converged" &&
+      return (reservoirClosure ? validMainWireFixedTonePointSettlementV2(point) : point.settlementEvidence === undefined) &&
+        point.quality === "locally-converged" &&
         point.curveEligible === true &&
         point.settled === true &&
         point.evidence === "fixed-tone-periodic" &&

@@ -1,8 +1,11 @@
 import { CARDIORESPIRATORY_BREATH_DERIVATION_V1 as breathMetrics } from "@/analysis/methods/cardiorespiratory/CardiorespiratoryBreathMetricsV1";
 import inherited from "@/studio/integrations/mainWireIntegratedV3/MainWireIntegratedStudioStaticCaseSurfaceV5";
+import { CARDIORESPIRATORY_MECHANICAL_ANALYSIS_V1_ID as mechanicalAnalysis, CARDIORESPIRATORY_MECHANICAL_PVA_V1_ID as mechanicalPva } from "@/analysis/methods/cardiorespiratory/CardiorespiratoryMechanicalAnalysisV1";
+import { MAIN_WIRE_PERIODIC_PVA_METHOD_V16_ID as inheritedPva } from "@/analysis/methods/mainWire/MainWirePeriodicPvaV1";
+import { MAIN_WIRE_PRESSURE_CROSSING_PV_ANALYSIS_V1_ID as inheritedAnalysis } from "@/analysis/methods/mainWire/MainWireStructuralAnalysisContractV3";
 import { CARDIORESPIRATORY_OUTPUT_IDS_V1 as outputs, CARDIORESPIRATORY_PRIMITIVE_SIGNALS_V1, CARDIORESPIRATORY_PRIMITIVE_CONTROLS_V1 } from "./CardiorespiratoryCatalogV1";
 import { CARDIORESPIRATORY_VARIATION_DERIVATION_V1 as variation } from "@/analysis/methods/cardiorespiratory/CardiorespiratoryVariationV1";
-import { controlCapabilityV1, derivationCapabilityV1, outputCapabilityV1, type ModelSurfaceGraphDefinitionV1,
+import { analysisCapabilityV1, controlCapabilityV1, derivationCapabilityV1, outputCapabilityV1, type ModelSurfaceGraphDefinitionV1,
   type ModelSurfaceReleaseManifestV1 } from "@/studio/contracts/v2/modelSurface";
 
 function sweep(graphId: string, series: Readonly<Record<string, string>>): ModelSurfaceGraphDefinitionV1 {
@@ -32,16 +35,19 @@ export const CARDIORESPIRATORY_GRAPHS_V1 = Object.freeze([
   xy("flow-volume", [["Airway", outputs.lungVolume, outputs.airwayFlow]]),
 ]);
 
-/** Local development projection. Production remains immutable. The exact
- * adapter must report explicit ineligibility for inherited periodic-PVA
- * requests under respiration; their pinned semantics are never relaxed. */
+/** The catalog is inherited; the resting-only source/PVA pins are explicitly
+ * replaced by a fixed respiratory mechanical experiment with the same outputs.
+ * Production and breathing-continuation semantics remain separate. */
 export const CARDIORESPIRATORY_SURFACE_COMPATIBILITY_V1 = Object.freeze({
   inheritedSurfaceReleaseId: inherited.surfaceReleaseId,
-  inheritedCatalogs: "all-existing-items-and-analysis-pins-retained",
-  periodicPva: "unsupported-under-breathing-return-explicit-unavailable",
+  inheritedCatalogs: "all-existing-items-retained",
+  periodicPva: "explicit-fixed-respiratory-mechanical-protocol-and-pva-substitution",
   inheritedOxygen: "legacy-steady-fick-estimate-distinct-from-dynamic-gas-state",
   inheritedPeep: "alias-to-ventilator-peep-with-both-fixture-values-updated-atomically",
 });
+const mechanicalCapability = (capability: string) => capability === analysisCapabilityV1(inheritedAnalysis)
+  ? analysisCapabilityV1(mechanicalAnalysis) : capability === derivationCapabilityV1(inheritedPva)
+    ? derivationCapabilityV1(mechanicalPva) : capability;
 export default Object.freeze({ ...inherited,
   surfaceReleaseId: "circleheart.cardiorespiratory-dev.surface-v1",
   surfaceSeriesId: "circleheart.cardiorespiratory-dev.surface",
@@ -51,9 +57,15 @@ export default Object.freeze({ ...inherited,
     controlId: control.controlId, preferredPresentation: (control.controlId.endsWith(".mode") || control.controlId.endsWith(".recruitment-preset")) ? "buttons" as const : "slider" as const,
     requiredCapabilities: Object.freeze([controlCapabilityV1(control.controlId)]),
   }))]),
-  derivedOutputCatalog: Object.freeze([...inherited.derivedOutputCatalog, ...[variation, breathMetrics].flatMap(method => method.outputs.map(output => Object.freeze({ ...output,
+  derivedOutputCatalog: Object.freeze([...inherited.derivedOutputCatalog.map(output => Object.freeze({ ...output,
+    derivationId: output.derivationId === inheritedPva ? mechanicalPva : output.derivationId,
+    requiredCapabilities: Object.freeze(output.requiredCapabilities.map(mechanicalCapability)),
+  })), ...[variation, breathMetrics].flatMap(method => method.outputs.map(output => Object.freeze({ ...output,
     derivationId: method.derivationId, significantDigits: 3,
     requiredCapabilities: Object.freeze([derivationCapabilityV1(method.derivationId), ...output.dependencies.map(outputCapabilityV1)]),
   })))]),
-  graphCatalog: Object.freeze([...inherited.graphCatalog, ...CARDIORESPIRATORY_GRAPHS_V1]),
+  graphCatalog: Object.freeze([...inherited.graphCatalog.map(graph => Object.freeze({ ...graph,
+    ...(graph.renderer === "structural-return" ? { analysisId: mechanicalAnalysis } : {}),
+    requiredCapabilities: Object.freeze(graph.requiredCapabilities.map(mechanicalCapability)),
+  })), ...CARDIORESPIRATORY_GRAPHS_V1]),
 }) satisfies ModelSurfaceReleaseManifestV1;

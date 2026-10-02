@@ -54,9 +54,13 @@ import { createMainWireExtendedAcceptedTypedBoundaryBindingV1, limitMainWireAcce
 import { createMainWireExtendedAcceptedTypedHemodynamicBindingV1, createMainWireAcceptedTypedHemodynamicDestinationV1,
   type MainWireAcceptedTypedHemodynamicBindingV1 } from "@/engine/vnext/MainWireAcceptedTypedHemodynamicV1";
 import { isMainWireTypedOrdinaryCandidateV1, stageMainWireTypedOrdinaryCandidateV1 } from "@/engine/vnext/MainWireTypedOrdinaryCandidateV1";
-import { mainWireFiveWallCoronaryBaseStateV2 } from "@/engine/myocardium/MainWireFiveWallCoronaryTransactionV3";
+import { mainWireFiveWallCoronaryBaseStateV2, wrapMainWireFiveWallCoronaryAcceptedStateV3 } from "@/engine/myocardium/MainWireFiveWallCoronaryTransactionV3";
 import { fullHotPathInvariantsEnabledV1 } from "@/engine/hotPathIntegrityTierV1";
 import { validationStampsDisabledV1 } from "@/engine/validationStampModeV1";
+import { CardiorespiratoryFixedRespiratoryMechanicalSessionV1, CARDIORESPIRATORY_FIXED_RESPIRATORY_MECHANICAL_BOUNDARY_V1 }
+  from "./CardiorespiratoryFixedRespiratoryMechanicalSessionV1";
+import { projectCardiorespiratorySettlementStateV1, type CardiorespiratorySettlementSeedV1 } from "./CardiorespiratorySettlementStateV1";
+import { NORMAL_ADULT_CORONARY_AUTOREGULATION_PRIOR_V2 } from "@/engine/coronary/autoregulationV2";
 
 type Hemo = MainWireIntegratedModelAcceptedStateV3<MainWireNormalAdultFiveWallMechanicsStateV1>;
 type FixtureRuntime = ReturnType<typeof createMainWireIntegratedModelStaticCaseFixtureV1>;
@@ -257,6 +261,94 @@ export class CardiorespiratorySessionV1 {
   }
   cardiorespiratoryState() { return this.#image.rehydrateCurrentRoot("cardiorespiratory"); }
   respiratoryOutput() { return evaluateRespiratoryMechanicsV1(this.fixture.cardiorespiratory.respiratory, this.cardiorespiratoryState().respiratory); }
+  /** Ephemeral fixed mechanical boundary experiment, never a respiratory hold. */
+  forkFixedRespiratoryMechanicsV1() {
+    const state = this.currentAcceptedState(), respiratory = this.respiratoryOutput();
+    return CardiorespiratoryFixedRespiratoryMechanicalSessionV1.fromAcceptedState(this.fixture, state, {
+      boundaryId: CARDIORESPIRATORY_FIXED_RESPIRATORY_MECHANICAL_BOUNDARY_V1,
+      sourceAcceptedTimeSec: state.acceptedTimeSec, sourceAcceptedRevision: state.revision,
+      pleuralPressureMmHg: respiratory.pleuralPressureMmHg,
+      alveolarPressureMmHgByUnit: respiratory.alveolarPressureMmHgByUnit,
+      volumeLByUnit: respiratory.volumeLByUnit, pulmonaryPaths: this.#pulmonaryPaths(respiratory),
+    });
+  }
+  physicalSettlementProjectionV1() {
+    return projectCardiorespiratorySettlementStateV1(this.fixture, this.#image.rehydrateCurrent());
+  }
+  /**
+   * Independent, admitted same-forcing initial condition for offline memory
+   * experiments. No accepted clock, input, recruitment branch or controller
+   * window is reset. This is not a pullback constructor or a steady-state claim.
+   */
+  forkSettlementSeedV1(options: CardiorespiratorySettlementSeedV1) {
+    const known = ["systemicGasPressureOffsetMmHg", "myocardialGasPressureOffsetMmHg", "bloodGasPressureOffsetMmHg",
+      "venousRedistributionMl", "coronaryToneScale", "lungGasScaleByUnit"];
+    if (!options || typeof options !== "object" || Object.keys(options).some(key => !known.includes(key)))
+      throw new Error("Invalid settlement seed options");
+    for (const offset of [options.systemicGasPressureOffsetMmHg, options.myocardialGasPressureOffsetMmHg, options.bloodGasPressureOffsetMmHg]) {
+      if (offset !== undefined && (!offset || typeof offset !== "object" || Object.keys(offset).some(key => key !== "o2" && key !== "co2")
+        || Object.values(offset).some(value => !Number.isFinite(value)))) throw new Error("Invalid settlement gas pressure offset");
+    }
+    const transferMl = options.venousRedistributionMl ?? 0, toneScale = options.coronaryToneScale ?? 1;
+    if (!Number.isFinite(transferMl) || !Number.isFinite(toneScale) || toneScale <= 0) throw new Error("Invalid settlement mechanical seed");
+    const lungScales = options.lungGasScaleByUnit ?? [1, 1];
+    if (!Array.isArray(lungScales) || lungScales.length !== 2 || lungScales.some(x => !Number.isFinite(x) || x <= 0))
+      throw new Error("Invalid settlement lung seed");
+    const cp = this.checkpoint(), source = this.currentAcceptedState(), old = cp.state.cardiorespiratory;
+    const beforeVolumes = cardiorespiratoryPhysicalBloodVolumesV1(source);
+    const volumes = { ...source.coronary.circulation.nodeVolumesMl,
+      SV: source.coronary.circulation.nodeVolumesMl.SV - transferMl,
+      VC: source.coronary.circulation.nodeVolumesMl.VC + transferMl };
+    if (!(volumes.SV > 0) || !(volumes.VC > 0)) throw new Error("Settlement redistribution depletes a venous reservoir");
+    const control = source.coronary.coronaryAutoregulation.windowControl ?? source.coronary.coronaryAutoregulation.desiredControl;
+    const tone = Object.fromEntries(Object.entries(source.coronary.coronary.toneResistanceScaleByTerritoryLayer).map(([territory, layers]) =>
+      [territory, Object.fromEntries(Object.entries(layers).map(([layer, value]) => {
+        const scaled = value * toneScale;
+        const minimum = control?.effectiveMinimumToneScaleByTerritoryLayer[territory as keyof typeof control.effectiveMinimumToneScaleByTerritoryLayer]
+          [layer as keyof typeof layers] ?? NORMAL_ADULT_CORONARY_AUTOREGULATION_PRIOR_V2.minimumResistanceScale;
+        if (scaled < minimum || scaled > NORMAL_ADULT_CORONARY_AUTOREGULATION_PRIOR_V2.maximumResistanceScale)
+          throw new Error("Settlement tone seed exceeds the admitted controller bounds");
+        return [layer, scaled];
+      }))])) as Hemo["coronary"]["coronary"]["toneResistanceScaleByTerritoryLayer"];
+    const coronary = wrapMainWireFiveWallCoronaryAcceptedStateV3({ ...mainWireFiveWallCoronaryBaseStateV2(source.coronary),
+      circulation: { ...source.coronary.circulation, nodeVolumesMl: volumes },
+      coronary: { ...source.coronary.coronary, toneResistanceScaleByTerritoryLayer: tone } },
+    source.coronary.coronaryAutoregulationBinding, source.coronary.coronaryAutoregulation);
+    const hemo = this.#ownHemo({ ...source, coronary });
+    const afterVolumes = cardiorespiratoryPhysicalBloodVolumesV1(hemo), blood = { ...old.blood };
+    if (transferMl !== 0) {
+      const from = transferMl > 0 ? "SV" : "VC", to = transferMl > 0 ? "VC" : "SV";
+      const fraction = Math.abs(transferMl) / beforeVolumes[from];
+      const moved = { o2Mol: old.blood[from].o2Mol * fraction, co2Mol: old.blood[from].co2Mol * fraction };
+      blood[from] = add(old.blood[from], { o2Mol: -moved.o2Mol, co2Mol: -moved.co2Mol });
+      blood[to] = add(old.blood[to], moved);
+    }
+    if (options.bloodGasPressureOffsetMmHg) for (const [id, amount] of Object.entries(blood)) {
+      const pressure = bloodGasPressuresFromAmountsV1(amount, afterVolumes[id], this.fixture.cardiorespiratory.bloodGas);
+      blood[id] = bloodGasAmountsFromPressuresV1(afterVolumes[id], { o2MmHg: pressure.o2MmHg + (options.bloodGasPressureOffsetMmHg.o2 ?? 0),
+        co2MmHg: pressure.co2MmHg + (options.bloodGasPressureOffsetMmHg.co2 ?? 0) }, this.fixture.cardiorespiratory.bloodGas);
+    }
+    const tissue = (id: "systemic" | "myocardium", offset?: Readonly<{ o2?: number; co2?: number }>) => ({ ...old[id], amount: {
+      o2Mol: old[id].amount.o2Mol + (offset?.o2 ?? 0) * DEFAULT_TISSUE_GAS_PARAMETERS_V1[id].o2CapacityMolPerMmHg,
+      co2Mol: old[id].amount.co2Mol + (offset?.co2 ?? 0) * DEFAULT_TISSUE_GAS_PARAMETERS_V1[id].co2CapacityMolPerMmHg,
+    } });
+    const respiratory = { ...old.respiratory, unitGasMol: ([0, 1] as const).map(i => ({
+      o2Mol: old.respiratory.unitGasMol[i].o2Mol * lungScales[i],
+      co2Mol: old.respiratory.unitGasMol[i].co2Mol * lungScales[i],
+      inertMol: old.respiratory.unitGasMol[i].inertMol * (old.respiratory.airwayOpenByUnit[i] ? lungScales[i] : 1),
+    })) as [RespiratoryGasAmountV1, RespiratoryGasAmountV1] };
+    const changed = { ...old, respiratory, blood, systemic: tissue("systemic", options.systemicGasPressureOffsetMmHg),
+      myocardium: tissue("myocardium", options.myocardialGasPressureOffsetMmHg), hemodynamicReadback: unavailableHemodynamicReadback() };
+    const beforeGas = totalGas(old), afterGas = totalGas(changed);
+    const material = { ...changed, ledger: { ...old.ledger,
+      interventionO2Mol: old.ledger.interventionO2Mol + afterGas.o2Mol - beforeGas.o2Mol,
+      interventionCo2Mol: old.ledger.interventionCo2Mol + afterGas.co2Mol - beforeGas.co2Mol } };
+    const residual = gasResidual(material);
+    return new CardiorespiratorySessionV1(this.fixture, { ...cp, state: { ...hemo, cardiorespiratory: { ...material,
+      readback: { ...old.readback, oxygenBalanceResidualMol: residual.o2Mol, co2BalanceResidualMol: residual.co2Mol } } },
+      completedBeatMetrics: null, beatAccumulator: new MainWireIntegratedModelBeatAccumulatorV3().checkpoint(),
+      coupledPredictor: { history: checkpointMainWireFiveWallCoupledPredictorV1(createMainWireFiveWallCoupledPredictorWorkspaceV1()), previousStepDtSec: 0 } });
+  }
   checkpoint(): CardiorespiratoryCheckpointV2 {
     return structuredClone({ schemaId: "circleheart-cardiorespiratory-checkpoint-v2" as const,
       fixture: this.fixture, state: portableNumericalArrays(this.#image.rehydrateCurrent()) as Composite,

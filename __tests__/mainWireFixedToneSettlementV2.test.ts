@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { MainWireFixedToneVolumeClosureV2, MAIN_WIRE_FIXED_TONE_SETTLEMENT_V2,
-  validMainWireFixedToneSettlementEvidenceV2 } from
+  validMainWireFixedToneSettlementEvidenceV2, validMainWireFixedTonePointSettlementV2 } from
   "@/analysis/methods/mainWire/MainWireFixedToneSettlementV2";
 import { measureMainWireIntegratedModelFormalPreloadEndDiastolicV2,
+  formalPressureVolumeLocusV3,
   mainWireIntegratedModelFormalPreloadLandmarkClosureScoreV2 } from
   "@/analysis/methods/mainWire/MainWirePressureVolumeProtocolsV3";
+import type { MainWireIntegratedModelStarlingPointV3 } from "@/analysis/methods/mainWire/MainWireGuytonStarlingOrientationV3";
+import { structuralReturnOrientationFromPayloadV3 } from "@/analysis/methods/mainWire/MainWireStructuralReturnPayloadV3";
 import type { MainWireIntegratedModelCompletedBeatMetricsV3,
   MainWireIntegratedModelVentricularValveEventMetricsV3 } from
   "@/engine/myocardium/MainWireIntegratedModelBeatMetricsV3";
@@ -99,7 +102,82 @@ describe("fixed-tone reservoir settlement V2", () => {
         expect(validMainWireFixedToneSettlementEvidenceV2({ ...evidence, [key]: value })).toBe(false);
     }
   });
+
+  it("preserves interval-bound closure evidence and the actual 50-beat policy in portable measured families", () => {
+    const points = [reservoirPoint(30, 26.58), { ...reservoirPoint(21, 18.89), fillingPressureMmHg: 7 }];
+    const locus = formalPressureVolumeLocusV3(points, true, 2);
+    expect(locus).toMatchObject({ minimumBeatCount: 4, maximumBeatCount: 50,
+      convergencePolicy: "complete-beat-output-and-reservoir-period1-closure",
+      settlementPolicy: MAIN_WIRE_FIXED_TONE_SETTLEMENT_V2 });
+    const portable = JSON.parse(JSON.stringify(orientationPayload(locus)));
+    const decoded = structuralReturnOrientationFromPayloadV3(portable, "left");
+    expect(decoded?.starlingLocus).toEqual(locus);
+    expect(decoded?.starlingLocus.points.every(validMainWireFixedTonePointSettlementV2)).toBe(true);
+    expect(decoded?.starlingLocus.points.map(point => point.completedBeatCount)).toEqual([21, 30]);
+  });
+
+  it("does not upgrade historical output-periodicity families to reservoir closure", () => {
+    const { settlementEvidence: _receipt, ...legacy } = reservoirPoint(8, 7.1);
+    const locus = formalPressureVolumeLocusV3([legacy, { ...legacy, fillingPressureMmHg: 7 }], true, 2);
+    expect(locus).toMatchObject({ minimumBeatCount: 3, maximumBeatCount: 20,
+      convergencePolicy: "complete-beat-output-period1-closure" });
+    expect(locus).not.toHaveProperty("settlementPolicy");
+    expect(locus.points.every(point => !Object.hasOwn(point, "settlementEvidence"))).toBe(true);
+    expect(structuralReturnOrientationFromPayloadV3(orientationPayload(locus), "left")?.starlingLocus).toEqual(locus);
+  });
+
+  it("rejects missing, mismatched or relaxed reservoir policy receipts instead of silently certifying the family", () => {
+    const point = reservoirPoint(30, 26.58);
+    const { settlementEvidence: _receipt, ...missing } = point;
+    for (const invalid of [missing, { ...point, completedBeatCount: 29 },
+      { ...point, acceptedMeasurementDurationSec: 26.57 },
+      { ...point, settlementEvidence: { ...point.settlementEvidence!, maximumRecentRedistributedVolumeMl: .05001 } }]) {
+      expect(validMainWireFixedTonePointSettlementV2(invalid)).toBe(false);
+      expect(() => formalPressureVolumeLocusV3([point, invalid], true, 2)).toThrow(/interval evidence/);
+    }
+    const locus = formalPressureVolumeLocusV3([point, { ...point, fillingPressureMmHg: 7 }], true, 2);
+    for (const mutate of [
+      (value: any) => { delete value.settlementPolicy; },
+      (value: any) => { value.settlementPolicy.maximumRedistributedVolumePerBeatMl = .1; },
+      (value: any) => { value.maximumBeatCount = 20; },
+      (value: any) => { value.minimumBeatCount = 3; },
+      (value: any) => { delete value.points[0].settlementEvidence; },
+      (value: any) => { value.points[0].settlementEvidence.completedBeatCount--; },
+      (value: any) => { value.convergencePolicy = "complete-beat-output-period1-closure"; },
+    ]) {
+      const damaged = JSON.parse(JSON.stringify(orientationPayload(locus)));
+      mutate(damaged.left.starlingLocus);
+      expect(structuralReturnOrientationFromPayloadV3(damaged, "left")).toBeNull();
+    }
+  });
 });
+
+// Only tests portable analysis evidence; this fixture does not claim an exact trajectory.
+function reservoirPoint(completedBeatCount: number, durationSec: number): MainWireIntegratedModelStarlingPointV3 {
+  return {
+    totalBloodVolumeMl: 4935, fillingPressureMmHg: 8, cardiacOutputLPerMin: 5,
+    role: "operating-anchor", quality: "locally-converged", curveEligible: true,
+    completedBeatCount, maximumNormalizedBeatDelta: .01, settled: true,
+    finiteAndFixedTbvPassed: true, evidence: "fixed-tone-periodic",
+    measurementWindowStatus: "fixed-tone-period1-settled", acceptedMeasurementDurationSec: durationSec,
+    ventricularPressureVolumeLoop: Array.from({ length: 12 }, (_, index) => ({
+      volumeMl: 100 + 20 * Math.cos(index * Math.PI / 6), pressureMmHg: 40 + 20 * Math.sin(index * Math.PI / 6) })),
+    ventricularPressureVolumeLandmarks: inletClosureBeat().leftVentricularPressureVolumeLandmarks,
+    settlementEvidence: { policyId: MAIN_WIRE_FIXED_TONE_SETTLEMENT_V2.policyId, completedBeatCount,
+      maximumRecentRedistributedVolumeMl: .02, maximumRecentNormalizedOutputDelta: .01,
+      maximumRecentNormalizedLandmarkDelta: .2, measurementDurationSec: durationSec },
+  };
+}
+
+function orientationPayload(starlingLocus: ReturnType<typeof formalPressureVolumeLocusV3>) {
+  return { status: "available", left: { side: "left",
+    semantics: "frozen-accepted-step-volume-constrained-structural-orientation-not-simulated-response",
+    pressureBasis: "absolute", sourceAcceptedRevision: 1, sourceAcceptedTimeSec: 1, fillingPressureMmHg: 8,
+    operatingPoint: { downstreamPressureMmHg: 8, returnFlowLPerMin: 5 },
+    anchoring: { status: "accepted-step-readback", method: "none", downstreamPressureOffsetMmHg: 0, volumeResidualMl: null },
+    curve: [{ downstreamPressureMmHg: 0, returnFlowLPerMin: 5, flowLimited: false },
+      { downstreamPressureMmHg: 1, returnFlowLPerMin: 4, flowLimited: false }], starlingLocus } };
+}
 
 describe("formal preload V2 inlet-closure observations", () => {
   it("reads inlet-closure ED volume and transmural pressure, not the maximum-volume sample", () => {

@@ -952,6 +952,7 @@ export class StudioSimulationWorkerRuntimeV2 {
           acceptedFrame: currentFrame.runtimeSessionId === physicalRuntimeSessionId ? currentFrame
             : Object.freeze({ ...currentFrame, runtimeSessionId: physicalRuntimeSessionId }),
           surfaceRelease: this.#analysisReleaseTicket!.surfaceRelease,
+          exactNumericalExports: this.#requiredExactRuntime().exactNumericalExports,
           capture: async () => {
             this.#assertAnalysisDidNotMutate(priorFrame, null);
             const content = await this.#captureAllScenarios("experiment/analysis-source-capture", EMPTY_WORKER_CAPTURE_SURFACE_V2);

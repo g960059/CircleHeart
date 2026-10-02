@@ -49,3 +49,23 @@ test("@desktop cardiorespiratory Model Lab runs its own Worker, renders XY data 
   expect(errors).toEqual([]);
   await page.screenshot({ path: testInfo.outputPath("cardiorespiratory-model-lab.png"), fullPage: true });
 });
+
+test("@desktop cardiorespiratory mechanical analysis runs through its artifact Worker without advancing the live capture", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.goto("/ja/dev/model-lab?model=cardiorespiratory", { waitUntil: "domcontentloaded" });
+  const root = page.getByTestId("v3-dockview-workbench");
+  await expect.poll(async () => Number(await root.getAttribute("data-model-time-sec"))).toBeGreaterThan(.3);
+  await page.getByTestId("v3-playback-toggle").click();
+  const time = await root.getAttribute("data-model-time-sec");
+  const graphs = page.getByRole("region", { name: "グラフエリア" });
+  await graphs.getByRole("button", { name: "Paneを追加" }).first().click();
+  await page.getByRole("dialog", { name: "グラフを追加" })
+    .getByRole("button", { name: "体循環 Guyton / Starling（CVP）", exact: true }).click();
+  const structural = page.locator('[data-chart-kind="guyton-starling-structural-orientation-v3"][data-circulation-side="right"]');
+  await expect.poll(async () => Number(await structural.getAttribute("data-starling-completed-points")), { timeout: 90_000 })
+    .toBeGreaterThan(1);
+  await expect(root).toHaveAttribute("data-model-time-sec", time!);
+  await expect(page.getByTestId("workbench-calculation-stopped")).toHaveCount(0);
+  expect(errors).toEqual([]);
+});

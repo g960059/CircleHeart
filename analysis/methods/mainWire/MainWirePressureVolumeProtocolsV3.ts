@@ -28,6 +28,7 @@ import {
 import {
   MAIN_WIRE_FIXED_TONE_SETTLEMENT_V2,
   MainWireFixedToneVolumeClosureV2,
+  validMainWireFixedTonePointSettlementV2,
   type MainWireFixedToneSettlementEvidenceV2,
 } from "@/analysis/methods/mainWire/MainWireFixedToneSettlementV2";
 
@@ -109,6 +110,8 @@ export const MAIN_WIRE_INTEGRATED_MODEL_FORMAL_PRELOAD_RESERVE_POLICY_V1 =
  * in their accepted state or checkpoint ABI.
  */
 export interface MainWireIntegratedModelStructuralAnalysisSessionV3 {
+  /** Purpose-specific additional gate, propagated to all analysis forks. */
+  readonly requireReservoirClosureV1?: boolean;
   currentAcceptedState(): ReturnType<
     MainWireIntegratedModelSessionV3["currentAcceptedState"]
   >;
@@ -1162,6 +1165,7 @@ function settleFormalPressureVolumeSourceV3(
       branch: MainWireIntegratedModelStructuralAnalysisSessionV3;
     }>
   | RejectedBranchV3 {
+  reservoirClosure ||= sourceSession.requireReservoirClosureV1 === true;
   let branch: MainWireIntegratedModelStructuralAnalysisSessionV3;
   try {
     branch = sourceSession.forkAtFixedGlobalTotalBloodVolume(sourceGlobalTbvMl);
@@ -2006,6 +2010,7 @@ async function measureFormalPressureVolumeBranchV3(
   role: MainWireIntegratedModelStarlingPointV3["role"],
   reservoirClosure = false,
 ): Promise<MeasuredBranchV3> {
+  reservoirClosure ||= sourceSession.requireReservoirClosureV1 === true;
   let branch: MainWireIntegratedModelStructuralAnalysisSessionV3;
   try {
     // A preload-reduction PVA family is a short mechanical perturbation, not a
@@ -2144,7 +2149,16 @@ async function measureFormalPressureVolumeBranchV3(
     // transient and must not bias the retained filling pressure or output.
     const averaged = averageBeatMetricsV3(beats.slice(-2));
     const selectedBeat = pressureVolumeBeat.completedBeatMetrics;
+    const settlementEvidence = volumeClosure ? Object.freeze({
+      policyId: MAIN_WIRE_FIXED_TONE_SETTLEMENT_V2.policyId,
+      completedBeatCount: beats.length,
+      maximumRecentRedistributedVolumeMl: volumeClosure.maximumRecentRedistributedVolumeMl(),
+      maximumRecentNormalizedOutputDelta: fixedToneRecentOutputScoreV2(beats),
+      maximumRecentNormalizedLandmarkDelta: fixedToneRecentOutputScoreV2(beats, landmarkClosureScore),
+      measurementDurationSec: branch.currentAcceptedState().acceptedTimeSec - originTimeSec,
+    }) : undefined;
     const common = Object.freeze({
+      ...(settlementEvidence ? { settlementEvidence } : {}),
       totalBloodVolumeMl: targetGlobalTbvMl,
       role,
       quality: "locally-converged" as const,
@@ -2168,14 +2182,7 @@ async function measureFormalPressureVolumeBranchV3(
       observation: branch.observe(),
       ...(reservoirClosure ? { preloadEndDiastolic:
         measureMainWireIntegratedModelFormalPreloadEndDiastolicV2(selectedBeat) } : {}),
-      ...(volumeClosure ? { settlementEvidence: {
-        policyId: MAIN_WIRE_FIXED_TONE_SETTLEMENT_V2.policyId,
-        completedBeatCount: beats.length,
-        maximumRecentRedistributedVolumeMl: volumeClosure.maximumRecentRedistributedVolumeMl(),
-        maximumRecentNormalizedOutputDelta: fixedToneRecentOutputScoreV2(beats),
-        maximumRecentNormalizedLandmarkDelta: fixedToneRecentOutputScoreV2(beats, landmarkClosureScore),
-        measurementDurationSec: branch.currentAcceptedState().acceptedTimeSec - originTimeSec,
-      } } : {}),
+      ...(settlementEvidence ? { settlementEvidence } : {}),
       pair: Object.freeze({
         right: Object.freeze({
           ...common,
@@ -2642,20 +2649,26 @@ function formalPressureVolumeLocusV3(
       point.evidence === "fixed-tone-periodic" &&
       point.measurementWindowStatus === "fixed-tone-period1-settled",
   );
+  const reservoirClosure = settled.some(point => point.settlementEvidence !== undefined);
+  if (reservoirClosure && !settled.every(validMainWireFixedTonePointSettlementV2)) {
+    throw new Error("Formal reservoir-closure family has missing or invalid interval evidence");
+  }
   return Object.freeze({
     status: "measured-fixed-tbv-protocol" as const,
     protocolId:
       MAIN_WIRE_INTEGRATED_MODEL_FORMAL_PRESSURE_VOLUME_PROTOCOL_V3_ID,
     requirement: MAIN_WIRE_INTEGRATED_MODEL_STARLING_PROTOCOL_REQUIREMENT_V3,
-    minimumBeatCount: MINIMUM_COMPLETE_BEAT_COUNT_V3,
-    maximumBeatCount: CENTER_MAXIMUM_COMPLETE_BEAT_COUNT_V3,
+    minimumBeatCount: reservoirClosure ? MAIN_WIRE_FIXED_TONE_SETTLEMENT_V2.consecutiveComparisonCount + 1 : MINIMUM_COMPLETE_BEAT_COUNT_V3,
+    maximumBeatCount: reservoirClosure ? MAIN_WIRE_FIXED_TONE_SETTLEMENT_V2.maximumCompleteBeatCount : CENTER_MAXIMUM_COMPLETE_BEAT_COUNT_V3,
     completedPointCount: settled.length,
     totalPointCount: protocolComplete
       ? settled.length
       : Math.max(settled.length + 1, expectedPointCount),
     slowControllerPolicy:
       "active-source-period1-then-coronary-tone-frozen" as const,
-    convergencePolicy: "complete-beat-output-period1-closure" as const,
+    convergencePolicy: reservoirClosure ? "complete-beat-output-and-reservoir-period1-closure" as const
+      : "complete-beat-output-period1-closure" as const,
+    ...(reservoirClosure ? { settlementPolicy: MAIN_WIRE_FIXED_TONE_SETTLEMENT_V2 } : {}),
     points: Object.freeze(
       [...settled].sort(
         (left, right) => left.fillingPressureMmHg - right.fillingPressureMmHg,

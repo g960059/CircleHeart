@@ -194,6 +194,7 @@ if (!SKIP_ANALYSIS) {
     let progressCount = 0;
     const analysis = await REGISTERED_ANALYSIS_EXECUTOR_V1.execute({
       source: { acceptedFrame: frame, surfaceRelease: currentSurfaceReleaseV1, legacyExact: null,
+        exactNumericalExports: runtime.exactNumericalExports,
         capture: async () => ({ artifactRevisionId: ticket.artifactRevisionId, scenario: structuredClone(scenario.capture) }) },
       request: { runtimeSessionId: frame.runtimeSessionId, scenarioId: frame.scenarioId, analysisId,
         expectedInputEpoch: 0, expectedAcceptedRevision: frame.acceptedRevision, expectedAcceptedTimeSec: frame.acceptedTimeSec,

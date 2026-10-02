@@ -22,11 +22,53 @@ import type { MainWireIntegratedStudioSelectedAorticOutflowFixtureV1 as Fixture,
 import { importExactExecutableArtifactModuleV2 as importArtifact } from "@/runtime/ExactExecutableArtifactModuleLoaderV2";
 import { composeStandardModelContractV1 } from "@/studio/contracts/v2/modelSurface";
 import { validateScenarioPresetV2 } from "@/studio/application/authoring/StudioExperimentDataV2";
+import * as fixedBoundaryExecution from "@/analysis/methods/mainWire/FixedBoundaryPressureVolumeExecutionV1";
 
 const tier = hotPathIntegrityTierV1();
 afterEach(() => selectHotPathIntegrityTierV1(tier));
 
 describe("analysis-owned quasi-steady semilunar closure", () => {
+  it("retains tier ownership until the asynchronous shared helper completes", async () => {
+    selectHotPathIntegrityTierV1("full-invariant");
+    const frame = { modelId: high.modelId, runtimeSessionId: "physical", scenarioId: "high", inputEpoch: 1,
+      acceptedRevision: high.capture.checkpoint.acceptedRevision, acceptedTimeSec: high.capture.checkpoint.acceptedTimeSec, outputs: {} };
+    const restored = { currentAcceptedState: () => ({ revision: frame.acceptedRevision, acceptedTimeSec: frame.acceptedTimeSec }) } as Session;
+    const restore = vi.spyOn(Session, "restore").mockResolvedValue(restored);
+    type Result = Awaited<ReturnType<typeof fixedBoundaryExecution.executeFixedBoundaryPressureVolumeV1>>;
+    const gates: { resolve: (value: Result) => void; reject: (error: Error) => void }[] = [];
+    const helper = vi.spyOn(fixedBoundaryExecution, "executeFixedBoundaryPressureVolumeV1").mockImplementation(() =>
+      new Promise<Result>((resolve, reject) => gates.push({ resolve, reject })));
+    const input = { source: { acceptedFrame: frame, exactNumericalExports: { ExactSessionV1: Session },
+      surfaceRelease: candidate, capture: async () => ({ artifactRevisionId: supportedArtifact, scenario: high.capture }), legacyExact: null },
+    request: { runtimeSessionId: frame.runtimeSessionId, scenarioId: frame.scenarioId, analysisId, expectedInputEpoch: frame.inputEpoch,
+      expectedAcceptedRevision: frame.acceptedRevision, expectedAcceptedTimeSec: frame.acceptedTimeSec } } as Parameters<AnalysisExecutorV1["execute"]>[0];
+    const first = execute(input).catch(error => error), second = execute(input).catch(error => error);
+    try {
+      await vi.waitFor(() => expect(gates.length).toBeGreaterThan(0));
+      // Both restores can finish immediately. Only the pending analysis helper
+      // should retain the lock across this event-loop turn.
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(restore).toHaveBeenCalledTimes(1);
+      expect(helper).toHaveBeenCalledTimes(1);
+      expect(hotPathIntegrityTierV1()).toBe("hot-path-lean");
+      gates[0]!.reject(new Error("first helper stopped"));
+      expect((await first).message).toBe("first helper stopped");
+      await vi.waitFor(() => expect(helper).toHaveBeenCalledTimes(2));
+      expect(hotPathIntegrityTierV1()).toBe("hot-path-lean");
+      const result = { ...frame, sourceAcceptedRevision: frame.acceptedRevision,
+        sourceAcceptedTimeSec: frame.acceptedTimeSec, analysisId, payload: { status: "available" } } as Result;
+      gates[1]!.resolve(result);
+      expect(await second).toBe(result);
+      expect(hotPathIntegrityTierV1()).toBe("full-invariant");
+    } finally {
+      // A failing assertion must not leave the module's serial queue locked.
+      gates.forEach(gate => gate.reject(new Error("test cleanup")));
+      helper.mockRejectedValue(new Error("test cleanup"));
+      await Promise.all([first, second]);
+      helper.mockRestore(); restore.mockRestore();
+    }
+  });
+
   it("serializes same-realm async tier ownership and releases it after failures", async () => {
     selectHotPathIntegrityTierV1("full-invariant");
     const rejections: ((error: Error) => void)[] = [];
@@ -36,7 +78,7 @@ describe("analysis-owned quasi-steady semilunar closure", () => {
     });
     const input = { source: { acceptedFrame: { modelId: high.modelId, runtimeSessionId: "physical", scenarioId: "high",
       inputEpoch: 1, acceptedRevision: high.capture.checkpoint.acceptedRevision, acceptedTimeSec: high.capture.checkpoint.acceptedTimeSec, outputs: {} },
-      surfaceRelease: candidate, capture: async () => ({ artifactRevisionId: supportedArtifact, scenario: high.capture }), legacyExact: null },
+      exactNumericalExports: { ExactSessionV1: Session }, surfaceRelease: candidate, capture: async () => ({ artifactRevisionId: supportedArtifact, scenario: high.capture }), legacyExact: null },
       request: { runtimeSessionId: "physical", scenarioId: "high", analysisId, expectedInputEpoch: 1,
         expectedAcceptedRevision: high.capture.checkpoint.acceptedRevision, expectedAcceptedTimeSec: high.capture.checkpoint.acceptedTimeSec },
     } as Parameters<AnalysisExecutorV1["execute"]>[0];
@@ -215,7 +257,7 @@ describe("analysis-owned quasi-steady semilunar closure", () => {
       const namespace = await importArtifact(bytes), release = await (namespace.createCircleHeartExactModelReleaseV1 as typeof Factory)();
       const adapter = release.executables.simulationAdapter;
       const f = preset.capture.fixture as unknown as Fixture;
-      const raw = await Session.restore(preset.capture.checkpoint.payload, f.anatomyId!, f.hemodynamicResearchInputs, 1, f.mechanismResearchInputs);
+      const raw = await (namespace.ExactSessionV1 as typeof Session).restore(preset.capture.checkpoint.payload, f.anatomyId!, f.hemodynamicResearchInputs, 1, f.mechanismResearchInputs);
       const id = { runtimeSessionId: "analysis-source-parity", scenarioId: "parity" };
       await adapter.createSession({ runtimeSessionId: id.runtimeSessionId, scenarios: [{ scenarioId: id.scenarioId, ...preset.capture }] });
       try {

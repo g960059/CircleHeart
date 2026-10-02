@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { importExactExecutableArtifactModuleV2 } from "@/runtime/ExactExecutableArtifactModuleLoaderV2";
 import { afterEach, describe, expect, it } from "vitest";
 import { executeMainWirePressureCrossingPvV1 as execute } from "@/analysis/methods/mainWire/MainWirePressureCrossingExecutionV1";
 import { MAIN_WIRE_PRESSURE_CROSSING_PV_ANALYSIS_V1_ID as analysisId } from "@/analysis/methods/mainWire/MainWireStructuralAnalysisContractV3";
@@ -17,7 +19,8 @@ describe("shared pressure-volume anchor", () => {
   ("preserves both first measured loads, native evidence and orientation: $title", async preset => {
     selectHotPathIntegrityTierV1("hot-path-lean");
     const checkpoint = preset.capture.checkpoint!;
-    const source = { acceptedFrame: { modelId: preset.modelId, runtimeSessionId: "test", scenarioId: "source",
+    const exactNumericalExports = await importExactExecutableArtifactModuleV2(new Uint8Array(readFileSync("data/model-releases/standard74/artifact.mjs.txt")));
+    const source = { exactNumericalExports, acceptedFrame: { modelId: preset.modelId, runtimeSessionId: "test", scenarioId: "source",
       inputEpoch: 0, acceptedRevision: checkpoint.acceptedRevision, acceptedTimeSec: checkpoint.acceptedTimeSec, outputs: {} },
       legacyExact: null, capture: async () => ({ artifactRevisionId: preset.artifactRevisionId, scenario: preset.capture }) };
     const request = { runtimeSessionId: "test", scenarioId: "source", analysisId, expectedInputEpoch: 0,

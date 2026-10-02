@@ -23,8 +23,64 @@ import {
   STANDARD_TEST_SURFACE_RELEASE_ID_V1,
   STANDARD_TEST_SURFACE_SERIES_ID_V1,
 } from "./helpers/standardReleaseTicketV1";
+import type {
+  StudioSnapshotPreparationPortV1,
+  StudioSnapshotSettlementMethodV1,
+} from "@/studio/application/authoring/StudioSnapshotPreparationV1";
 
 describe("WorkbenchParallelAuthoringCoordinatorV3", () => {
+  const preparationMethod: StudioSnapshotSettlementMethodV1 = {
+    methodId: "test/settlement-v1", purpose: "full-system-steady", configuration: { tolerance: 0.001 },
+  };
+
+  it("prepares every Scenario before sealing and preserves the original Worker commit", async () => {
+    const client = clientDoubleV3();
+    const commit = Object.freeze({ snapshot: "sealed-worker-owned" });
+    client.createSnapshot.mockResolvedValue(commit);
+    const coordinator = new WorkbenchParallelAuthoringCoordinatorV3(() => client as unknown as StudioSimulationWorkerClientV2);
+    const source = preparedInputV3();
+    const prepare = vi.fn<StudioSnapshotPreparationPortV1["prepare"]>(async ({ capture }) => {
+      expect(client.initialize).not.toHaveBeenCalled();
+      return { status: "qualified", capture: {
+        ...capture, checkpoint: { ...capture.checkpoint, acceptedRevision: 20, acceptedTimeSec: 2 },
+      }, evidence: { holdoutPassed: true } };
+    });
+    const result = await coordinator.createPreparedSnapshot(source, { method: preparationMethod }, { supports: () => true, prepare });
+    expect(prepare).toHaveBeenCalledTimes(2);
+    expect(client.initialize.mock.calls[0]![0].checkpoint.acceptedRevision).toBe(20);
+    expect(client.addScenarioFromPreset.mock.calls[0]![0].preset.capture.checkpoint.acceptedRevision).toBe(20);
+    expect(result.commit).toBe(commit);
+    expect(result.preparations.map(({ preparation }) => preparation.mode)).toEqual(["steady", "steady"]);
+    expect(source.scenarios[0]!.capture.checkpoint.acceptedRevision).toBe(1);
+    expect(client.terminate).toHaveBeenCalledOnce();
+  });
+
+  it("does not seal partial preparation when another Scenario fails or a method is missing", async () => {
+    const factory = vi.fn(() => clientDoubleV3() as unknown as StudioSimulationWorkerClientV2);
+    const coordinator = new WorkbenchParallelAuthoringCoordinatorV3(factory);
+    await expect(coordinator.createPreparedSnapshot(preparedInputV3())).rejects.toThrow("compatible settlement method");
+    let count = 0;
+    const port: StudioSnapshotPreparationPortV1 = {
+      supports: () => true,
+      prepare: async ({ capture }) => ++count === 1
+        ? { status: "qualified", capture, evidence: {} }
+        : { status: "insufficient-evidence", reason: "independent seed coverage" },
+    };
+    await expect(coordinator.createPreparedSnapshot(preparedInputV3(), { method: preparationMethod }, port))
+      .rejects.toThrow("insufficient-evidence");
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it("preserves transient checkpoints explicitly without a preparation method", async () => {
+    const client = clientDoubleV3();
+    const coordinator = new WorkbenchParallelAuthoringCoordinatorV3(() => client as unknown as StudioSimulationWorkerClientV2);
+    const source = preparedInputV3();
+    const result = await coordinator.createPreparedSnapshot(source, { mode: "preserve-transient" });
+    expect(client.initialize.mock.calls[0]![0].checkpoint).toEqual(source.scenarios[0]!.capture.checkpoint);
+    expect(client.addScenarioFromPreset.mock.calls[0]![0].preset.capture).toEqual(source.scenarios[1]!.capture);
+    expect(result.preparations.every(({ preparation }) => preparation.settlement === null)).toBe(true);
+  });
+
   it("seeds an existing Experiment with the latest ordered lane captures", async () => {
     const durableExperiment = experimentV3({
       version: 7,
@@ -322,6 +378,16 @@ describe("WorkbenchParallelAuthoringCoordinatorV3", () => {
     }))).rejects.toThrow(/requires an explicitly saved Experiment/);
   });
 });
+
+function preparedInputV3(): WorkbenchParallelSnapshotAuthoringInputV3 {
+  return {
+    ...snapshotInputV3({ modelId: STANDARD_TEST_RELEASE_TICKET_V1.modelId, scenarios: [
+      scenarioV3("scenario/baseline", "Baseline", 1),
+      scenarioV3("scenario/comparison", "Comparison", 2),
+    ] }),
+    snapshotSource: "session",
+  };
+}
 
 function clientDoubleV3() {
   return {
