@@ -371,15 +371,22 @@ export class WorkbenchGroupTimeConductorV3<TFrame> {
         "scheduler.group.presentation-publication", this.#nowMs() - completedAtMs,
       );
       const intervalMs = this.#batchModelDurationMs(batchSteps) / this.#playbackRate;
-      // Carry the absolute deadline forward while it is still current, so
-      // ordinary sub-millisecond timer lateness cannot accumulate into a
-      // visible rate error at high playback multipliers. A suspended tab or
-      // exceptional Worker stall must not replay every missed wall deadline:
-      // re-anchor at completion and permit at most one immediate batch.
-      this.#nextPumpWallMs = Math.max(
-        this.#nextPumpWallMs + intervalMs,
-        completedAtMs,
-      );
+      const proposedDeadlineMs = this.#nextPumpWallMs + intervalMs;
+      const lateByMs = Math.max(0, completedAtMs - proposedDeadlineMs);
+      // A short late reply can be repaid by the next faster batch. Dropping
+      // every such deadline causes permanent drift even when mean throughput
+      // exceeds the requested rate. Retain at most one interval of debt only
+      // for visible work; longer stalls or hidden work re-anchor at completion.
+      const retainShortDebt = lateByMs <= intervalMs
+        && capacityEligibleAtStart && this.#capacityMeasurementEligible();
+      this.#nextPumpWallMs = retainShortDebt
+        ? proposedDeadlineMs : Math.max(proposedDeadlineMs, completedAtMs);
+      if (this.#performance.enabled) {
+        this.#performance.recordValue("scheduler.group.retained-compute-deadline-debt-ms",
+          retainShortDebt ? lateByMs : 0);
+        if (!retainShortDebt && lateByMs > 0) this.#performance.recordDuration(
+          "scheduler.group.discarded-compute-deadline-debt", lateByMs);
+      }
       // Publication may synchronously materialize samples and notify mounted
       // panes. Its elapsed time consumes this deadline, not another idle delay.
       this.#queuePump(Math.max(0, this.#nextPumpWallMs - this.#nowMs()));

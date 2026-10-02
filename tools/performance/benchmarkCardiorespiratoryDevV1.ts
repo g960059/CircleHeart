@@ -11,13 +11,22 @@ import type { StudioJsonValueV2 } from "@/studio/contracts/v2/json";
 // Measures the actual local dev artifact, so an old immutable artifact can be
 // compared with a rebuilt candidate under the same benchmark. No publication.
 const argument = (name: string) => { const i = process.argv.indexOf(name); return i < 0 ? undefined : process.argv[i + 1]; };
+const positiveIntegerArgument = (name: string, fallback: number, maximum: number) => {
+  const text = argument(name);
+  const value = text === undefined && !process.argv.includes(name) ? fallback : Number(text);
+  if (!Number.isSafeInteger(value) || value < 1 || value > maximum) throw new Error(`${name} must be an integer in 1..${maximum}`);
+  return value;
+};
 const bundlePath = argument("--bundle") ?? "data/model-releases/cardiorespiratory-dev-v1/bundle.json";
 const artifactPath = argument("--artifact") ?? "data/model-releases/cardiorespiratory-dev-v1/artifact.mjs.txt";
 const bundle = JSON.parse(await readFile(bundlePath, "utf8"));
 const artifact = await readFile(artifactPath);
 const directory = await mkdtemp(path.join(tmpdir(), "circleheart-cardiorespiratory-perf-"));
 const artifactRevisionId = createHash("sha256").update(artifact).digest("hex");
-const dt = .002, warmupSteps = 250, rounds = 3, stepsPerRound = 512, batchSteps = 16;
+const dt = .002, warmupSteps = positiveIntegerArgument("--warmup-steps", 250, 60_000),
+  rounds = positiveIntegerArgument("--rounds", 3, 20),
+  stepsPerRound = positiveIntegerArgument("--steps-per-round", 512, 60_000),
+  batchSteps = positiveIntegerArgument("--batch-steps", 16, 32);
 const selectedIds = ["hemodynamics.pressure.absolute.Ao", "hemodynamics.volume.LV", "cardiorespiratory.pressure.airway", "cardiorespiratory.volume.lung", "cardiorespiratory.phase"];
 const percentile = (values: number[], q: number) => [...values].sort((a, b) => a - b)[Math.ceil(values.length * q) - 1]!;
 try {

@@ -1,7 +1,7 @@
 import { chromium, expect, type Page } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { arch, cpus, platform } from "node:os";
-import { WORKBENCH_PLAYBACK_RATE_STEP_V3 } from "@/components/workbench/runtime/WorkbenchGroupTimeConductorV3";
+import { selectMeasuredPlaybackRateV1 } from "./workbenchMeasuredPlaybackRateV1";
 import type { WorkbenchPerformanceDiagnosticsApiV3 } from "@/components/workbench/runtime/WorkbenchPerformanceDiagnosticsV3";
 
 import { CARDIORESPIRATORY_SAMPLE_START_MARK, CARDIORESPIRATORY_SAMPLE_END_MARK, parseCardiorespiratoryBrowserArgumentsV1, groupCardiorespiratoryRenderDiagnosticsV1 } from "./cardiorespiratoryBrowserMeasurementsV1";
@@ -47,7 +47,7 @@ try {
   await page.waitForTimeout(warmupMs);
   let selectedMaximumRate: number | null = null;
   const rateSlider = page.getByTestId("v3-playback-rate-slider");
-  const playbackRateSelection = targetPlaybackRate === null ? null : await selectMeasuredPlaybackRate(page, targetPlaybackRate).catch(async error => {
+  const playbackRateSelection = targetPlaybackRate === null ? null : await selectMeasuredPlaybackRateV1(page, targetPlaybackRate).catch(async error => {
     const stopped = await page.getByTestId("workbench-calculation-stopped").allTextContents();
     throw new Error(`Playback selection failed: ${String(error)}; stopped=${JSON.stringify(stopped)}; pageErrors=${JSON.stringify(errors)}`);
   });
@@ -160,41 +160,6 @@ try {
   try {
     if (trace?.started && !traceFinished) await trace.stop().catch(error => console.error(`Trace cleanup: ${String(error)}; partial path=${trace!.path}`));
   } finally { await browser.close(); }
-}
-
-/** Follow the real control and measured capacity; a requested target is never
- * injected into the conductor or substituted for the actual selected value. */
-async function selectMeasuredPlaybackRate(page: Page, targetRate: number) {
-  const maximumReadinessWaitMs = 60_000, startedAt = performance.now();
-  const trigger = page.getByTestId("v3-playback-rate-trigger"), slider = page.getByTestId("v3-playback-rate-slider");
-  const observations: { elapsedMs: number; sliderMaximumRate: number; measuredSafeRate: number | null; selectedRate: number }[] = [];
-  let attempts = 0;
-  while (performance.now() - startedAt < maximumReadinessWaitMs) {
-    const timeout = Math.max(1, Math.min(5000, maximumReadinessWaitMs - (performance.now() - startedAt)));
-    await trigger.click({ timeout });
-    const sliderMaximumRate = Number(await slider.getAttribute("max"));
-    const measuredSafeRate = await page.evaluate(() =>
-      (window as DiagnosticWindow).__circleHeartWorkbenchPerfV3.snapshot().values["scheduler.group.safe-playback-rate"]?.latest ?? null);
-    // During calibration the UI temporarily offers the global maximum. Wait
-    // for actual measured capacity before accelerating above ordinary 1x.
-    const availableRate = Math.min(sliderMaximumRate, Math.max(1, measuredSafeRate ?? 1));
-    const nextRate = Math.min(targetRate, availableRate);
-    const previousRate = Number(await slider.inputValue());
-    const steps = Math.round((nextRate - previousRate) / WORKBENCH_PLAYBACK_RATE_STEP_V3);
-    await slider.focus({ timeout });
-    for (let step = 0; step < Math.abs(steps); step++) await slider.press(steps > 0 ? "ArrowRight" : "ArrowLeft", { timeout });
-    const selectedRate = Number(await slider.inputValue());
-    if (selectedRate !== nextRate) throw new Error(`Playback UI selected ${selectedRate}x instead of available ${nextRate}x`);
-    await trigger.click({ timeout });
-    observations.push({ elapsedMs: performance.now() - startedAt, sliderMaximumRate, measuredSafeRate, selectedRate });
-    attempts++;
-    if (selectedRate === targetRate) return { mode: "target-with-measured-ui-ramp" as const, targetRate,
-      maximumReadinessWaitMs, readinessWaitMs: performance.now() - startedAt, attempts, observations };
-    if (await page.getByTestId("workbench-calculation-stopped").count()) throw new Error("Calculation stopped while waiting for target playback capacity");
-    const remaining = maximumReadinessWaitMs - (performance.now() - startedAt);
-    if (remaining > 0) await page.waitForTimeout(Math.min(1000, remaining));
-  }
-  throw new Error(`Playback target ${targetRate}x was not available within ${maximumReadinessWaitMs} ms; ${JSON.stringify(observations.at(-1))}`);
 }
 
 /** Use the same duplication path as the Workbench browser-performance suite. */

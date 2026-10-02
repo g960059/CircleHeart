@@ -36,7 +36,7 @@ import { createRespiratoryMechanicsStateV1, evaluateRespiratoryMechanicsV1, step
   validateRespiratoryMechanicsStateV1, type RespiratoryMechanicsStateV1, type RespiratoryGasAmountV1, type RespiratoryMechanicsOutputV1 } from "./RespiratoryMechanicsV1";
 import { bloodGasAmountsFromPressuresV1, bloodGasPressuresFromAmountsV1, validateBloodGasContentsV1, MOLAR_GAS_VOLUME_STPD_L_PER_MOL_V1,
   type BloodGasAmountV1 } from "./BloodGasChemistryV1";
-import { advanceConservativeGasTransportV1 } from "./ConservativeGasTransportV1";
+import { ConservativeGasTransportWorkspaceV1 } from "./ConservativeGasTransportV1";
 import { exchangePerfusedBloodWithAlveolarGasV1 } from "./PulmonaryGasExchangeV1";
 import { DEFAULT_TISSUE_GAS_PARAMETERS_V1, initializeTissueGasStateV1, advanceTissueGasExchangeV1,
   oxygenDemandMolPerSecFromMlPerMinV1, type TissueGasStateV1 } from "./TissueGasExchangeV1";
@@ -102,6 +102,9 @@ export class CardiorespiratorySessionV1 {
   readonly #image: TransactionalTypedStateImageV1<Composite>;
   readonly #typedBoundary: MainWireAcceptedTypedBoundaryBindingV1;
   readonly #typedHemodynamics: MainWireAcceptedTypedHemodynamicBindingV1;
+  readonly #readAutoregulationBinding: () => Hemo["coronary"]["coronaryAutoregulationBinding"];
+  readonly #readAutoregulationState: () => Hemo["coronary"]["coronaryAutoregulation"];
+  readonly #readCoronaryTone: () => Hemo["coronary"]["coronary"]["toneResistanceScaleByTerritoryLayer"];
   readonly #typedScratch = createMainWireAcceptedTypedHemodynamicDestinationV1();
   readonly #rootCompletionPlan: ReturnType<TransactionalTypedStateImageV1<Composite>["createRootCompletionPlan"]>;
   readonly #typedPromotionPlan: ReturnType<TransactionalTypedStateImageV1<Composite>["createPromotionPlan"]>;
@@ -113,6 +116,7 @@ export class CardiorespiratorySessionV1 {
   readonly #revisionSlot: number;
   readonly #projectionSlots: Readonly<{ aorticVolume: number; pulmonaryArterialVolume: number;
     nextAtrialActivation: number; lvadFlow: number }>;
+  readonly #gasTransport = new ConservativeGasTransportWorkspaceV1();
   readonly #residualWorkspace = createMainWireFiveWallCoupledResidualWorkspaceV1();
   #beats = new MainWireIntegratedModelBeatAccumulatorV3();
   #completedBeat: MainWireIntegratedModelCompletedBeatMetricsV3 | null = null;
@@ -168,6 +172,9 @@ export class CardiorespiratorySessionV1 {
     this.#baseTickSec = prepared.updateSchedule.baseTickSec;
     this.#validate(initial);
     this.#image = new TransactionalTypedStateImageV1(manifest, initial, state => this.#admitDirectCandidate(state));
+    this.#readAutoregulationBinding = this.#image.createCurrentSubtreeReader(["coronary", "coronaryAutoregulationBinding"]);
+    this.#readAutoregulationState = this.#image.createCurrentSubtreeReader(["coronary", "coronaryAutoregulation"]);
+    this.#readCoronaryTone = this.#image.createCurrentSubtreeReader(["coronary", "coronary", "toneResistanceScaleByTerritoryLayer"]);
     this.#completionPlan = this.#image.createCompletionPlan({ continuous: [], booleans: [] });
     this.#rootCompletionPlan = this.#image.createRootCompletionPlan("cardiorespiratory");
     this.#typedPromotionPlan = this.#image.createPromotionPlan({
@@ -302,9 +309,8 @@ export class CardiorespiratorySessionV1 {
     const devices = this.#runtime.config;
     if (devices.lvad.enabled || devices.impella.enabled || devices.vaEcmo.enabled || devices.vvEcmo.enabled || devices.iabp.enabled) return false;
     if (ROTARY_SUPPORT_DEVICE_IDS_V1.some(id => cursor.readContinuous(this.#typedBoundary.continuous.dynamicMechanicalSupport[id]) !== 0)) return false;
-    const coronary = this.#image.rehydrateCurrentRoot("coronary");
-    const autoregulation = { acceptedTimeSec: clock.acceptedTimeSec, binding: coronary.coronaryAutoregulationBinding,
-      state: coronary.coronaryAutoregulation, toneResistanceScaleByTerritoryLayer: coronary.coronary.toneResistanceScaleByTerritoryLayer };
+    const autoregulation = { acceptedTimeSec: clock.acceptedTimeSec, binding: this.#readAutoregulationBinding(),
+      state: this.#readAutoregulationState(), toneResistanceScaleByTerritoryLayer: this.#readCoronaryTone() };
     if (!isMainWireTypedOrdinaryCandidateV1(clock.acceptedTimeSec, limit, this.#runtime.rhythm.configuration, autoregulation)) return false;
     const old = this.cardiorespiratoryState(), c = this.fixture.cardiorespiratory, dt = limit.candidateTimeSec - clock.acceptedTimeSec;
     const ventilation = stepRespiratoryMechanicsV1(c.respiratory, old.respiratory, dt), ro = ventilation.output;
@@ -438,7 +444,7 @@ export class CardiorespiratorySessionV1 {
     const c = this.fixture.cardiorespiratory, ro = ventilation.output;
     const afterV = network.physicalBloodVolumesMl, bloodTransfers = network.transfers;
     const pth = ro.pleuralPressureMmHg, palv = (ro.alveolarPressureMmHgByUnit[0] + ro.alveolarPressureMmHgByUnit[1]) / 2;
-    const advected = advanceConservativeGasTransportV1(Object.keys(beforeV).map(id => ({ id,
+    const advected = this.#gasTransport.advance(Object.keys(beforeV).map(id => ({ id,
       volumeBeforeMl: beforeV[id], volumeAfterMl: afterV[id], amount: old.blood[id] })),
       bloodTransfers, { volumeBalanceToleranceMl: 2e-5 });
     const aorticTransferIndex = bloodTransfers.findIndex(edge => edge.from === "LV" && edge.to === "Ao");

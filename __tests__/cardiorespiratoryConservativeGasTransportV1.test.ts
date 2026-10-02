@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { advanceConservativeGasTransportV1, type GasTransportNodeV1 } from '../engine/cardiorespiratory/ConservativeGasTransportV1';
+import { advanceConservativeGasTransportV1, ConservativeGasTransportWorkspaceV1, type GasTransportNodeV1 } from '../engine/cardiorespiratory/ConservativeGasTransportV1';
 
 describe('accepted-fluid conservative implicit gas advection', () => {
   it('preserves uniform concentrations while physical blood volumes change', () => {
@@ -61,5 +61,54 @@ describe('accepted-fluid conservative implicit gas advection', () => {
   it('rejects negative inventory and an isolated zero-volume junction', () => {
     expect(() => advanceConservativeGasTransportV1([{ id: 'a', volumeBeforeMl: 1, volumeAfterMl: 1, amount: { o2Mol: -1, co2Mol: 1 } }], [])).toThrow();
     expect(() => advanceConservativeGasTransportV1([{ id: 'a', volumeBeforeMl: 0, volumeAfterMl: 0, amount: { o2Mol: 0, co2Mol: 0 } }], [])).toThrow(/singular/);
+  });
+
+  it('reuses scratch across changing graph sizes, names, ordering and flow direction without retaining prior results', () => {
+    const workspace = new ConservativeGasTransportWorkspaceV1();
+    const retained: { result: ReturnType<typeof advanceConservativeGasTransportV1>; snapshot: string }[] = [];
+    for (let iteration = 0; iteration < 50; iteration++) {
+      const count = 2 + (iteration * 7) % 29;
+      const nodes = Array.from({ length: count }, (_, i) => ({ id: `${iteration}:${i}`,
+        volumeBeforeMl: 100 + i, volumeAfterMl: 100 + i,
+        amount: { o2Mol: (i + 1) * .0001, co2Mol: (count - i) * .0002 } }));
+      const transfers = nodes.map((node, i) => ({ from: node.id, to: nodes[(i + 1) % count].id,
+        volumeMl: iteration % 2 ? -12.5 : 25 }));
+      if (iteration % 3 === 0) nodes.reverse();
+      const result = workspace.advance(nodes, transfers);
+      expect(result).toEqual(advanceConservativeGasTransportV1(nodes, transfers));
+      retained.push({ result, snapshot: JSON.stringify(result) });
+      // Same input objects may change; mutable data must never earn a reuse proof.
+      nodes[0].amount.o2Mol *= 2;
+      expect(workspace.advance(nodes, transfers)).toEqual(advanceConservativeGasTransportV1(nodes, transfers));
+    }
+    for (const { result, snapshot } of retained) expect(JSON.stringify(result)).toBe(snapshot);
+  });
+
+  it('fully rebuilds scratch after a failed pivot and does not share it with another session', () => {
+    const workspace = new ConservativeGasTransportWorkspaceV1(), other = new ConservativeGasTransportWorkspaceV1();
+    const nodes = [
+      { id: 'a', volumeBeforeMl: 100, volumeAfterMl: 75, amount: { o2Mol: .001, co2Mol: .002 } },
+      { id: 'b', volumeBeforeMl: 100, volumeAfterMl: 125, amount: { o2Mol: .002, co2Mol: .001 } },
+    ];
+    const transfers = [{ from: 'a', to: 'b', volumeMl: 25 }];
+    const expected = advanceConservativeGasTransportV1(nodes, transfers);
+    expect(workspace.advance(nodes, transfers)).toEqual(expected);
+    const singular = nodes.map(node => ({ ...node, volumeBeforeMl: 0, volumeAfterMl: 0, amount: { o2Mol: 0, co2Mol: 0 } }));
+    expect(() => workspace.advance(singular, [])).toThrow(/singular/);
+    const sparse = [...nodes]; delete sparse[0];
+    expect(() => workspace.advance(sparse, transfers)).toThrow(/dense records/);
+    expect(other.advance(nodes, transfers)).toEqual(expected);
+    expect(workspace.advance(nodes, transfers)).toEqual(expected);
+    const output = workspace.advance(nodes, transfers);
+    (output.amountsById.a as { o2Mol: number }).o2Mol = 99;
+    expect(workspace.advance(nodes, transfers)).toEqual(expected);
+  });
+
+  it('rejects reentrant input evaluation without poisoning the next independent call', () => {
+    const workspace = new ConservativeGasTransportWorkspaceV1();
+    const node = { id: 'a', volumeBeforeMl: 1, volumeAfterMl: 1, amount: { o2Mol: 1, co2Mol: 1 } };
+    const reentrant = { ...node, get volumeBeforeMl() { return workspace.advance([node], []).amountsById.a.o2Mol; } };
+    expect(() => workspace.advance([reentrant], [])).toThrow(/already in use/);
+    expect(workspace.advance([node], []).amountsById.a).toEqual(node.amount);
   });
 });

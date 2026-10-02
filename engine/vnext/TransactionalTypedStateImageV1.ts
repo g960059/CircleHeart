@@ -64,6 +64,12 @@ type TypedStateNodeV1 =
     items: readonly TypedStateNodeV1[];
   }>;
 
+type TypedStateSubtreeValueV1<TState, TPath extends readonly string[]> =
+  TPath extends readonly [] ? TState
+    : TPath extends readonly [infer TKey, ...infer TRest extends readonly string[]]
+      ? TKey extends keyof TState ? TypedStateSubtreeValueV1<TState[TKey], TRest> : unknown
+      : unknown;
+
 type NumericTypedArrayV1 =
   | Float64Array
   | Float32Array
@@ -1047,6 +1053,31 @@ export class TransactionalTypedStateImageV1<TState> {
       this.#images[this.#activeIndex],
       this.#manifest.externalImmutableRoots,
     ) as TState[TKey];
+  }
+
+  /** Bind a declared record path once. Every invocation reads this authority's
+   * current accepted image and returns the usual detached subtree, never a
+   * live view or a candidate borrow. Promotion cannot change earlier results. */
+  createCurrentSubtreeReader<const TPath extends readonly string[]>(
+    path: TPath,
+  ): () => TypedStateSubtreeValueV1<TState, TPath> {
+    if (!Array.isArray(path) || path.length === 0) {
+      throw new Error("Transactional typed state subtree path is empty or invalid");
+    }
+    let node = this.#manifest.rootNode;
+    for (const key of path) {
+      if (typeof key !== "string" || node.kind !== "record") {
+        throw new Error("Transactional typed state subtree path crosses a non-record node");
+      }
+      const entry = node.entries.find(candidate => candidate.key === key);
+      if (entry === undefined) {
+        throw new Error(`Transactional typed state subtree ${key} is unavailable`);
+      }
+      node = entry.node;
+    }
+    const boundNode = node;
+    return () => rehydrateNode(boundNode, this.#images[this.#activeIndex],
+      this.#manifest.externalImmutableRoots) as TypedStateSubtreeValueV1<TState, TPath>;
   }
 
   rehydrateStaged(): TState {

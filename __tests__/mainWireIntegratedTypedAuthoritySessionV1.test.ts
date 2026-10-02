@@ -299,6 +299,56 @@ describe("TransactionalTypedStateImageV1", () => {
     expect(() => image.rehydrateCurrentRoot("toFixed")).toThrow("root is not a record");
   });
 
+  it("binds detached nested readers to one accepted authority across staging, abort and promotion", () => {
+    const initial = { selected: { nested: { samples: new Float64Array([2, 3]), value: 7 } }, sibling: 11 };
+    const manifest = createTransactionalTypedStateManifestV1("test-bound-subtree-reader", initial, 8, 64);
+    const image = new TransactionalTypedStateImageV1(manifest, initial);
+    const other = new TransactionalTypedStateImageV1(manifest,
+      { selected: { nested: { samples: new Float64Array([20, 30]), value: 70 } }, sibling: 110 });
+    const path: ["selected", "nested"] = ["selected", "nested"];
+    const read = image.createCurrentSubtreeReader(path);
+    const readOther = other.createCurrentSubtreeReader(["selected", "nested"]);
+    const first = read();
+    expect(first).toEqual(initial.selected.nested);
+    expect(readOther()).toEqual(other.rehydrateCurrent().selected.nested);
+    expect(first.samples).not.toBe(read().samples);
+    first.samples[0] = 99;
+    expect(() => Object.assign(first, { value: 99 })).toThrow(TypeError);
+    expect(read()).toEqual(initial.selected.nested);
+    // A caller cannot retarget the compiled reader by changing its path array.
+    (path as string[])[0] = "sibling";
+    expect(read()).toEqual(initial.selected.nested);
+    const next = { selected: { nested: { samples: new Float64Array([5, 6]), value: 8 } }, sibling: 12 };
+    image.stage(next);
+    expect(read()).toEqual(initial.selected.nested);
+    image.abort();
+    expect(read()).toEqual(initial.selected.nested);
+    image.stage(next);
+    image.promote();
+    expect(read()).toEqual(next.selected.nested);
+    expect(first).toEqual({ samples: new Float64Array([99, 3]), value: 7 });
+    expect(readOther()).toEqual({ samples: new Float64Array([20, 30]), value: 70 });
+  });
+
+  it("preserves declared immutable bindings and rejects unavailable or non-record subtree paths", () => {
+    const configuration = Object.freeze({ gain: 2 });
+    const initial = { selected: { configuration, value: 3 }, other: 4 };
+    const image = new TransactionalTypedStateImageV1(createTransactionalTypedStateManifestV1(
+      "test-bound-subtree-path", initial, 8, 64, { externalImmutablePointers: ["/selected/configuration"] }), initial);
+    const readConfiguration = image.createCurrentSubtreeReader(["selected", "configuration"]);
+    const readScalar = image.createCurrentSubtreeReader(["selected", "value"]);
+    expect(readConfiguration()).toBe(configuration);
+    expect(readScalar()).toBe(3);
+    expect(() => image.createCurrentSubtreeReader([])).toThrow("path is empty or invalid");
+    expect(() => image.createCurrentSubtreeReader(["missing"])).toThrow("unavailable");
+    expect(() => image.createCurrentSubtreeReader(["selected", "missing"])).toThrow("unavailable");
+    expect(() => image.createCurrentSubtreeReader(["other", "value"])).toThrow("non-record");
+    expect(() => image.createCurrentSubtreeReader(["selected", "configuration", "gain"])).toThrow("non-record");
+    const scalar = new TransactionalTypedStateImageV1(createTransactionalTypedStateManifestV1(
+      "test-bound-subtree-non-record", 1, 8, 64), 1);
+    expect(() => scalar.createCurrentSubtreeReader(["value"])).toThrow("non-record");
+  });
+
   it("keeps declared frozen configuration roots outside hot images", () => {
     type State = Readonly<{
       value: number;

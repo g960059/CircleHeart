@@ -2,7 +2,7 @@
   "schemaId": "circleheart-local-dev-model-bundle-v1",
   "stage": "dev",
   "ephemeral": true,
-  "sourceTreeHash": "da6294f3087467f80cf0f6092bf9af75e4f88e0a4e6b4611f118838fc78c9bc5",
+  "sourceTreeHash": "d5386e18f530872d91c940056ff0e52e919b2eda9bc3b58733c99e5a98eb0fa9",
   "sourceInputs": [
     {
       "path": "analysis/methods/mainWire/MainWireFixedToneSettlementV2.ts",
@@ -62,11 +62,11 @@
     },
     {
       "path": "engine/cardiorespiratory/CardiorespiratorySessionV1.ts",
-      "sha256": "7ca869bc356e2506a2b90c7909f0dbbda1bfa580711b751574008017d37df439"
+      "sha256": "1fb1265a195dd28be06438e25b1aba827aa627027ffac3a0f54697f22f8e8a71"
     },
     {
       "path": "engine/cardiorespiratory/ConservativeGasTransportV1.ts",
-      "sha256": "013b8326384b747082a8cc053210d83abad51389816c796ed671310c040482f5"
+      "sha256": "4788c65ca1acd1e988930782416c119da6d0d43c0caeee9c11af590131e8a82a"
     },
     {
       "path": "engine/cardiorespiratory/PulmonaryGasExchangeV1.ts",
@@ -122,7 +122,7 @@
     },
     {
       "path": "engine/coronary/acceptedAutoregulationWindowV3.ts",
-      "sha256": "ad9a0d47f4e89522fa77dc6b200f3c4a2a964f3b026968eb2dd9a3bbb2d59d69"
+      "sha256": "0dcd7dc320ba9800a18b26c0e7bd520eba0a3ce3a6555b3f9fd850c633221a04"
     },
     {
       "path": "engine/coronary/autoregulationV1.ts",
@@ -258,7 +258,7 @@
     },
     {
       "path": "engine/myocardium/MainWireFiveWallCoronaryTransactionV3.ts",
-      "sha256": "2840958baf9f8dc6ae385b418f408f063a725e5f76ba3af85b693ec3992be3fb"
+      "sha256": "d0132bcf554de55409c306c49e376547bfae8e9efbd811167306cc27a9a31e3c"
     },
     {
       "path": "engine/myocardium/MainWireFiveWallNonCoronaryTransactionV1.ts",
@@ -726,7 +726,7 @@
     },
     {
       "path": "engine/vnext/TransactionalTypedStateImageV1.ts",
-      "sha256": "a0a46e8fc2e99b371237ff2bee93b8b7685146726c096d36fe3f5a5d5ebcb040"
+      "sha256": "e3d5f43df05b765afa07123efa4e548c4c1f47fa9c4a8c639bf84f1e37dc4f06"
     },
     {
       "path": "engine/vnext/coupled/CoupledHemodynamicsLayoutV1.ts",
@@ -829,7 +829,7 @@
       "sha256": "b9343d9ec2469940cb9c972c549165cdea1ade9a90828544599a675ba5eec1b5"
     }
   ],
-  "artifactRevisionId": "1202c2315c52198526bf8a3521266944dec70af51d941914784eb9444266eef8",
+  "artifactRevisionId": "1de81cb381ec136ba820d2ba4f1538b203192600db8f60b341ec37931420f75a",
   "manifest": {
     "schemaId": "circleheart-studio-exact-model-kernel-v3",
     "modelId": "circleheart.cardiorespiratory-dev-v1",

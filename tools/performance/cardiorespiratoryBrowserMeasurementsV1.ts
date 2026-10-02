@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { WORKBENCH_MINIMUM_PLAYBACK_RATE_V3, WORKBENCH_MAXIMUM_PLAYBACK_RATE_V3, WORKBENCH_PLAYBACK_RATE_STEP_V3 } from "@/components/workbench/runtime/WorkbenchGroupTimeConductorV3";
+import { validateMeasuredPlaybackRateV1 } from "./workbenchMeasuredPlaybackRateV1";
 import type { WorkbenchPerformanceSnapshotV3 } from "@/components/workbench/runtime/WorkbenchPerformanceDiagnosticsV3";
 
 export const CARDIORESPIRATORY_SAMPLE_START_MARK = "circleheart.cardiorespiratory.sample.start";
@@ -45,11 +45,8 @@ export function parseCardiorespiratoryBrowserArgumentsV1(argv: readonly string[]
     || width < 320 || width > 7680 || height < 240 || height > 4320) throw new Error("--viewport requires WIDTHxHEIGHT, width 320..7680 and height 240..4320 CSS pixels");
   const useMaximumRate = options.has("--maximum-rate");
   const targetPlaybackRate = options.has("--playback-rate")
-    ? boundedNumber("--playback-rate", 1, WORKBENCH_MINIMUM_PLAYBACK_RATE_V3, WORKBENCH_MAXIMUM_PLAYBACK_RATE_V3) : null;
-  if (targetPlaybackRate !== null && (useMaximumRate
-    || Math.abs(targetPlaybackRate / WORKBENCH_PLAYBACK_RATE_STEP_V3 - Math.round(targetPlaybackRate / WORKBENCH_PLAYBACK_RATE_STEP_V3)) > 1e-9)) {
-    throw new Error(`--playback-rate requires ${WORKBENCH_PLAYBACK_RATE_STEP_V3} steps and cannot be combined with --maximum-rate`);
-  }
+    ? validateMeasuredPlaybackRateV1(Number(value("--playback-rate", "1"))) : null;
+  if (targetPlaybackRate !== null && useMaximumRate) throw new Error("--playback-rate cannot be combined with --maximum-rate");
   return { origin: parsedOrigin.origin, mode: oneOf("--view", "default", ["default", "xy"]),
     throttle: boundedNumber("--main-thread-throttle", 1, 1, 8), useMaximumRate, targetPlaybackRate,
     scenarioCount: boundedNumber("--scenarios", 1, 1, 5, true), warmupMs: boundedNumber("--warmup-ms", 4000, 1000, 120000, true),

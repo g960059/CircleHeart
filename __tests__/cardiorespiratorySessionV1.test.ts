@@ -216,6 +216,21 @@ describe('development cardiorespiratory exact session', () => {
     reference.advanceToPresentationTime(.008);
     expect(session.checkpoint()).toEqual(reference.checkpoint());
   });
+  it('reads only the required coronary subtrees on ordinary steps after independent JSON restore', () => {
+    const original = run(.002, .006);
+    const restored = CardiorespiratorySessionV1.restore(original.fixture, JSON.parse(JSON.stringify(original.checkpoint())));
+    const previous = restored.currentAcceptedState().coronary;
+    const rootRead = vi.spyOn(TransactionalTypedStateImageV1.prototype, 'rehydrateCurrentRoot');
+    try {
+      original.advanceToPresentationTime(.02);
+      restored.advanceToPresentationTime(.02);
+      expect(rootRead).toHaveBeenCalled();
+      expect(rootRead.mock.calls.every(([root]) => root !== 'coronary')).toBe(true);
+      expect(restored.checkpoint()).toEqual(original.checkpoint());
+      expect(previous.acceptedTimeSec).toBe(.006);
+      expect(restored.currentAcceptedState().coronary.acceptedTimeSec).toBe(.02);
+    } finally { rootRead.mockRestore(); }
+  });
   it('retains raw fallback entry admission while avoiding an extra public wrap for its private typed adapter', () => {
     const session = run(.002, .006);
     const forceRaw = vi.spyOn(typedOrdinary, 'isMainWireTypedOrdinaryCandidateV1').mockReturnValue(false);

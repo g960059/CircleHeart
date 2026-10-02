@@ -23530,6 +23530,8 @@ var CORONARY_ACCEPTED_AUTOREGULATION_BINDING_V3_ID = "accepted-physical-time-cor
 var CORONARY_ACCEPTED_AUTOREGULATION_STATE_V3_ID = "circleheart.coronary-accepted-autoregulation-state.v3";
 var DEFAULT_CORONARY_AUTOREGULATION_CONTROL_V3_ID = "circleheart.coronary-autoregulation-control.rest.v1";
 var VALIDATED_AUTOREGULATION_BINDINGS_V3 = /* @__PURE__ */ new WeakSet();
+var FROZEN_AUTOREGULATION_CONTROLS_V3 = /* @__PURE__ */ new WeakMap();
+var defaultAutoregulationControlV3;
 var VALIDATED_BINDINGS_BY_AUTOREGULATION_STATE_V3 = /* @__PURE__ */ new WeakMap();
 function createCoronaryAutoregulationWindowBindingV3(input) {
   requireNonnegativeFinite12(
@@ -23562,14 +23564,19 @@ function createCoronaryAutoregulationWindowBindingV3(input) {
   return binding;
 }
 function createDefaultCoronaryAutoregulationWindowControlV3() {
-  return freezeControl({
+  if (validationStampReuseEligibleV1() && defaultAutoregulationControlV3 !== void 0) {
+    return defaultAutoregulationControlV3;
+  }
+  const control2 = freezeControl(Object.freeze({
     controlId: DEFAULT_CORONARY_AUTOREGULATION_CONTROL_V3_ID,
     demandScaleByTerritoryLayer: unitCoronaryDemandScaleV2(),
     hyperemia01ByTerritoryLayer: zeroCoronaryHyperemiaDriveV2(),
     effectiveMinimumToneScaleByTerritoryLayer: constantLayerRecord(
       NORMAL_ADULT_CORONARY_AUTOREGULATION_PRIOR_V2.minimumResistanceScale
     )
-  });
+  }));
+  if (validationStampReuseEligibleV1()) defaultAutoregulationControlV3 = control2;
+  return control2;
 }
 function createCoronaryAcceptedAutoregulationStateV3(binding, input) {
   validateCoronaryAutoregulationWindowBindingV3(binding);
@@ -23868,10 +23875,12 @@ function validateCoronaryAcceptedAutoregulationStateV3(binding, state, clock) {
 function freezeState(state) {
   return Object.freeze({
     ...state,
-    qmTimeIntegralMlByTerritoryLayer: mapLayerRecord(
+    // Every caller is private and supplies freshly constructed frozen numerical
+    // records. Reusing those records retains detachment from all public inputs.
+    qmTimeIntegralMlByTerritoryLayer: validationStampReuseEligibleV1() ? state.qmTimeIntegralMlByTerritoryLayer : mapLayerRecord(
       (territoryId, layerId) => state.qmTimeIntegralMlByTerritoryLayer[territoryId][layerId]
     ),
-    perfusionPressureTimeIntegralMmHgSecByTerritory: mapTerritoryRecord(
+    perfusionPressureTimeIntegralMmHgSecByTerritory: validationStampReuseEligibleV1() ? state.perfusionPressureTimeIntegralMmHgSecByTerritory : mapTerritoryRecord(
       (territoryId) => state.perfusionPressureTimeIntegralMmHgSecByTerritory[territoryId]
     ),
     windowControl: state.windowControl === null ? null : freezeControl(state.windowControl),
@@ -23922,6 +23931,9 @@ function recordAutoregulationStateBindingStampV3(state, binding) {
   VALIDATED_BINDINGS_BY_AUTOREGULATION_STATE_V3.set(state, bindings);
 }
 function freezeControl(control2) {
+  const reuse = validationStampReuseEligibleV1();
+  const cached = reuse ? FROZEN_AUTOREGULATION_CONTROLS_V3.get(control2) : void 0;
+  if (cached !== void 0) return cached;
   assertPlainObject(control2, "autoregulation control");
   assertExactKeys6(control2, [
     "controlId",
@@ -23953,7 +23965,7 @@ function freezeControl(control2) {
       }
     }
   }
-  return Object.freeze({
+  const frozen = Object.freeze({
     controlId: control2.controlId,
     demandScaleByTerritoryLayer: mapLayerRecord((territoryId, layerId) => control2.demandScaleByTerritoryLayer[territoryId][layerId]),
     hyperemia01ByTerritoryLayer: mapLayerRecord((territoryId, layerId) => control2.hyperemia01ByTerritoryLayer[territoryId][layerId]),
@@ -23961,6 +23973,11 @@ function freezeControl(control2) {
       (territoryId, layerId) => control2.effectiveMinimumToneScaleByTerritoryLayer[territoryId][layerId]
     )
   });
+  if (reuse && validationStampIssuanceEligibleV1(control2)) {
+    FROZEN_AUTOREGULATION_CONTROLS_V3.set(frozen, frozen);
+    FROZEN_AUTOREGULATION_CONTROLS_V3.set(control2, frozen);
+  }
+  return frozen;
 }
 function controlsExactlyEqual(left, right) {
   if (left.controlId !== right.controlId) return false;
@@ -31879,6 +31896,8 @@ var MAIN_WIRE_FIVE_WALL_CORONARY_TRANSACTION_CLAIM_V3 = Object.freeze({
   simulationReady: false
 });
 var validatedBaseStateByMainWireFiveWallCoronaryAcceptedStateV3 = /* @__PURE__ */ new WeakMap();
+var defaultAutoregulationDriveIdentityV3 = Object.freeze({});
+var resolvedAutoregulationControlsByDiseaseV3 = /* @__PURE__ */ new WeakMap();
 function advanceMainWireFiveWallCoronaryAutoregulationFromPackedV3(previous, input, candidateAcceptedTimeSec, candidateRevision, packedHydraulicObservables) {
   return advanceMainWireFiveWallCoronaryAutoregulationOwnerFromPackedV3(
     Object.freeze({
@@ -32165,8 +32184,12 @@ function withAcceptedCoronaryTone(base2, tone) {
   });
 }
 function resolveAutoregulationControl(drive, disease) {
+  const reuse = validationStampReuseEligibleV1();
+  const driveIdentity = drive ?? defaultAutoregulationDriveIdentityV3;
+  const cached = reuse ? resolvedAutoregulationControlsByDiseaseV3.get(disease)?.get(driveIdentity) : void 0;
+  if (cached !== void 0) return cached;
   const defaults2 = createDefaultCoronaryAutoregulationWindowControlV3();
-  return Object.freeze({
+  const control2 = Object.freeze({
     controlId: drive?.controlId ?? defaults2.controlId,
     demandScaleByTerritoryLayer: drive?.demandScaleByTerritoryLayer ?? unitCoronaryDemandScaleV2(),
     hyperemia01ByTerritoryLayer: drive?.hyperemia01ByTerritoryLayer ?? zeroCoronaryHyperemiaDriveV2(),
@@ -32177,6 +32200,12 @@ function resolveAutoregulationControl(drive, disease) {
       )
     )
   });
+  if (reuse && validationStampIssuanceEligibleV1(disease, driveIdentity)) {
+    const byDrive = resolvedAutoregulationControlsByDiseaseV3.get(disease) ?? /* @__PURE__ */ new WeakMap();
+    byDrive.set(driveIdentity, control2);
+    resolvedAutoregulationControlsByDiseaseV3.set(disease, byDrive);
+  }
+  return control2;
 }
 function copyLayerRecord(record) {
   return mapLayerRecord2((territoryId, layerId) => record[territoryId][layerId]);
@@ -36878,6 +36907,31 @@ var TransactionalTypedStateImageV1 = class {
     }
     return rehydrateNode(
       entry.node,
+      this.#images[this.#activeIndex],
+      this.#manifest.externalImmutableRoots
+    );
+  }
+  /** Bind a declared record path once. Every invocation reads this authority's
+   * current accepted image and returns the usual detached subtree, never a
+   * live view or a candidate borrow. Promotion cannot change earlier results. */
+  createCurrentSubtreeReader(path) {
+    if (!Array.isArray(path) || path.length === 0) {
+      throw new Error("Transactional typed state subtree path is empty or invalid");
+    }
+    let node = this.#manifest.rootNode;
+    for (const key of path) {
+      if (typeof key !== "string" || node.kind !== "record") {
+        throw new Error("Transactional typed state subtree path crosses a non-record node");
+      }
+      const entry = node.entries.find((candidate) => candidate.key === key);
+      if (entry === void 0) {
+        throw new Error(`Transactional typed state subtree ${key} is unavailable`);
+      }
+      node = entry.node;
+    }
+    const boundNode = node;
+    return () => rehydrateNode(
+      boundNode,
       this.#images[this.#activeIndex],
       this.#manifest.externalImmutableRoots
     );
@@ -47427,90 +47481,125 @@ function bloodGasPressuresFromAmountsV1(amount, volumeMl, parameters = DEFAULT_B
 function nonnegative9(value, label) {
   if (!Number.isFinite(value) || value < 0) throw new RangeError(`${label} must be finite and nonnegative`);
 }
-function advanceConservativeGasTransportV1(nodes, transfers, options = {}) {
-  if (nodes.length === 0) throw new RangeError("gas transport requires nodes");
-  const tolerance = options.volumeBalanceToleranceMl ?? 1e-7;
-  nonnegative9(tolerance, "volumeBalanceToleranceMl");
-  const index = /* @__PURE__ */ new Map();
-  const expected = nodes.map((node, i) => {
-    if (!node.id || index.has(node.id)) throw new RangeError("gas transport node IDs must be nonempty and unique");
-    index.set(node.id, i);
-    nonnegative9(node.volumeBeforeMl, `${node.id}.volumeBeforeMl`);
-    nonnegative9(node.volumeAfterMl, `${node.id}.volumeAfterMl`);
-    nonnegative9(node.amount.o2Mol, `${node.id}.o2Mol`);
-    nonnegative9(node.amount.co2Mol, `${node.id}.co2Mol`);
-    if (node.volumeBeforeMl === 0 && (node.amount.o2Mol !== 0 || node.amount.co2Mol !== 0)) {
-      throw new RangeError("zero-volume nodes cannot store gas");
-    }
-    return node.volumeBeforeMl;
-  });
-  const n = nodes.length;
-  const matrix = nodes.map((node, i) => {
-    const row = new Float64Array(n + 2);
-    row[i] = node.volumeAfterMl;
-    row[n] = node.amount.o2Mol;
-    row[n + 1] = node.amount.co2Mol;
-    return row;
-  });
-  const oriented = transfers.map((edge) => {
-    const from = index.get(edge.from);
-    const to = index.get(edge.to);
-    if (from === void 0 || to === void 0) throw new RangeError("gas transfer references unknown node");
-    if (!Number.isFinite(edge.volumeMl)) throw new RangeError("accepted fluid transfer must be finite");
-    expected[from] -= edge.volumeMl;
-    expected[to] += edge.volumeMl;
-    const upstream = edge.volumeMl >= 0 ? from : to;
-    const downstream = edge.volumeMl >= 0 ? to : from;
-    const volume = Math.abs(edge.volumeMl);
-    matrix[upstream][upstream] += volume;
-    matrix[downstream][upstream] -= volume;
-    return { upstream, signedVolume: edge.volumeMl };
-  });
-  nodes.forEach((node, i) => {
-    if (Math.abs(expected[i] - node.volumeAfterMl) > tolerance) {
-      throw new RangeError(`accepted blood continuity mismatch at ${node.id}: ${expected[i] - node.volumeAfterMl} mL`);
-    }
-  });
-  for (let k = 0; k < n; k += 1) {
-    let pivot = k;
-    for (let i = k + 1; i < n; i += 1) if (Math.abs(matrix[i][k]) > Math.abs(matrix[pivot][k])) pivot = i;
-    if (!(Math.abs(matrix[pivot][k]) > 0)) throw new RangeError("singular gas transport mixing network");
-    [matrix[k], matrix[pivot]] = [matrix[pivot], matrix[k]];
-    for (let i = k + 1; i < n; i += 1) {
-      const factor = matrix[i][k] / matrix[k][k];
-      matrix[i][k] = 0;
-      for (let j = k + 1; j < n + 2; j += 1) matrix[i][j] -= factor * matrix[k][j];
+var ConservativeGasTransportWorkspaceV1 = class {
+  #matrix = [];
+  #expected = new Float64Array(0);
+  #oxygen = new Float64Array(0);
+  #carbonDioxide = new Float64Array(0);
+  #upstream = new Uint32Array(0);
+  #signedVolume = new Float64Array(0);
+  #index = /* @__PURE__ */ new Map();
+  #busy = false;
+  advance(nodes, transfers, options = {}) {
+    if (this.#busy) throw new Error("gas transport workspace is already in use");
+    this.#busy = true;
+    try {
+      return this.#solve(nodes, transfers, options);
+    } finally {
+      this.#busy = false;
     }
   }
-  const concentrations = nodes.map(() => ({ o2Mol: 0, co2Mol: 0 }));
-  for (let i = n - 1; i >= 0; i -= 1) {
-    let o2 = matrix[i][n];
-    let co2 = matrix[i][n + 1];
-    for (let j = i + 1; j < n; j += 1) {
-      o2 -= matrix[i][j] * concentrations[j].o2Mol;
-      co2 -= matrix[i][j] * concentrations[j].co2Mol;
+  #solve(nodes, transfers, options) {
+    if (nodes.length === 0) throw new RangeError("gas transport requires nodes");
+    const tolerance = options.volumeBalanceToleranceMl ?? 1e-7;
+    nonnegative9(tolerance, "volumeBalanceToleranceMl");
+    const n = nodes.length;
+    if (this.#matrix.length !== n) {
+      this.#matrix = Array.from({ length: n }, () => new Float64Array(n + 2));
+      this.#expected = new Float64Array(n);
+      this.#oxygen = new Float64Array(n);
+      this.#carbonDioxide = new Float64Array(n);
     }
-    concentrations[i] = { o2Mol: o2 / matrix[i][i], co2Mol: co2 / matrix[i][i] };
-    nonnegative9(concentrations[i].o2Mol, "solved O2 concentration");
-    nonnegative9(concentrations[i].co2Mol, "solved CO2 concentration");
+    if (this.#upstream.length !== transfers.length) {
+      this.#upstream = new Uint32Array(transfers.length);
+      this.#signedVolume = new Float64Array(transfers.length);
+    }
+    const index = this.#index, expected = this.#expected, matrix = this.#matrix;
+    index.clear();
+    for (let i = 0; i < n; i++) {
+      const node = nodes[i];
+      if (!node || typeof node !== "object") throw new RangeError("gas transport nodes must be dense records");
+      if (!node.id || index.has(node.id)) throw new RangeError("gas transport node IDs must be nonempty and unique");
+      index.set(node.id, i);
+      nonnegative9(node.volumeBeforeMl, `${node.id}.volumeBeforeMl`);
+      nonnegative9(node.volumeAfterMl, `${node.id}.volumeAfterMl`);
+      nonnegative9(node.amount.o2Mol, `${node.id}.o2Mol`);
+      nonnegative9(node.amount.co2Mol, `${node.id}.co2Mol`);
+      if (node.volumeBeforeMl === 0 && (node.amount.o2Mol !== 0 || node.amount.co2Mol !== 0)) {
+        throw new RangeError("zero-volume nodes cannot store gas");
+      }
+      expected[i] = node.volumeBeforeMl;
+    }
+    nodes.forEach((node, i) => {
+      const row = matrix[i];
+      row.fill(0);
+      row[i] = node.volumeAfterMl;
+      row[n] = node.amount.o2Mol;
+      row[n + 1] = node.amount.co2Mol;
+    });
+    const upstreamByEdge = this.#upstream, signedVolumeByEdge = this.#signedVolume;
+    transfers.forEach((edge, i) => {
+      const from = index.get(edge.from);
+      const to = index.get(edge.to);
+      if (from === void 0 || to === void 0) throw new RangeError("gas transfer references unknown node");
+      if (!Number.isFinite(edge.volumeMl)) throw new RangeError("accepted fluid transfer must be finite");
+      expected[from] -= edge.volumeMl;
+      expected[to] += edge.volumeMl;
+      const upstream = edge.volumeMl >= 0 ? from : to;
+      const downstream = edge.volumeMl >= 0 ? to : from;
+      const volume = Math.abs(edge.volumeMl);
+      matrix[upstream][upstream] += volume;
+      matrix[downstream][upstream] -= volume;
+      upstreamByEdge[i] = upstream;
+      signedVolumeByEdge[i] = edge.volumeMl;
+    });
+    nodes.forEach((node, i) => {
+      if (Math.abs(expected[i] - node.volumeAfterMl) > tolerance) {
+        throw new RangeError(`accepted blood continuity mismatch at ${node.id}: ${expected[i] - node.volumeAfterMl} mL`);
+      }
+    });
+    for (let k = 0; k < n; k += 1) {
+      let pivot = k;
+      for (let i = k + 1; i < n; i += 1) if (Math.abs(matrix[i][k]) > Math.abs(matrix[pivot][k])) pivot = i;
+      if (!(Math.abs(matrix[pivot][k]) > 0)) throw new RangeError("singular gas transport mixing network");
+      [matrix[k], matrix[pivot]] = [matrix[pivot], matrix[k]];
+      for (let i = k + 1; i < n; i += 1) {
+        const factor = matrix[i][k] / matrix[k][k];
+        matrix[i][k] = 0;
+        for (let j = k + 1; j < n + 2; j += 1) matrix[i][j] -= factor * matrix[k][j];
+      }
+    }
+    const oxygen = this.#oxygen, carbonDioxide = this.#carbonDioxide;
+    for (let i = n - 1; i >= 0; i -= 1) {
+      let o2 = matrix[i][n];
+      let co2 = matrix[i][n + 1];
+      for (let j = i + 1; j < n; j += 1) {
+        o2 -= matrix[i][j] * oxygen[j];
+        co2 -= matrix[i][j] * carbonDioxide[j];
+      }
+      oxygen[i] = o2 / matrix[i][i];
+      carbonDioxide[i] = co2 / matrix[i][i];
+      nonnegative9(oxygen[i], "solved O2 concentration");
+      nonnegative9(carbonDioxide[i], "solved CO2 concentration");
+    }
+    const amountsById = /* @__PURE__ */ Object.create(null);
+    const residual = { o2Mol: 0, co2Mol: 0 };
+    nodes.forEach((node, i) => {
+      const amount = { o2Mol: oxygen[i] * node.volumeAfterMl, co2Mol: carbonDioxide[i] * node.volumeAfterMl };
+      amountsById[node.id] = amount;
+      residual.o2Mol += amount.o2Mol - node.amount.o2Mol;
+      residual.co2Mol += amount.co2Mol - node.amount.co2Mol;
+    });
+    return {
+      amountsById,
+      transfersByEdge: transfers.map((_edge, i) => ({
+        o2Mol: signedVolumeByEdge[i] * oxygen[upstreamByEdge[i]],
+        co2Mol: signedVolumeByEdge[i] * carbonDioxide[upstreamByEdge[i]]
+      })),
+      conservationResidualMol: residual
+    };
   }
-  const amountsById = /* @__PURE__ */ Object.create(null);
-  const residual = { o2Mol: 0, co2Mol: 0 };
-  nodes.forEach((node, i) => {
-    const amount = { o2Mol: concentrations[i].o2Mol * node.volumeAfterMl, co2Mol: concentrations[i].co2Mol * node.volumeAfterMl };
-    amountsById[node.id] = amount;
-    residual.o2Mol += amount.o2Mol - node.amount.o2Mol;
-    residual.co2Mol += amount.co2Mol - node.amount.co2Mol;
-  });
-  return {
-    amountsById,
-    transfersByEdge: oriented.map(({ upstream, signedVolume }) => ({
-      o2Mol: signedVolume * concentrations[upstream].o2Mol,
-      co2Mol: signedVolume * concentrations[upstream].co2Mol
-    })),
-    conservationResidualMol: residual
-  };
-}
+};
 
 // engine/cardiorespiratory/PulmonaryGasExchangeV1.ts
 function exchangePerfusedBloodWithAlveolarGasV1(input) {
@@ -49180,6 +49269,9 @@ var CardiorespiratorySessionV1 = class _CardiorespiratorySessionV1 {
   #image;
   #typedBoundary;
   #typedHemodynamics;
+  #readAutoregulationBinding;
+  #readAutoregulationState;
+  #readCoronaryTone;
   #typedScratch = createMainWireAcceptedTypedHemodynamicDestinationV1();
   #rootCompletionPlan;
   #typedPromotionPlan;
@@ -49190,6 +49282,7 @@ var CardiorespiratorySessionV1 = class _CardiorespiratorySessionV1 {
   #acceptedTimeSlot;
   #revisionSlot;
   #projectionSlots;
+  #gasTransport = new ConservativeGasTransportWorkspaceV1();
   #residualWorkspace = createMainWireFiveWallCoupledResidualWorkspaceV1();
   #beats = new MainWireIntegratedModelBeatAccumulatorV3();
   #completedBeat = null;
@@ -49260,6 +49353,9 @@ var CardiorespiratorySessionV1 = class _CardiorespiratorySessionV1 {
     this.#baseTickSec = prepared.updateSchedule.baseTickSec;
     this.#validate(initial);
     this.#image = new TransactionalTypedStateImageV1(manifest, initial, (state) => this.#admitDirectCandidate(state));
+    this.#readAutoregulationBinding = this.#image.createCurrentSubtreeReader(["coronary", "coronaryAutoregulationBinding"]);
+    this.#readAutoregulationState = this.#image.createCurrentSubtreeReader(["coronary", "coronaryAutoregulation"]);
+    this.#readCoronaryTone = this.#image.createCurrentSubtreeReader(["coronary", "coronary", "toneResistanceScaleByTerritoryLayer"]);
     this.#completionPlan = this.#image.createCompletionPlan({ continuous: [], booleans: [] });
     this.#rootCompletionPlan = this.#image.createRootCompletionPlan("cardiorespiratory");
     this.#typedPromotionPlan = this.#image.createPromotionPlan({
@@ -49420,12 +49516,11 @@ var CardiorespiratorySessionV1 = class _CardiorespiratorySessionV1 {
     const devices = this.#runtime.config;
     if (devices.lvad.enabled || devices.impella.enabled || devices.vaEcmo.enabled || devices.vvEcmo.enabled || devices.iabp.enabled) return false;
     if (ROTARY_SUPPORT_DEVICE_IDS_V1.some((id) => cursor.readContinuous(this.#typedBoundary.continuous.dynamicMechanicalSupport[id]) !== 0)) return false;
-    const coronary = this.#image.rehydrateCurrentRoot("coronary");
     const autoregulation = {
       acceptedTimeSec: clock.acceptedTimeSec,
-      binding: coronary.coronaryAutoregulationBinding,
-      state: coronary.coronaryAutoregulation,
-      toneResistanceScaleByTerritoryLayer: coronary.coronary.toneResistanceScaleByTerritoryLayer
+      binding: this.#readAutoregulationBinding(),
+      state: this.#readAutoregulationState(),
+      toneResistanceScaleByTerritoryLayer: this.#readCoronaryTone()
     };
     if (!isMainWireTypedOrdinaryCandidateV1(clock.acceptedTimeSec, limit, this.#runtime.rhythm.configuration, autoregulation)) return false;
     const old = this.cardiorespiratoryState(), c = this.fixture.cardiorespiratory, dt2 = limit.candidateTimeSec - clock.acceptedTimeSec;
@@ -49586,7 +49681,7 @@ var CardiorespiratorySessionV1 = class _CardiorespiratorySessionV1 {
     const c = this.fixture.cardiorespiratory, ro = ventilation.output;
     const afterV = network.physicalBloodVolumesMl, bloodTransfers = network.transfers;
     const pth = ro.pleuralPressureMmHg, palv = (ro.alveolarPressureMmHgByUnit[0] + ro.alveolarPressureMmHgByUnit[1]) / 2;
-    const advected = advanceConservativeGasTransportV1(
+    const advected = this.#gasTransport.advance(
       Object.keys(beforeV).map((id) => ({
         id,
         volumeBeforeMl: beforeV[id],
